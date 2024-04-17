@@ -1,42 +1,34 @@
 #include <stdio.h>
 
-#define WIN32_LEAN_AND_MEAN
-#include <Windows.h>
-
 #include "types.hpp"
+#include "window.hpp"
+
+LRESULT CALLBACK window_proc(HWND window_handle, UINT message, WPARAM w_param, LPARAM l_param);
 
 int main()
 {
-    // Register the window class.
-    // This represents a set of common behavious that several windows may have.
-    const char WINDOW_CLASS_NAME[] = "Base Window Class";
-
-    const WNDCLASSA window_class = {
-        .lpfnWndProc = DefWindowProcA,
-        .hInstance = GetModuleHandle(NULL),
-        .lpszClassName = WINDOW_CLASS_NAME,
-    };
-
-    RegisterClassA(&window_class);
-
-    const u16 window_width = 1920u;
-    const u16 window_height = 1080u;
-
-    const HWND window_handle =
-        CreateWindowExA(0, WINDOW_CLASS_NAME, "voxel-engine", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
-                        window_width, window_height, NULL, NULL, GetModuleHandle(NULL), NULL);
-
-    if (window_handle == 0)
+    Window window = Window(1080u, 720u);
+    if (window.m_handle == nullptr)
     {
-        printf("Failed to create win32 window.");
         return -1;
     }
 
-    ShowWindow(window_handle, SW_SHOW);
-
-    while (true)
+    bool quit = false;
+    while (!quit)
     {
+        MSG message = {};
+        if (PeekMessageA(&message, NULL, 0u, 0u, PM_REMOVE))
+        {
+            TranslateMessage(&message);
+            DispatchMessageA(&message);
+        }
+
+        if (message.message == WM_QUIT)
+        {
+            quit = true;
+        }
     }
 
     return 0;
 }
+

@@ -8,11 +8,11 @@ flags {
     "FatalLinkWarnings",    -- Treat linker warnings as errors
 }
 
-
 -- Define the projects
 project("voxel-engine")
     architecture "x64"
 	kind "ConsoleApp"
+	toolset ("clang")
 	language "C++"
 	cppdialect "C++20"
 	includedirs { "include" }
