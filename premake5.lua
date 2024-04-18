@@ -17,7 +17,10 @@ project("voxel-engine")
 	cppdialect "C++20"
 	includedirs { "include" }
 
-	files { "src/**.cpp", "include/**.hpp" }
+	pchheader "include/pch.hpp"
+	pchsource "src/pch.cpp"
+
+	files { "src/**.cpp" }
 
 	-- In debug mode, the VX_DEBUG #define must be set.
 	-- Also, in debug mode optimization is set to Debug, while in release it is for speed.

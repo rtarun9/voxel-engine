@@ -1,15 +1,15 @@
-#include <stdio.h>
+#include "pch.hpp"
 
 #include "types.hpp"
 #include "window.hpp"
 
-LRESULT CALLBACK window_proc(HWND window_handle, UINT message, WPARAM w_param, LPARAM l_param);
-
 int main()
 {
-    Window window = Window(1080u, 720u);
+    Window window(1080u, 720u);
+
     if (window.m_handle == nullptr)
     {
+        printf("Failed to create win32 window.");
         return -1;
     }
 

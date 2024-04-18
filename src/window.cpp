@@ -1,7 +1,6 @@
-#include "window.hpp"
+#include "pch.hpp"
 
-#define WIN32_LEAN_AND_MEAN
-#include <Windows.h>
+#include "window.hpp"
 
 LRESULT CALLBACK window_proc(HWND window_handle, UINT message, WPARAM w_param, LPARAM l_param)
 {
@@ -48,9 +47,5 @@ Window::Window(const u16 width, const u16 height) : m_width(width), m_height(hei
     if (m_handle != 0)
     {
 		ShowWindow(m_handle, SW_SHOW);
-    }
-    else
-    {
-        printf("Failed to create win32 window.");
     }
 }

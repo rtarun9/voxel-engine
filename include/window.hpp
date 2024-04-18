@@ -2,7 +2,6 @@
 
 // Simple abstraction over a win32 window.
 
-#include "common.hpp"
 #include "types.hpp"
 
 struct Window

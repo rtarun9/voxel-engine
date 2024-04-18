@@ -1,7 +1,5 @@
 #pragma once
 
-#include <stdint.h>
-
 // A collection of typedefs used throughout the project.
 
 using u8 = uint8_t;
