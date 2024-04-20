@@ -22,6 +22,8 @@ project("voxel-engine")
 
 	files { "src/**.cpp" }
 
+	links { "d3d12", "dxgi" }
+
 	-- In debug mode, the VX_DEBUG #define must be set.
 	-- Also, in debug mode optimization is set to Debug, while in release it is for speed.
 	filter "configurations:Debug"

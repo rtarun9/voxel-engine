@@ -2,7 +2,7 @@
 
 #include "window.hpp"
 
-LRESULT CALLBACK window_proc(HWND window_handle, UINT message, WPARAM w_param, LPARAM l_param)
+static LRESULT CALLBACK window_proc(HWND window_handle, UINT message, WPARAM w_param, LPARAM l_param)
 {
     switch (message)
     {
@@ -17,6 +17,15 @@ LRESULT CALLBACK window_proc(HWND window_handle, UINT message, WPARAM w_param, L
         // This adds a WM_QUIT message to the queue.
         PostQuitMessage(0);
         return 0;
+    }
+    break;
+
+    case WM_KEYDOWN: {
+        if (w_param == VK_ESCAPE)
+        {
+            PostQuitMessage(0);
+            return 0;
+        }
     }
     break;
     }
@@ -40,12 +49,21 @@ Window::Window(const u16 width, const u16 height) : m_width(width), m_height(hei
 
     RegisterClassA(&window_class);
 
-    m_handle =
-        CreateWindowExA(0, WINDOW_CLASS_NAME, "voxel-engine", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
-                        m_width, m_height, NULL, NULL, instance_handle, NULL);
+    m_handle = CreateWindowExA(0, WINDOW_CLASS_NAME, "voxel-engine", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
+                               m_width, m_height, NULL, NULL, instance_handle, NULL);
 
     if (m_handle != 0)
     {
-		ShowWindow(m_handle, SW_SHOW);
+        ShowWindow(m_handle, SW_SHOW);
     }
+    else
+    {
+        printf("Failed to create win32 window.");
+        exit(EXIT_FAILURE);
+    }
+}
+
+Window::~Window()
+{
+    UnregisterClassA("Base Window Class", GetModuleHandle(NULL));
 }
