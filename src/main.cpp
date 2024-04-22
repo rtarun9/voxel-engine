@@ -173,6 +173,54 @@ int main()
         throw_if_failed(direct_command_queue->Signal(fence.Get(), fence_value_to_signal));
     };
 
+    // Create the resources required for rendering.
+    // Index buffer setup.
+    constexpr u8 index_buffer_data[3] = {0u, 1u, 2u};
+    Microsoft::WRL::ComPtr<ID3D12Resource> index_buffer_resource{};
+    // D3D12_INDEX_BUFFER_VIEW index_buffer_view{};
+    {
+        // To upload the index buffer data to GPU - only memory, we need to first create a staging buffer in CPU - GPU
+        // accessible memory, then copy the data from CPU to this intermediate memory, then to GPU only memory.
+
+        // Create the staging commited resource.
+        // A commited resource creates both a resource and heap large enough to fit the resource.
+
+        // The heap type is : Upload (because CPU has access and it is optimized for uploading to GPU).
+        const D3D12_HEAP_PROPERTIES upload_heap_properties = {
+            .Type = D3D12_HEAP_TYPE_UPLOAD,
+            .CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+            .MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN,
+            .CreationNodeMask = 0u,
+            .VisibleNodeMask = 0u,
+        };
+
+        constexpr u32 index_buffer_size = sizeof(u32) * 3u;
+
+        const D3D12_RESOURCE_DESC upload_resource_desc = {
+            .Dimension = D3D12_RESOURCE_DIMENSION_BUFFER,
+            .Width = index_buffer_size,
+            .Height = 1u,
+            .DepthOrArraySize = 1u,
+            .MipLevels = 1u,
+            .Format = DXGI_FORMAT_UNKNOWN,
+            .SampleDesc = {1u, 0u},
+            .Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
+            .Flags = D3D12_RESOURCE_FLAG_NONE,
+        };
+
+        Microsoft::WRL::ComPtr<ID3D12Resource> upload_resource{};
+        throw_if_failed(device->CreateCommittedResource(
+            &upload_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES, &upload_resource_desc,
+            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, nullptr, IID_PPV_ARGS(&upload_resource)));
+
+        // Now that a resource is created, copy CPU data to this upload buffer.
+        u8 *upload_buffer_pointer = nullptr;
+        const D3D12_RANGE read_range{.Begin = 0u, .End = 0u};
+
+        throw_if_failed(upload_resource->Map(0u, &read_range, (void **)&upload_buffer_pointer));
+        memcpy(upload_buffer_pointer, index_buffer_data, index_buffer_size);
+    }
+
     u64 frame_count = 0u;
     u8 swapchain_backbuffer_index = swapchain->GetCurrentBackBufferIndex();
 
