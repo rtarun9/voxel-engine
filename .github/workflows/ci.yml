@@ -13,9 +13,7 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-    - name: configure
-      run: ./configure
-    - name: generate_makefile
+    - name: generate makefile
       run: premake.exe gmake
     - name: make
       run: make
