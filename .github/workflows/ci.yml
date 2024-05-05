@@ -1,4 +1,4 @@
-name: C/C++ CI
+name: C++ MSBuild 
 
 on:
   push:
@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [ "main" ]
 
+env:
+  SOLUTION_FILE_PATH: .
+  
 jobs:
   build:
 
@@ -13,11 +16,12 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-    - name: generate makefile
-      run: ./premake5.exe gmake
-    - name: make
-      run: make
-    - name: make check
-      run: make check
-    - name: make distcheck
-      run: make distcheck
+
+    - name: Add MSBuild to PATH
+      uses: microsoft/setup-msbuild@v1.0.2
+      
+    - name: Generate VS solution file
+      run: ./premake5.exe vs2022
+    
+    - name: Build
+      run: msbuild voxel-engine.sln
