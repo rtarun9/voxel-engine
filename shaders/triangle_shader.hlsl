@@ -4,7 +4,7 @@ struct VSOutput
     float4 color : VertexColor;
 };
 
-VSOutput vs_main(uint vertexId : SV_VertexID) : SV_POSITION
+VSOutput vs_main(uint vertexId : SV_VertexID)
 {
     static const float3 vertex_positions[3] =
     {

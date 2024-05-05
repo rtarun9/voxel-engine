@@ -1,16 +1,17 @@
 #pragma once
 
-// Simple abstraction over a win32 window.
-
 #include "types.hpp"
 
+// Simple abstraction class over win32 window.
 struct Window
 {
     Window(const u16 width, const u16 height);
     ~Window();
 
-    u16 m_width{};
-    u16 m_height{};
+    static inline constexpr const char WINDOW_CLASS_NAME[] = "Base Window Class";
 
     HWND m_handle{nullptr};
+
+    u16 m_width{};
+    u16 m_height{};
 };

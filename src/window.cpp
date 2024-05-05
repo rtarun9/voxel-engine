@@ -37,8 +37,6 @@ Window::Window(const u16 width, const u16 height) : m_width(width), m_height(hei
 {
     // Register the window class.
     // This represents a set of common behavious that several windows may have.
-    const char WINDOW_CLASS_NAME[] = "Base Window Class";
-
     const HINSTANCE instance_handle = GetModuleHandle(NULL);
 
     const WNDCLASSA window_class = {
@@ -65,5 +63,5 @@ Window::Window(const u16 width, const u16 height) : m_width(width), m_height(hei
 
 Window::~Window()
 {
-    UnregisterClassA("Base Window Class", GetModuleHandle(NULL));
+    UnregisterClassA(WINDOW_CLASS_NAME, GetModuleHandle(NULL));
 }

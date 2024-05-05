@@ -38,7 +38,7 @@ int main()
     throw_if_failed(dxgi_adapter->GetDesc(&adapter_desc));
     printf("Selected adapter desc :: %ls.\n", adapter_desc.Description);
 
-    // Create the d3d12 device (logical adapter : All d3d device creation uses the d3d12 device).
+    // Create the d3d12 device (logical adapter : All d3d objects require d3d12 device for creation).
     Microsoft::WRL::ComPtr<ID3D12Device2> device{};
     throw_if_failed(D3D12CreateDevice(dxgi_adapter.Get(), D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&device)));
 
@@ -69,7 +69,6 @@ int main()
 
     Microsoft::WRL::ComPtr<IDXGISwapChain3> swapchain{};
     {
-
         Microsoft::WRL::ComPtr<IDXGISwapChain1> swapchain_1{};
         const DXGI_SWAP_CHAIN_DESC1 swapchain_desc = {
             .Width = window.m_width,
@@ -89,6 +88,7 @@ int main()
 
         throw_if_failed(swapchain_1.As(&swapchain));
     }
+
     // Create a cbv srv uav descriptor heap.
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> cbv_srv_uav_descriptor_heap{};
     const D3D12_DESCRIPTOR_HEAP_DESC cbv_srv_uav_descriptor_heap_desc = {
@@ -142,7 +142,6 @@ int main()
     Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> command_list{};
     throw_if_failed(device->CreateCommandList(0u, D3D12_COMMAND_LIST_TYPE_DIRECT, direct_command_allocators[0].Get(),
                                               nullptr, IID_PPV_ARGS(&command_list)));
-    throw_if_failed(command_list->Close());
 
     // Create a fence for CPU GPU synchronization.
     Microsoft::WRL::ComPtr<ID3D12Fence> fence{};
@@ -153,6 +152,8 @@ int main()
 
     // The per frame fence values (used to determine if rendering of previous frame is completed).
     u64 frame_fence_values[2] = {};
+
+    u8 swapchain_backbuffer_index = swapchain->GetCurrentBackBufferIndex();
 
     // Helper functions related to GPU - CPU synchronization.
 
@@ -175,9 +176,10 @@ int main()
 
     // Create the resources required for rendering.
     // Index buffer setup.
-    constexpr u8 index_buffer_data[3] = {0u, 1u, 2u};
+    constexpr u16 index_buffer_data[3] = {0u, 1u, 2u};
+    Microsoft::WRL::ComPtr<ID3D12Resource> upload_resource{};
     Microsoft::WRL::ComPtr<ID3D12Resource> index_buffer_resource{};
-    // D3D12_INDEX_BUFFER_VIEW index_buffer_view{};
+    D3D12_INDEX_BUFFER_VIEW index_buffer_view{};
     {
         // To upload the index buffer data to GPU - only memory, we need to first create a staging buffer in CPU - GPU
         // accessible memory, then copy the data from CPU to this intermediate memory, then to GPU only memory.
@@ -196,7 +198,7 @@ int main()
 
         constexpr u32 index_buffer_size = sizeof(u32) * 3u;
 
-        const D3D12_RESOURCE_DESC upload_resource_desc = {
+        const D3D12_RESOURCE_DESC index_buffer_resource_desc = {
             .Dimension = D3D12_RESOURCE_DIMENSION_BUFFER,
             .Width = index_buffer_size,
             .Height = 1u,
@@ -208,9 +210,8 @@ int main()
             .Flags = D3D12_RESOURCE_FLAG_NONE,
         };
 
-        Microsoft::WRL::ComPtr<ID3D12Resource> upload_resource{};
         throw_if_failed(device->CreateCommittedResource(
-            &upload_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES, &upload_resource_desc,
+            &upload_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES, &index_buffer_resource_desc,
             D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, nullptr, IID_PPV_ARGS(&upload_resource)));
 
         // Now that a resource is created, copy CPU data to this upload buffer.
@@ -219,10 +220,157 @@ int main()
 
         throw_if_failed(upload_resource->Map(0u, &read_range, (void **)&upload_buffer_pointer));
         memcpy(upload_buffer_pointer, index_buffer_data, index_buffer_size);
+
+        // Create the final resource and transfer the data from upload buffer to the final buffer.
+        // The heap type is : Default (no CPU access).
+        const D3D12_HEAP_PROPERTIES default_heap_properties = {
+            .Type = D3D12_HEAP_TYPE_DEFAULT,
+            .CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+            .MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN,
+            .CreationNodeMask = 0u,
+            .VisibleNodeMask = 0u,
+        };
+
+        throw_if_failed(device->CreateCommittedResource(
+            &default_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES, &index_buffer_resource_desc,
+            D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&index_buffer_resource)));
+
+        command_list->CopyResource(index_buffer_resource.Get(), upload_resource.Get());
+
+        // Create the index buffer view.
+        index_buffer_view = {
+            .BufferLocation = index_buffer_resource->GetGPUVirtualAddress(),
+            .SizeInBytes = index_buffer_size,
+            .Format = DXGI_FORMAT_R16_UINT,
+        };
     }
 
+    // Create a empty root signature.
+    Microsoft::WRL::ComPtr<ID3DBlob> root_signature_blob{};
+    Microsoft::WRL::ComPtr<ID3D12RootSignature> root_signature{};
+    const D3D12_VERSIONED_ROOT_SIGNATURE_DESC root_signature_desc = {
+        .Version = D3D_ROOT_SIGNATURE_VERSION_1_1,
+        .Desc_1_1 =
+            {
+                .NumParameters = 0u,
+                .pParameters = nullptr,
+                .NumStaticSamplers = 0u,
+                .pStaticSamplers = nullptr,
+                .Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT,
+            },
+    };
+    // Serialize root signature.
+    throw_if_failed(D3D12SerializeVersionedRootSignature(&root_signature_desc, &root_signature_blob, nullptr));
+    throw_if_failed(device->CreateRootSignature(0u, root_signature_blob->GetBufferPointer(),
+                                                root_signature_blob->GetBufferSize(), IID_PPV_ARGS(&root_signature)));
+
+    // Compile the vertex and pixel shader.
+    Microsoft::WRL::ComPtr<ID3DBlob> shader_error_blob{};
+
+    Microsoft::WRL::ComPtr<ID3DBlob> vertex_shader_blob{};
+    throw_if_failed(D3DCompileFromFile(L"shaders/triangle_shader.hlsl", nullptr, nullptr, "vs_main", "vs_5_0", 0u, 0u,
+                                       &vertex_shader_blob, &shader_error_blob));
+    if (shader_error_blob)
+    {
+        printf("Shader compiler error (vertex) : %s.\n", (const char *)(shader_error_blob->GetBufferPointer()));
+    }
+
+    Microsoft::WRL::ComPtr<ID3DBlob> pixel_shader_blob{};
+    throw_if_failed(D3DCompileFromFile(L"shaders/triangle_shader.hlsl", nullptr, nullptr, "ps_main", "ps_5_0", 0u, 0u,
+                                       &pixel_shader_blob, nullptr));
+    if (shader_error_blob)
+    {
+        printf("Shader compiler error (pixel) : %s.\n", (const char *)(shader_error_blob->GetBufferPointer()));
+    }
+
+    // Create the root signature.
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> pso{};
+    const D3D12_GRAPHICS_PIPELINE_STATE_DESC graphics_pso_desc = {
+        .pRootSignature = root_signature.Get(),
+        .VS =
+            {
+                .pShaderBytecode = vertex_shader_blob->GetBufferPointer(),
+                .BytecodeLength = vertex_shader_blob->GetBufferSize(),
+            },
+        .PS =
+            {
+                .pShaderBytecode = pixel_shader_blob->GetBufferPointer(),
+                .BytecodeLength = pixel_shader_blob->GetBufferSize(),
+            },
+        .BlendState =
+            {
+                .AlphaToCoverageEnable = FALSE,
+                .IndependentBlendEnable = FALSE,
+                .RenderTarget =
+                    {
+                        D3D12_RENDER_TARGET_BLEND_DESC{
+                            .RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL,
+                        },
+                    },
+            },
+        .SampleMask = 0xffff'ffff,
+        .RasterizerState =
+            {
+                .FillMode = D3D12_FILL_MODE_SOLID,
+                .CullMode = D3D12_CULL_MODE_BACK,
+                .FrontCounterClockwise = FALSE,
+            },
+        .DepthStencilState =
+            {
+                .DepthEnable = FALSE,
+            },
+        .InputLayout =
+            {
+                .NumElements = 0u,
+            },
+        .PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE,
+        .NumRenderTargets = 1u,
+        .RTVFormats =
+            {
+                DXGI_FORMAT_R10G10B10A2_UNORM,
+            },
+        .SampleDesc =
+            {
+                1u,
+                0u,
+            },
+        .NodeMask = 0u,
+    };
+    throw_if_failed(device->CreateGraphicsPipelineState(&graphics_pso_desc, IID_PPV_ARGS(&pso)));
+
+    // Create viewport and scissor.
+    const D3D12_VIEWPORT viewport = {
+        .TopLeftX = 0.0f,
+        .TopLeftY = 0.0f,
+        .Width = (float)window.m_width,
+        .Height = (float)window.m_height,
+        .MinDepth = 0.0f,
+        .MaxDepth = 1.0f,
+    };
+
+    // The default config is used if we want to mask the entire viewport for drawing.
+    const D3D12_RECT scissor_rect = {
+        .left = 0u,
+        .top = 0u,
+        .right = LONG_MAX,
+        .bottom = LONG_MAX,
+    };
+
+    // Flush the gpu.
+    throw_if_failed(command_list->Close());
+
+    ID3D12CommandList *const command_lists_to_execute[1] = {command_list.Get()};
+
+    direct_command_queue->ExecuteCommandLists(1u, command_lists_to_execute);
+    ++monotonic_fence_value;
+    for (auto &frame_fence_value : frame_fence_values)
+    {
+        frame_fence_value = monotonic_fence_value;
+    }
+    signal_fence(monotonic_fence_value);
+    wait_for_fence_value(frame_fence_values[swapchain_backbuffer_index]);
+
     u64 frame_count = 0u;
-    u8 swapchain_backbuffer_index = swapchain->GetCurrentBackBufferIndex();
 
     bool quit = false;
     while (!quit)
@@ -269,6 +417,20 @@ int main()
         // Now, clear the RTV.
         const float clear_color[4] = {cosf(frame_count / 100.0f), sinf(frame_count / 100.0f), 0.0f, 1.0f};
         command_list->ClearRenderTargetView(rtv_handle, clear_color, 0u, nullptr);
+
+        // Set viewport.
+        command_list->RSSetViewports(1u, &viewport);
+        command_list->RSSetScissorRects(1u, &scissor_rect);
+
+        // Set the index buffer, pso and all config settings for rendering.
+        command_list->SetGraphicsRootSignature(root_signature.Get());
+        command_list->SetPipelineState(pso.Get());
+
+        command_list->OMSetRenderTargets(1u, &swapchain_backbuffer_cpu_descriptor_handles[swapchain_backbuffer_index],
+                                         FALSE, nullptr);
+        command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        command_list->IASetIndexBuffer(&index_buffer_view);
+        command_list->DrawInstanced(3u, 1u, 0u, 0u);
 
         // Now, transition back to presentation mode.
         const D3D12_RESOURCE_BARRIER render_target_to_presentation_barrier = {
