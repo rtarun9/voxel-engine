@@ -14,7 +14,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: generate makefile
-      run: premake.exe gmake
+      run: ./premake5.exe gmake
     - name: make
       run: make
     - name: make check
