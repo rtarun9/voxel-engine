@@ -245,6 +245,79 @@ int main()
         };
     }
 
+    // Vertex buffer setup.
+    struct VertexBuffer
+    {
+        DirectX::XMFLOAT3 position{};
+        DirectX::XMFLOAT3 color{};
+    };
+    constexpr VertexBuffer vertex_buffer_data[3] = {
+        VertexBuffer{.position = {-0.5f, -0.5f, 0.0f}, .color = {1.0f, 0.0f, 0.0f}},
+        VertexBuffer{.position = {0.0f, 0.5f, 0.0f}, .color = {0.0f, 1.0f, 0.0f}},
+        VertexBuffer{.position = {+0.5f, -0.5f, 0.0f}, .color = {0.0f, 0.0f, 1.0f}},
+    };
+
+    Microsoft::WRL::ComPtr<ID3D12Resource> vertex_buffer_upload_resource{};
+    Microsoft::WRL::ComPtr<ID3D12Resource> vertex_buffer_resource{};
+    D3D12_VERTEX_BUFFER_VIEW vertex_buffer_view{};
+    {
+        const D3D12_HEAP_PROPERTIES upload_heap_properties = {
+            .Type = D3D12_HEAP_TYPE_UPLOAD,
+            .CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+            .MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN,
+            .CreationNodeMask = 0u,
+            .VisibleNodeMask = 0u,
+        };
+
+        constexpr u32 vertex_buffer_size = sizeof(VertexBuffer) * 3u;
+
+        const D3D12_RESOURCE_DESC vertex_buffer_resource_desc = {
+            .Dimension = D3D12_RESOURCE_DIMENSION_BUFFER,
+            .Width = vertex_buffer_size,
+            .Height = 1u,
+            .DepthOrArraySize = 1u,
+            .MipLevels = 1u,
+            .Format = DXGI_FORMAT_UNKNOWN,
+            .SampleDesc = {1u, 0u},
+            .Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
+            .Flags = D3D12_RESOURCE_FLAG_NONE,
+        };
+
+        throw_if_failed(device->CreateCommittedResource(
+            &upload_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES, &vertex_buffer_resource_desc,
+            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, nullptr, IID_PPV_ARGS(&vertex_buffer_upload_resource)));
+
+        // Now that a resource is created, copy CPU data to this upload buffer.
+        u8 *upload_buffer_pointer = nullptr;
+        const D3D12_RANGE read_range{.Begin = 0u, .End = 0u};
+
+        throw_if_failed(vertex_buffer_upload_resource->Map(0u, &read_range, (void **)&upload_buffer_pointer));
+        memcpy(upload_buffer_pointer, vertex_buffer_data, vertex_buffer_size);
+
+        // Create the final resource and transfer the data from upload buffer to the final buffer.
+        // The heap type is : Default (no CPU access).
+        const D3D12_HEAP_PROPERTIES default_heap_properties = {
+            .Type = D3D12_HEAP_TYPE_DEFAULT,
+            .CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+            .MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN,
+            .CreationNodeMask = 0u,
+            .VisibleNodeMask = 0u,
+        };
+
+        throw_if_failed(device->CreateCommittedResource(
+            &default_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES, &vertex_buffer_resource_desc,
+            D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&vertex_buffer_resource)));
+
+        command_list->CopyResource(vertex_buffer_resource.Get(), vertex_buffer_upload_resource.Get());
+
+        // Create the vertex buffer view.
+        vertex_buffer_view = {
+            .BufferLocation = vertex_buffer_resource->GetGPUVirtualAddress(),
+            .SizeInBytes = vertex_buffer_size,
+            .StrideInBytes = sizeof(VertexBuffer),
+        };
+    }
+
     // Create a empty root signature.
     Microsoft::WRL::ComPtr<ID3DBlob> root_signature_blob{};
     Microsoft::WRL::ComPtr<ID3D12RootSignature> root_signature{};
@@ -284,6 +357,27 @@ int main()
     }
 
     // Create the root signature.
+    const D3D12_INPUT_ELEMENT_DESC input_element_descs[2] = {
+        D3D12_INPUT_ELEMENT_DESC{
+            .SemanticName = "POSITION",
+            .SemanticIndex = 0u,
+            .Format = DXGI_FORMAT_R32G32B32_FLOAT,
+            .InputSlot = 0u,
+            .AlignedByteOffset = D3D12_APPEND_ALIGNED_ELEMENT,
+            .InputSlotClass = D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,
+            .InstanceDataStepRate = 0u,
+        },
+        D3D12_INPUT_ELEMENT_DESC{
+            .SemanticName = "COLOR",
+            .SemanticIndex = 0u,
+            .Format = DXGI_FORMAT_R32G32B32_FLOAT,
+            .InputSlot = 0u,
+            .AlignedByteOffset = D3D12_APPEND_ALIGNED_ELEMENT,
+            .InputSlotClass = D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,
+            .InstanceDataStepRate = 0u,
+        },
+    };
+
     Microsoft::WRL::ComPtr<ID3D12PipelineState> pso{};
     const D3D12_GRAPHICS_PIPELINE_STATE_DESC graphics_pso_desc = {
         .pRootSignature = root_signature.Get(),
@@ -321,7 +415,8 @@ int main()
             },
         .InputLayout =
             {
-                .NumElements = 0u,
+                .pInputElementDescs = input_element_descs,
+                .NumElements = 2u,
             },
         .PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE,
         .NumRenderTargets = 1u,
@@ -430,6 +525,7 @@ int main()
                                          FALSE, nullptr);
         command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         command_list->IASetIndexBuffer(&index_buffer_view);
+        command_list->IASetVertexBuffers(0u, 1u, &vertex_buffer_view);
         command_list->DrawInstanced(3u, 1u, 0u, 0u);
 
         // Now, transition back to presentation mode.
