@@ -318,15 +318,82 @@ int main()
         };
     }
 
+    // Create a constant buffer for simple linear algebra tests.
+    struct alignas(256) ConstantBuffer
+    {
+        DirectX::XMMATRIX matrix{};
+    };
+
+    Microsoft::WRL::ComPtr<ID3D12Resource> constant_buffer{};
+
+    u8 *constant_buffer_ptr = nullptr;
+    {
+        const D3D12_HEAP_PROPERTIES upload_heap_properties = {
+            .Type = D3D12_HEAP_TYPE_UPLOAD,
+            .CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+            .MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN,
+            .CreationNodeMask = 0u,
+            .VisibleNodeMask = 0u,
+        };
+
+        constexpr u32 constant_buffer_size = sizeof(ConstantBuffer);
+
+        const D3D12_RESOURCE_DESC constant_buffer_resource_desc = {
+            .Dimension = D3D12_RESOURCE_DIMENSION_BUFFER,
+            .Width = constant_buffer_size,
+            .Height = 1u,
+            .DepthOrArraySize = 1u,
+            .MipLevels = 1u,
+            .Format = DXGI_FORMAT_UNKNOWN,
+            .SampleDesc = {1u, 0u},
+            .Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
+            .Flags = D3D12_RESOURCE_FLAG_NONE,
+        };
+
+        throw_if_failed(device->CreateCommittedResource(
+            &upload_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES, &constant_buffer_resource_desc,
+            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, nullptr, IID_PPV_ARGS(&constant_buffer)));
+        constant_buffer->SetName(L"Constant Buffer Resource");
+
+        const D3D12_RANGE read_range{.Begin = 0u, .End = 0u};
+
+        throw_if_failed(constant_buffer->Map(0u, &read_range, (void **)&constant_buffer_ptr));
+
+        // Create the constant buffer descriptor.
+        const D3D12_CONSTANT_BUFFER_VIEW_DESC cbv_desc = {
+            .BufferLocation = constant_buffer->GetGPUVirtualAddress(),
+            .SizeInBytes = sizeof(ConstantBuffer),
+        };
+
+        D3D12_CPU_DESCRIPTOR_HANDLE constant_buffer_descriptor_handle =
+            cbv_srv_uav_descriptor_heap->GetCPUDescriptorHandleForHeapStart();
+        constant_buffer_descriptor_handle.ptr +=
+            device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV) * number_of_backbuffers;
+
+        device->CreateConstantBufferView(&cbv_desc, constant_buffer_descriptor_handle);
+    }
+
     // Create a empty root signature.
     Microsoft::WRL::ComPtr<ID3DBlob> root_signature_blob{};
     Microsoft::WRL::ComPtr<ID3D12RootSignature> root_signature{};
+
+    D3D12_ROOT_PARAMETER1 root_parameter = {
+        .ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV,
+        .Descriptor =
+            D3D12_ROOT_DESCRIPTOR1{
+                .ShaderRegister = 0u,
+                .RegisterSpace = 0u,
+                .Flags = D3D12_ROOT_DESCRIPTOR_FLAG_NONE,
+            },
+        .ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX,
+    };
+
     const D3D12_VERSIONED_ROOT_SIGNATURE_DESC root_signature_desc = {
         .Version = D3D_ROOT_SIGNATURE_VERSION_1_1,
         .Desc_1_1 =
             {
-                .NumParameters = 0u,
-                .pParameters = nullptr,
+                .NumParameters = 1u,
+                .pParameters = &root_parameter,
                 .NumStaticSamplers = 0u,
                 .pStaticSamplers = nullptr,
                 .Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT,
@@ -482,6 +549,12 @@ int main()
             quit = true;
         }
 
+        // Update cbuffers.
+        ConstantBuffer buffer = {
+            .matrix = DirectX::XMMatrixRotationZ(frame_count / 100.0f),
+        };
+        memcpy(constant_buffer_ptr, &buffer, sizeof(ConstantBuffer));
+
         // Main render loop.
 
         // First, reset the command allocator and command list.
@@ -521,8 +594,12 @@ int main()
         command_list->SetGraphicsRootSignature(root_signature.Get());
         command_list->SetPipelineState(pso.Get());
 
+        ID3D12DescriptorHeap *const shader_visible_descriptor_heaps = {cbv_srv_uav_descriptor_heap.Get()};
+        command_list->SetDescriptorHeaps(1u, &shader_visible_descriptor_heaps);
+
         command_list->OMSetRenderTargets(1u, &swapchain_backbuffer_cpu_descriptor_handles[swapchain_backbuffer_index],
                                          FALSE, nullptr);
+        command_list->SetGraphicsRootConstantBufferView(0u, constant_buffer->GetGPUVirtualAddress());
         command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         command_list->IASetIndexBuffer(&index_buffer_view);
         command_list->IASetVertexBuffers(0u, 1u, &vertex_buffer_view);

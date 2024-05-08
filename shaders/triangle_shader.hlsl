@@ -10,10 +10,16 @@ struct VSInput
     float3 color : COLOR;
 };
 
+cbuffer TransformBufferCBuffer : register(b0)
+{
+    row_major float4x4 transform_buffer;
+};
+
 VSOutput vs_main(VSInput input)
 {
     VSOutput output;
-    output.position = float4(input.position, 1.0f);
+    output.position = mul(float4(input.position, 1.0f), transform_buffer);
+
     output.color = float4(input.color, 1.0f);
     
     return output;
