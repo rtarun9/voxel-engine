@@ -5,6 +5,97 @@
 
 #include "common.hpp"
 
+// Note that buffer_ptr is to only be used by constant buffers, intermediate_buffer is
+struct Buffer
+{
+    Microsoft::WRL::ComPtr<ID3D12Resource> buffer{};
+    u8 *buffer_ptr{};
+};
+
+// Static buffer : contents set once cannot be reset, the resource is in fast GPU only accesible memory.
+// Dynamic buffer (a hlsl constant buffer) : Placed in memory accesible by both CPU and GPU.
+enum class BufferTypes : u8
+{
+    Static,
+    Dynamic,
+};
+
+// Note that since intermediate buffer resources need to be in memory until the command list recorded operations are
+// executed, they are stored in a temporary vector that is cleared when intermediate buffers are no longer required.
+static std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> intermediate_buffers(200);
+
+// Helper function to create buffer. If buffer contains data, the upload operation (and GPU flush) must be done after
+// function invocation .
+
+Buffer create_buffer(ID3D12Device *const device, ID3D12GraphicsCommandList *const command_list, const void *data,
+                     const u32 buffer_size, const BufferTypes buffer_type)
+{
+    Buffer buffer{};
+
+    // First, create a upload buffer (that is placed in memory accesible by both GPU and CPU).
+    // If the buffer type is constant buffer, this IS the final buffer.
+    const D3D12_HEAP_PROPERTIES upload_heap_properties = {
+        .Type = D3D12_HEAP_TYPE_UPLOAD,
+        .CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+        .MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN,
+        .CreationNodeMask = 0u,
+        .VisibleNodeMask = 0u,
+    };
+
+    const D3D12_RESOURCE_DESC buffer_resource_desc = {
+        .Dimension = D3D12_RESOURCE_DIMENSION_BUFFER,
+        .Width = buffer_size,
+        .Height = 1u,
+        .DepthOrArraySize = 1u,
+        .MipLevels = 1u,
+        .Format = DXGI_FORMAT_UNKNOWN,
+        .SampleDesc = {1u, 0u},
+        .Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
+        .Flags = D3D12_RESOURCE_FLAG_NONE,
+    };
+
+    Microsoft::WRL::ComPtr<ID3D12Resource> intermediate_buffer{};
+    throw_if_failed(device->CreateCommittedResource(
+        &upload_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES, &buffer_resource_desc,
+        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, nullptr, IID_PPV_ARGS(&intermediate_buffer)));
+
+    // Now that a resource is created, copy CPU data to this upload buffer.
+    const D3D12_RANGE read_range{.Begin = 0u, .End = 0u};
+
+    throw_if_failed(intermediate_buffer->Map(0u, &read_range, (void **)&buffer.buffer_ptr));
+
+    if (data != nullptr)
+    {
+        memcpy(buffer.buffer_ptr, data, buffer_size);
+    }
+
+    if (buffer_type == BufferTypes::Dynamic)
+    {
+        buffer.buffer = intermediate_buffer;
+        return buffer;
+    }
+
+    // Create the final resource and transfer the data from upload buffer to the final buffer.
+    // The heap type is : Default (no CPU access).
+    const D3D12_HEAP_PROPERTIES default_heap_properties = {
+        .Type = D3D12_HEAP_TYPE_DEFAULT,
+        .CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+        .MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN,
+        .CreationNodeMask = 0u,
+        .VisibleNodeMask = 0u,
+    };
+
+    throw_if_failed(device->CreateCommittedResource(
+        &default_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES, &buffer_resource_desc,
+        D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&buffer.buffer)));
+
+    command_list->CopyResource(buffer.buffer.Get(), intermediate_buffer.Get());
+
+    intermediate_buffers.emplace_back(intermediate_buffer);
+
+    return buffer;
+}
+
 int main()
 {
     const Window window(1080u, 720u);
@@ -128,9 +219,8 @@ int main()
                                        swapchain_backbuffer_cpu_descriptor_handles[i]);
     }
 
-    // Create the command allocator (the underlying allocation where gpu commands will be stored after being recorded by
-    // command list).
-    // Each frame has its own command allocator.
+    // Create the command allocator (the underlying allocation where gpu commands will be stored after being
+    // recorded by command list). Each frame has its own command allocator.
     Microsoft::WRL::ComPtr<ID3D12CommandAllocator> direct_command_allocators[number_of_backbuffers] = {};
     for (u8 i = 0; i < number_of_backbuffers; i++)
     {
@@ -177,73 +267,15 @@ int main()
     // Create the resources required for rendering.
     // Index buffer setup.
     constexpr u16 index_buffer_data[3] = {0u, 1u, 2u};
-    Microsoft::WRL::ComPtr<ID3D12Resource> upload_resource{};
-    Microsoft::WRL::ComPtr<ID3D12Resource> index_buffer_resource{};
-    D3D12_INDEX_BUFFER_VIEW index_buffer_view{};
-    {
-        // To upload the index buffer data to GPU - only memory, we need to first create a staging buffer in CPU - GPU
-        // accessible memory, then copy the data from CPU to this intermediate memory, then to GPU only memory.
+    Buffer index_buffer = create_buffer(device.Get(), command_list.Get(), (void *)&index_buffer_data, sizeof(u16) * 3u,
+                                        BufferTypes::Static);
+    // Create the index buffer view.
+    const D3D12_INDEX_BUFFER_VIEW index_buffer_view = {
 
-        // Create the staging commited resource.
-        // A commited resource creates both a resource and heap large enough to fit the resource.
-
-        // The heap type is : Upload (because CPU has access and it is optimized for uploading to GPU).
-        const D3D12_HEAP_PROPERTIES upload_heap_properties = {
-            .Type = D3D12_HEAP_TYPE_UPLOAD,
-            .CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
-            .MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN,
-            .CreationNodeMask = 0u,
-            .VisibleNodeMask = 0u,
-        };
-
-        constexpr u32 index_buffer_size = sizeof(u32) * 3u;
-
-        const D3D12_RESOURCE_DESC index_buffer_resource_desc = {
-            .Dimension = D3D12_RESOURCE_DIMENSION_BUFFER,
-            .Width = index_buffer_size,
-            .Height = 1u,
-            .DepthOrArraySize = 1u,
-            .MipLevels = 1u,
-            .Format = DXGI_FORMAT_UNKNOWN,
-            .SampleDesc = {1u, 0u},
-            .Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
-            .Flags = D3D12_RESOURCE_FLAG_NONE,
-        };
-
-        throw_if_failed(device->CreateCommittedResource(
-            &upload_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES, &index_buffer_resource_desc,
-            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, nullptr, IID_PPV_ARGS(&upload_resource)));
-
-        // Now that a resource is created, copy CPU data to this upload buffer.
-        u8 *upload_buffer_pointer = nullptr;
-        const D3D12_RANGE read_range{.Begin = 0u, .End = 0u};
-
-        throw_if_failed(upload_resource->Map(0u, &read_range, (void **)&upload_buffer_pointer));
-        memcpy(upload_buffer_pointer, index_buffer_data, index_buffer_size);
-
-        // Create the final resource and transfer the data from upload buffer to the final buffer.
-        // The heap type is : Default (no CPU access).
-        const D3D12_HEAP_PROPERTIES default_heap_properties = {
-            .Type = D3D12_HEAP_TYPE_DEFAULT,
-            .CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
-            .MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN,
-            .CreationNodeMask = 0u,
-            .VisibleNodeMask = 0u,
-        };
-
-        throw_if_failed(device->CreateCommittedResource(
-            &default_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES, &index_buffer_resource_desc,
-            D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&index_buffer_resource)));
-
-        command_list->CopyResource(index_buffer_resource.Get(), upload_resource.Get());
-
-        // Create the index buffer view.
-        index_buffer_view = {
-            .BufferLocation = index_buffer_resource->GetGPUVirtualAddress(),
-            .SizeInBytes = index_buffer_size,
-            .Format = DXGI_FORMAT_R16_UINT,
-        };
-    }
+        .BufferLocation = index_buffer.buffer->GetGPUVirtualAddress(),
+        .SizeInBytes = sizeof(u16) * 3u,
+        .Format = DXGI_FORMAT_R16_UINT,
+    };
 
     // Vertex buffer setup.
     struct VertexBuffer
@@ -251,72 +283,23 @@ int main()
         DirectX::XMFLOAT3 position{};
         DirectX::XMFLOAT3 color{};
     };
+
     constexpr VertexBuffer vertex_buffer_data[3] = {
         VertexBuffer{.position = {-0.5f, -0.5f, 0.0f}, .color = {1.0f, 0.0f, 0.0f}},
         VertexBuffer{.position = {0.0f, 0.5f, 0.0f}, .color = {0.0f, 1.0f, 0.0f}},
         VertexBuffer{.position = {+0.5f, -0.5f, 0.0f}, .color = {0.0f, 0.0f, 1.0f}},
     };
 
-    Microsoft::WRL::ComPtr<ID3D12Resource> vertex_buffer_upload_resource{};
-    Microsoft::WRL::ComPtr<ID3D12Resource> vertex_buffer_resource{};
+    Buffer vertex_buffer = create_buffer(device.Get(), command_list.Get(), (void *)&vertex_buffer_data,
+                                         sizeof(VertexBuffer) * 3u, BufferTypes::Static);
     D3D12_VERTEX_BUFFER_VIEW vertex_buffer_view{};
-    {
-        const D3D12_HEAP_PROPERTIES upload_heap_properties = {
-            .Type = D3D12_HEAP_TYPE_UPLOAD,
-            .CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
-            .MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN,
-            .CreationNodeMask = 0u,
-            .VisibleNodeMask = 0u,
-        };
 
-        constexpr u32 vertex_buffer_size = sizeof(VertexBuffer) * 3u;
-
-        const D3D12_RESOURCE_DESC vertex_buffer_resource_desc = {
-            .Dimension = D3D12_RESOURCE_DIMENSION_BUFFER,
-            .Width = vertex_buffer_size,
-            .Height = 1u,
-            .DepthOrArraySize = 1u,
-            .MipLevels = 1u,
-            .Format = DXGI_FORMAT_UNKNOWN,
-            .SampleDesc = {1u, 0u},
-            .Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
-            .Flags = D3D12_RESOURCE_FLAG_NONE,
-        };
-
-        throw_if_failed(device->CreateCommittedResource(
-            &upload_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES, &vertex_buffer_resource_desc,
-            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, nullptr, IID_PPV_ARGS(&vertex_buffer_upload_resource)));
-
-        // Now that a resource is created, copy CPU data to this upload buffer.
-        u8 *upload_buffer_pointer = nullptr;
-        const D3D12_RANGE read_range{.Begin = 0u, .End = 0u};
-
-        throw_if_failed(vertex_buffer_upload_resource->Map(0u, &read_range, (void **)&upload_buffer_pointer));
-        memcpy(upload_buffer_pointer, vertex_buffer_data, vertex_buffer_size);
-
-        // Create the final resource and transfer the data from upload buffer to the final buffer.
-        // The heap type is : Default (no CPU access).
-        const D3D12_HEAP_PROPERTIES default_heap_properties = {
-            .Type = D3D12_HEAP_TYPE_DEFAULT,
-            .CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
-            .MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN,
-            .CreationNodeMask = 0u,
-            .VisibleNodeMask = 0u,
-        };
-
-        throw_if_failed(device->CreateCommittedResource(
-            &default_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES, &vertex_buffer_resource_desc,
-            D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&vertex_buffer_resource)));
-
-        command_list->CopyResource(vertex_buffer_resource.Get(), vertex_buffer_upload_resource.Get());
-
-        // Create the vertex buffer view.
-        vertex_buffer_view = {
-            .BufferLocation = vertex_buffer_resource->GetGPUVirtualAddress(),
-            .SizeInBytes = vertex_buffer_size,
-            .StrideInBytes = sizeof(VertexBuffer),
-        };
-    }
+    // Create the vertex buffer view.
+    vertex_buffer_view = {
+        .BufferLocation = vertex_buffer.buffer->GetGPUVirtualAddress(),
+        .SizeInBytes = sizeof(VertexBuffer) * 3u,
+        .StrideInBytes = sizeof(VertexBuffer),
+    };
 
     // Create a constant buffer for simple linear algebra tests.
     struct alignas(256) ConstantBuffer
@@ -324,54 +307,19 @@ int main()
         DirectX::XMMATRIX matrix{};
     };
 
-    Microsoft::WRL::ComPtr<ID3D12Resource> constant_buffer{};
+    Buffer constant_buffer =
+        create_buffer(device.Get(), command_list.Get(), nullptr, sizeof(ConstantBuffer), BufferTypes::Dynamic);
+    // Create the constant buffer descriptor.
+    const D3D12_CONSTANT_BUFFER_VIEW_DESC cbv_desc = {
+        .BufferLocation = constant_buffer.buffer->GetGPUVirtualAddress(),
+        .SizeInBytes = sizeof(ConstantBuffer),
+    };
 
-    u8 *constant_buffer_ptr = nullptr;
-    {
-        const D3D12_HEAP_PROPERTIES upload_heap_properties = {
-            .Type = D3D12_HEAP_TYPE_UPLOAD,
-            .CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
-            .MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN,
-            .CreationNodeMask = 0u,
-            .VisibleNodeMask = 0u,
-        };
+    // Assuming that currently only 1 cbv srv uav descriptor is present.
+    D3D12_CPU_DESCRIPTOR_HANDLE constant_buffer_descriptor_handle =
+        cbv_srv_uav_descriptor_heap->GetCPUDescriptorHandleForHeapStart();
 
-        constexpr u32 constant_buffer_size = sizeof(ConstantBuffer);
-
-        const D3D12_RESOURCE_DESC constant_buffer_resource_desc = {
-            .Dimension = D3D12_RESOURCE_DIMENSION_BUFFER,
-            .Width = constant_buffer_size,
-            .Height = 1u,
-            .DepthOrArraySize = 1u,
-            .MipLevels = 1u,
-            .Format = DXGI_FORMAT_UNKNOWN,
-            .SampleDesc = {1u, 0u},
-            .Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
-            .Flags = D3D12_RESOURCE_FLAG_NONE,
-        };
-
-        throw_if_failed(device->CreateCommittedResource(
-            &upload_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES, &constant_buffer_resource_desc,
-            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, nullptr, IID_PPV_ARGS(&constant_buffer)));
-        constant_buffer->SetName(L"Constant Buffer Resource");
-
-        const D3D12_RANGE read_range{.Begin = 0u, .End = 0u};
-
-        throw_if_failed(constant_buffer->Map(0u, &read_range, (void **)&constant_buffer_ptr));
-
-        // Create the constant buffer descriptor.
-        const D3D12_CONSTANT_BUFFER_VIEW_DESC cbv_desc = {
-            .BufferLocation = constant_buffer->GetGPUVirtualAddress(),
-            .SizeInBytes = sizeof(ConstantBuffer),
-        };
-
-        D3D12_CPU_DESCRIPTOR_HANDLE constant_buffer_descriptor_handle =
-            cbv_srv_uav_descriptor_heap->GetCPUDescriptorHandleForHeapStart();
-        constant_buffer_descriptor_handle.ptr +=
-            device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV) * number_of_backbuffers;
-
-        device->CreateConstantBufferView(&cbv_desc, constant_buffer_descriptor_handle);
-    }
+    device->CreateConstantBufferView(&cbv_desc, constant_buffer_descriptor_handle);
 
     // Create a empty root signature.
     Microsoft::WRL::ComPtr<ID3DBlob> root_signature_blob{};
@@ -532,6 +480,8 @@ int main()
     signal_fence(monotonic_fence_value);
     wait_for_fence_value(frame_fence_values[swapchain_backbuffer_index]);
 
+    intermediate_buffers.clear();
+
     u64 frame_count = 0u;
 
     bool quit = false;
@@ -553,7 +503,7 @@ int main()
         ConstantBuffer buffer = {
             .matrix = DirectX::XMMatrixRotationZ(frame_count / 100.0f),
         };
-        memcpy(constant_buffer_ptr, &buffer, sizeof(ConstantBuffer));
+        memcpy(constant_buffer.buffer_ptr, &buffer, sizeof(ConstantBuffer));
 
         // Main render loop.
 
@@ -599,7 +549,7 @@ int main()
 
         command_list->OMSetRenderTargets(1u, &swapchain_backbuffer_cpu_descriptor_handles[swapchain_backbuffer_index],
                                          FALSE, nullptr);
-        command_list->SetGraphicsRootConstantBufferView(0u, constant_buffer->GetGPUVirtualAddress());
+        command_list->SetGraphicsRootConstantBufferView(0u, constant_buffer.buffer->GetGPUVirtualAddress());
         command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         command_list->IASetIndexBuffer(&index_buffer_view);
         command_list->IASetVertexBuffers(0u, 1u, &vertex_buffer_view);
