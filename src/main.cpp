@@ -22,7 +22,7 @@ enum class BufferTypes : u8
 
 // Note that since intermediate buffer resources need to be in memory until the command list recorded operations are
 // executed, they are stored in a temporary vector that is cleared when intermediate buffers are no longer required.
-static std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> intermediate_buffers(200);
+static std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> intermediate_buffers{};
 
 // Helper function to create buffer. If buffer contains data, the upload operation (and GPU flush) must be done after
 // function invocation .
@@ -96,8 +96,67 @@ Buffer create_buffer(ID3D12Device *const device, ID3D12GraphicsCommandList *cons
     return buffer;
 }
 
+// A simple descriptor heap abstraction.
+// Provides simple methods to offset current descriptor to make creation of resources easier.
+// note(rtarun9) : Should the descriptor handle for heap start be stored in the struct?
+struct DescriptorHeap
+{
+    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> descriptor_heap{};
+    D3D12_CPU_DESCRIPTOR_HANDLE current_cpu_descriptor_handle{};
+    D3D12_GPU_DESCRIPTOR_HANDLE current_gpu_descriptor_handle{};
+    u32 descriptor_handle_size{};
+
+    D3D12_GPU_DESCRIPTOR_HANDLE get_gpu_descriptor_handle_at_index(const u32 index)
+    {
+        D3D12_GPU_DESCRIPTOR_HANDLE handle = descriptor_heap->GetGPUDescriptorHandleForHeapStart();
+        handle.ptr += static_cast<u64>(index) * descriptor_handle_size;
+
+        return handle;
+    }
+
+    D3D12_CPU_DESCRIPTOR_HANDLE get_cpu_descriptor_handle_at_index(const u32 index)
+    {
+        D3D12_CPU_DESCRIPTOR_HANDLE handle = descriptor_heap->GetCPUDescriptorHandleForHeapStart();
+        handle.ptr += static_cast<u64>(index) * descriptor_handle_size;
+
+        return handle;
+    }
+
+    void offset()
+    {
+        current_cpu_descriptor_handle.ptr += descriptor_handle_size;
+        current_gpu_descriptor_handle.ptr += descriptor_handle_size;
+    }
+
+    DescriptorHeap(ID3D12Device *const device, const u32 num_descriptors,
+                   const D3D12_DESCRIPTOR_HEAP_TYPE descriptor_heap_type,
+                   const D3D12_DESCRIPTOR_HEAP_FLAGS descriptor_heap_flags)
+    {
+        const D3D12_DESCRIPTOR_HEAP_DESC descriptor_heap_desc = {
+            .Type = descriptor_heap_type,
+            .NumDescriptors = num_descriptors,
+            .Flags = descriptor_heap_flags,
+            .NodeMask = 0u,
+
+        };
+
+        throw_if_failed(device->CreateDescriptorHeap(&descriptor_heap_desc, IID_PPV_ARGS(&descriptor_heap)));
+
+        current_cpu_descriptor_handle = descriptor_heap->GetCPUDescriptorHandleForHeapStart();
+
+        if (descriptor_heap_flags == D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE)
+        {
+            current_gpu_descriptor_handle = descriptor_heap->GetGPUDescriptorHandleForHeapStart();
+        }
+
+        descriptor_handle_size = device->GetDescriptorHandleIncrementSize(descriptor_heap_type);
+    }
+};
+
 int main()
 {
+    intermediate_buffers.reserve(50);
+
     const Window window(1080u, 720u);
 
     // Enable the debug layer in debug mode.
@@ -181,39 +240,20 @@ int main()
     }
 
     // Create a cbv srv uav descriptor heap.
-    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> cbv_srv_uav_descriptor_heap{};
-    const D3D12_DESCRIPTOR_HEAP_DESC cbv_srv_uav_descriptor_heap_desc = {
-        .Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
-        .NumDescriptors = 10u,
-        .Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE,
-        .NodeMask = 0u,
-    };
-    throw_if_failed(
-        device->CreateDescriptorHeap(&cbv_srv_uav_descriptor_heap_desc, IID_PPV_ARGS(&cbv_srv_uav_descriptor_heap)));
+    DescriptorHeap cbv_srv_uav_descriptor_heap = DescriptorHeap(
+        device.Get(), 10u, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
 
-    // Create a rtv descriptor heap.
-    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> rtv_descriptor_heap{};
-    const D3D12_DESCRIPTOR_HEAP_DESC rtv_descriptor_heap_desc = {
-        .Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV,
-        .NumDescriptors = number_of_backbuffers,
-        .Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE,
-        .NodeMask = 0u,
-    };
-    throw_if_failed(device->CreateDescriptorHeap(&rtv_descriptor_heap_desc, IID_PPV_ARGS(&rtv_descriptor_heap)));
+    DescriptorHeap rtv_descriptor_heap =
+        DescriptorHeap(device.Get(), 10u, D3D12_DESCRIPTOR_HEAP_TYPE_RTV, D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
 
     // Create the render target view for the swapchain back buffer.
     Microsoft::WRL::ComPtr<ID3D12Resource> swapchain_backbuffer_resources[number_of_backbuffers] = {};
     D3D12_CPU_DESCRIPTOR_HANDLE swapchain_backbuffer_cpu_descriptor_handles[number_of_backbuffers] = {};
 
-    const u32 rtv_descriptor_handle_size = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
-    const D3D12_CPU_DESCRIPTOR_HANDLE rtv_descriptor_handle_for_heap_start =
-        rtv_descriptor_heap->GetCPUDescriptorHandleForHeapStart();
-
     for (u8 i = 0; i < number_of_backbuffers; i++)
     {
         throw_if_failed(swapchain->GetBuffer(i, IID_PPV_ARGS(&(swapchain_backbuffer_resources[i]))));
-        swapchain_backbuffer_cpu_descriptor_handles[i] = rtv_descriptor_handle_for_heap_start;
-        swapchain_backbuffer_cpu_descriptor_handles[i].ptr += (u64)i * rtv_descriptor_handle_size;
+        swapchain_backbuffer_cpu_descriptor_handles[i] = rtv_descriptor_heap.get_cpu_descriptor_handle_at_index(i);
 
         device->CreateRenderTargetView(swapchain_backbuffer_resources[i].Get(), nullptr,
                                        swapchain_backbuffer_cpu_descriptor_handles[i]);
@@ -317,7 +357,7 @@ int main()
 
     // Assuming that currently only 1 cbv srv uav descriptor is present.
     D3D12_CPU_DESCRIPTOR_HANDLE constant_buffer_descriptor_handle =
-        cbv_srv_uav_descriptor_heap->GetCPUDescriptorHandleForHeapStart();
+        cbv_srv_uav_descriptor_heap.get_cpu_descriptor_handle_at_index(0u);
 
     device->CreateConstantBufferView(&cbv_desc, constant_buffer_descriptor_handle);
 
@@ -544,7 +584,8 @@ int main()
         command_list->SetGraphicsRootSignature(root_signature.Get());
         command_list->SetPipelineState(pso.Get());
 
-        ID3D12DescriptorHeap *const shader_visible_descriptor_heaps = {cbv_srv_uav_descriptor_heap.Get()};
+        ID3D12DescriptorHeap *const shader_visible_descriptor_heaps = {
+            cbv_srv_uav_descriptor_heap.descriptor_heap.Get()};
         command_list->SetDescriptorHeaps(1u, &shader_visible_descriptor_heaps);
 
         command_list->OMSetRenderTargets(1u, &swapchain_backbuffer_cpu_descriptor_handles[swapchain_backbuffer_index],
