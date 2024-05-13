@@ -5,11 +5,7 @@
 DirectX::XMMATRIX Camera::update_and_get_view_matrix(const float delta_time)
 {
     const DirectX::XMVECTOR camera_right =
-        DirectX::XMVector4Normalize(DirectX::XMVector3Cross(camera_front, camera_up_direction));
-
-    float pitch = 0.0f;
-    float yaw = 0.0f;
-    float roll = 0.0f;
+        DirectX::XMVector3Normalize(DirectX::XMVector3Cross(camera_front, camera_up_direction));
 
     // Note : Index is the virutal key code.
     // If higher order bit is 1 (0x8000), the key is down.
@@ -51,11 +47,13 @@ DirectX::XMMATRIX Camera::update_and_get_view_matrix(const float delta_time)
         pitch += camera_rotation_speed * delta_time;
     }
 
-    const DirectX::XMMATRIX rotation_matrix = DirectX::XMMatrixRotationRollPitchYaw(pitch, yaw, roll);
+    static constexpr DirectX::XMVECTOR world_up = DirectX::XMVECTOR{0.0f, 1.0f, 0.0f, 0.0f};
+    static constexpr DirectX::XMVECTOR world_front = DirectX::XMVECTOR{0.0f, 0.0f, 1.0f, 1.0f};
 
-    camera_front = DirectX::XMVector3Normalize(DirectX::XMVector4Transform(camera_front, rotation_matrix));
-    camera_up_direction =
-        DirectX::XMVector3Normalize(DirectX::XMVector3Transform(camera_up_direction, rotation_matrix));
+    const DirectX::XMMATRIX rotation_matrix = DirectX::XMMatrixRotationRollPitchYaw(pitch, yaw, 0.0f);
+
+    camera_front = DirectX::XMVector3Normalize(DirectX::XMVector3Transform(world_front, rotation_matrix));
+    camera_up_direction = DirectX::XMVector3Normalize(DirectX::XMVector3Transform(world_up, rotation_matrix));
 
     // Setup of simple view projection matrix.
     return DirectX::XMMatrixLookAtLH(camera_position, DirectX::XMVectorAdd(camera_position, camera_front),

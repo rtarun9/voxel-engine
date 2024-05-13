@@ -241,12 +241,15 @@ int main()
         throw_if_failed(swapchain_1.As(&swapchain));
     }
 
-    // Create a cbv srv uav descriptor heap.
+    // Create a descriptor heaps.
     DescriptorHeap cbv_srv_uav_descriptor_heap = DescriptorHeap(
         device.Get(), 10u, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
 
     DescriptorHeap rtv_descriptor_heap =
         DescriptorHeap(device.Get(), 10u, D3D12_DESCRIPTOR_HEAP_TYPE_RTV, D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
+
+    DescriptorHeap dsv_descriptor_heap =
+        DescriptorHeap(device.Get(), 1u, D3D12_DESCRIPTOR_HEAP_TYPE_DSV, D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
 
     // Create the render target view for the swapchain back buffer.
     Microsoft::WRL::ComPtr<ID3D12Resource> swapchain_backbuffer_resources[number_of_backbuffers] = {};
@@ -308,14 +311,15 @@ int main()
 
     // Create the resources required for rendering.
     // Index buffer setup.
-    constexpr u16 index_buffer_data[3] = {0u, 1u, 2u};
-    Buffer index_buffer = create_buffer(device.Get(), command_list.Get(), (void *)&index_buffer_data, sizeof(u16) * 3u,
+    constexpr u16 index_buffer_data[36] = {0, 1, 2, 0, 2, 3, 4, 6, 5, 4, 7, 6, 4, 5, 1, 4, 1, 0,
+                                           3, 2, 6, 3, 6, 7, 1, 5, 6, 1, 6, 2, 4, 0, 3, 4, 3, 7};
+    Buffer index_buffer = create_buffer(device.Get(), command_list.Get(), (void *)&index_buffer_data, sizeof(u16) * 36u,
                                         BufferTypes::Static);
     // Create the index buffer view.
     const D3D12_INDEX_BUFFER_VIEW index_buffer_view = {
 
         .BufferLocation = index_buffer.buffer->GetGPUVirtualAddress(),
-        .SizeInBytes = sizeof(u16) * 3u,
+        .SizeInBytes = sizeof(u16) * 36u,
         .Format = DXGI_FORMAT_R16_UINT,
     };
 
@@ -326,20 +330,33 @@ int main()
         DirectX::XMFLOAT3 color{};
     };
 
-    constexpr VertexBuffer vertex_buffer_data[3] = {
-        VertexBuffer{.position = {-0.5f, -0.5f, 0.0f}, .color = {1.0f, 0.0f, 0.0f}},
-        VertexBuffer{.position = {0.0f, 0.5f, 0.0f}, .color = {0.0f, 1.0f, 0.0f}},
-        VertexBuffer{.position = {+0.5f, -0.5f, 0.0f}, .color = {0.0f, 0.0f, 1.0f}},
+    constexpr VertexBuffer vertex_buffer_data[8] = {
+        VertexBuffer{.position = DirectX::XMFLOAT3(-1.0f, -1.0f, -1.0f),
+                     .color = DirectX::XMFLOAT3(0.0f, 0.0f, 0.0f)}, // 0
+        VertexBuffer{.position = DirectX::XMFLOAT3(-1.0f, 1.0f, -1.0f),
+                     .color = DirectX::XMFLOAT3(0.0f, 1.0f, 0.0f)}, // 1
+        VertexBuffer{.position = DirectX::XMFLOAT3(1.0f, 1.0f, -1.0f),
+                     .color = DirectX::XMFLOAT3(1.0f, 1.0f, 0.0f)}, // 2
+        VertexBuffer{.position = DirectX::XMFLOAT3(1.0f, -1.0f, -1.0f),
+                     .color = DirectX::XMFLOAT3(1.0f, 0.0f, 0.0f)}, // 3
+        VertexBuffer{.position = DirectX::XMFLOAT3(-1.0f, -1.0f, 1.0f),
+                     .color = DirectX::XMFLOAT3(0.0f, 0.0f, 1.0f)}, // 4
+        VertexBuffer{.position = DirectX::XMFLOAT3(-1.0f, 1.0f, 1.0f),
+                     .color = DirectX::XMFLOAT3(0.0f, 1.0f, 1.0f)}, // 5
+        VertexBuffer{.position = DirectX::XMFLOAT3(1.0f, 1.0f, 1.0f),
+                     .color = DirectX::XMFLOAT3(1.0f, 1.0f, 1.0f)}, // 6
+        VertexBuffer{.position = DirectX::XMFLOAT3(1.0f, -1.0f, 1.0f),
+                     .color = DirectX::XMFLOAT3(1.0f, 0.0f, 1.0f)} // 7
     };
 
     Buffer vertex_buffer = create_buffer(device.Get(), command_list.Get(), (void *)&vertex_buffer_data,
-                                         sizeof(VertexBuffer) * 3u, BufferTypes::Static);
+                                         sizeof(VertexBuffer) * 8u, BufferTypes::Static);
     D3D12_VERTEX_BUFFER_VIEW vertex_buffer_view{};
 
     // Create the vertex buffer view.
     vertex_buffer_view = {
         .BufferLocation = vertex_buffer.buffer->GetGPUVirtualAddress(),
-        .SizeInBytes = sizeof(VertexBuffer) * 3u,
+        .SizeInBytes = sizeof(VertexBuffer) * 8u,
         .StrideInBytes = sizeof(VertexBuffer),
     };
 
@@ -362,6 +379,61 @@ int main()
         cbv_srv_uav_descriptor_heap.get_cpu_descriptor_handle_at_index(0u);
 
     device->CreateConstantBufferView(&cbv_desc, constant_buffer_descriptor_handle);
+
+    // Create the depth stencil buffer.
+    Microsoft::WRL::ComPtr<ID3D12Resource> depth_resource{};
+    D3D12_CPU_DESCRIPTOR_HANDLE dsv_cpu_handle = dsv_descriptor_heap.current_cpu_descriptor_handle;
+    {
+        const D3D12_RESOURCE_DESC ds_resource_desc = {
+            .Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D,
+            .Alignment = 0u,
+            .Width = window.m_width,
+            .Height = window.m_height,
+            .DepthOrArraySize = 1u,
+            .MipLevels = 1u,
+            .Format = DXGI_FORMAT_D32_FLOAT,
+            .SampleDesc =
+                {
+                    1u,
+                    0u,
+                },
+            .Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN,
+            .Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL,
+        };
+
+        const D3D12_HEAP_PROPERTIES default_heap_properties = {
+            .Type = D3D12_HEAP_TYPE_DEFAULT,
+            .CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+            .MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN,
+            .CreationNodeMask = 0u,
+            .VisibleNodeMask = 0u,
+        };
+
+        const D3D12_CLEAR_VALUE optimized_ds_clear_value = {
+            .Format = DXGI_FORMAT_D32_FLOAT,
+            .DepthStencil =
+                {
+                    .Depth = 1.0f,
+                },
+        };
+
+        throw_if_failed(device->CreateCommittedResource(&default_heap_properties, D3D12_HEAP_FLAG_NONE,
+                                                        &ds_resource_desc, D3D12_RESOURCE_STATE_DEPTH_WRITE,
+                                                        &optimized_ds_clear_value, IID_PPV_ARGS(&depth_resource)));
+
+        const D3D12_DEPTH_STENCIL_VIEW_DESC dsv_desc = {
+            .Format = DXGI_FORMAT_D32_FLOAT,
+            .ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D,
+            .Flags = D3D12_DSV_FLAG_NONE,
+            .Texture2D =
+                {
+
+                    .MipSlice = 0u,
+                },
+        };
+
+        device->CreateDepthStencilView(depth_resource.Get(), &dsv_desc, dsv_cpu_handle);
+    }
 
     // Create a empty root signature.
     Microsoft::WRL::ComPtr<ID3DBlob> root_signature_blob{};
@@ -468,7 +540,10 @@ int main()
             },
         .DepthStencilState =
             {
-                .DepthEnable = FALSE,
+                .DepthEnable = TRUE,
+                .DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL,
+                .DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL,
+                .StencilEnable = FALSE,
             },
         .InputLayout =
             {
@@ -481,6 +556,7 @@ int main()
             {
                 DXGI_FORMAT_R10G10B10A2_UNORM,
             },
+        .DSVFormat = DXGI_FORMAT_D32_FLOAT,
         .SampleDesc =
             {
                 1u,
@@ -542,6 +618,7 @@ int main()
     float delta_time = 0.0;
 
     Camera camera{};
+    camera.camera_rotation_speed = 1.0f;
 
     while (!quit)
     {
@@ -600,9 +677,10 @@ int main()
 
         command_list->ResourceBarrier(1u, &presentation_to_render_target_barrier);
 
-        // Now, clear the RTV.
+        // Now, clear the RTV and DSV.
         const float clear_color[4] = {cosf(frame_count / 100.0f), sinf(frame_count / 100.0f), 0.0f, 1.0f};
         command_list->ClearRenderTargetView(rtv_handle, clear_color, 0u, nullptr);
+        command_list->ClearDepthStencilView(dsv_cpu_handle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0u, 0u, nullptr);
 
         // Set viewport.
         command_list->RSSetViewports(1u, &viewport);
@@ -617,12 +695,12 @@ int main()
         command_list->SetDescriptorHeaps(1u, &shader_visible_descriptor_heaps);
 
         command_list->OMSetRenderTargets(1u, &swapchain_backbuffer_cpu_descriptor_handles[swapchain_backbuffer_index],
-                                         FALSE, nullptr);
+                                         FALSE, &dsv_cpu_handle);
         command_list->SetGraphicsRootConstantBufferView(0u, constant_buffer.buffer->GetGPUVirtualAddress());
         command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         command_list->IASetIndexBuffer(&index_buffer_view);
         command_list->IASetVertexBuffers(0u, 1u, &vertex_buffer_view);
-        command_list->DrawInstanced(3u, 1u, 0u, 0u);
+        command_list->DrawIndexedInstanced(36u, 1u, 0u, 0u, 0u);
 
         // Now, transition back to presentation mode.
         const D3D12_RESOURCE_BARRIER render_target_to_presentation_barrier = {
@@ -657,6 +735,8 @@ int main()
 
         // Wait for the previous frame (that is presenting to swpachain_backbuffer_index) to complete execution.
         wait_for_fence_value(frame_fence_values[swapchain_backbuffer_index]);
+
+        ++frame_count;
 
         QueryPerformanceCounter(&frame_end_time);
 
