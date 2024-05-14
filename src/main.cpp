@@ -7,7 +7,6 @@
 
 #include "camera.hpp"
 
-// Note that buffer_ptr is to only be used by constant buffers, intermediate_buffer is
 struct Buffer
 {
     Microsoft::WRL::ComPtr<ID3D12Resource> buffer{};
@@ -29,8 +28,8 @@ static std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> intermediate_buffers{
 // Helper function to create buffer. If buffer contains data, the upload operation (and GPU flush) must be done after
 // function invocation .
 
-Buffer create_buffer(ID3D12Device *const device, ID3D12GraphicsCommandList *const command_list, const void *data,
-                     const u32 buffer_size, const BufferTypes buffer_type)
+static Buffer create_buffer(ID3D12Device *const device, ID3D12GraphicsCommandList *const command_list, const void *data,
+                            const u32 buffer_size, const BufferTypes buffer_type)
 {
     Buffer buffer{};
 
@@ -108,7 +107,7 @@ struct DescriptorHeap
     D3D12_GPU_DESCRIPTOR_HANDLE current_gpu_descriptor_handle{};
     u32 descriptor_handle_size{};
 
-    D3D12_GPU_DESCRIPTOR_HANDLE get_gpu_descriptor_handle_at_index(const u32 index)
+    D3D12_GPU_DESCRIPTOR_HANDLE get_gpu_descriptor_handle_at_index(const u32 index) const
     {
         D3D12_GPU_DESCRIPTOR_HANDLE handle = descriptor_heap->GetGPUDescriptorHandleForHeapStart();
         handle.ptr += static_cast<u64>(index) * descriptor_handle_size;
@@ -116,7 +115,7 @@ struct DescriptorHeap
         return handle;
     }
 
-    D3D12_CPU_DESCRIPTOR_HANDLE get_cpu_descriptor_handle_at_index(const u32 index)
+    D3D12_CPU_DESCRIPTOR_HANDLE get_cpu_descriptor_handle_at_index(const u32 index) const
     {
         D3D12_CPU_DESCRIPTOR_HANDLE handle = descriptor_heap->GetCPUDescriptorHandleForHeapStart();
         handle.ptr += static_cast<u64>(index) * descriptor_handle_size;
@@ -368,17 +367,56 @@ int main()
 
     Buffer constant_buffer =
         create_buffer(device.Get(), command_list.Get(), nullptr, sizeof(ConstantBuffer), BufferTypes::Dynamic);
+
     // Create the constant buffer descriptor.
     const D3D12_CONSTANT_BUFFER_VIEW_DESC cbv_desc = {
         .BufferLocation = constant_buffer.buffer->GetGPUVirtualAddress(),
         .SizeInBytes = sizeof(ConstantBuffer),
     };
 
-    // Assuming that currently only 1 cbv srv uav descriptor is present.
     D3D12_CPU_DESCRIPTOR_HANDLE constant_buffer_descriptor_handle =
         cbv_srv_uav_descriptor_heap.get_cpu_descriptor_handle_at_index(0u);
 
     device->CreateConstantBufferView(&cbv_desc, constant_buffer_descriptor_handle);
+
+    // Create a constant buffer that is a array of matrices. Each matrix is the transform matrix for each instance
+    // matrix.
+    static constexpr u32 number_of_voxels_per_dimension = 8u;
+    struct alignas(256) InstanceTransformBuffer
+    {
+        DirectX::XMMATRIX transform_matrix[number_of_voxels_per_dimension * number_of_voxels_per_dimension *
+                                           number_of_voxels_per_dimension];
+    };
+
+    InstanceTransformBuffer instance_transform_buffer_data = {};
+    for (u32 i = 0; i < number_of_voxels_per_dimension; i++)
+    {
+        for (u32 j = 0; j < number_of_voxels_per_dimension; j++)
+        {
+            for (u32 k = 0; k < number_of_voxels_per_dimension; k++)
+            {
+                // Note : The dimension of each voxel cube is 1. Thats why for translation, i, j, k is multiplied by 2.
+                instance_transform_buffer_data
+                    .transform_matrix[i * number_of_voxels_per_dimension * number_of_voxels_per_dimension +
+                                      j * number_of_voxels_per_dimension + k] =
+                    DirectX::XMMatrixTranslation(i * 2, j * 2, k * 2);
+            }
+        }
+    }
+
+    Buffer instance_transform_buffer =
+        create_buffer(device.Get(), command_list.Get(), nullptr, sizeof(InstanceTransformBuffer), BufferTypes::Dynamic);
+
+    // Create constant buffer.
+    const D3D12_CONSTANT_BUFFER_VIEW_DESC instance_transform_buffer_view_desc = {
+        .BufferLocation = instance_transform_buffer.buffer->GetGPUVirtualAddress(),
+        .SizeInBytes = sizeof(InstanceTransformBuffer),
+    };
+
+    D3D12_CPU_DESCRIPTOR_HANDLE instance_transform_buffer_descriptor_handle =
+        cbv_srv_uav_descriptor_heap.get_cpu_descriptor_handle_at_index(1);
+
+    device->CreateConstantBufferView(&instance_transform_buffer_view_desc, instance_transform_buffer_descriptor_handle);
 
     // Create the depth stencil buffer.
     Microsoft::WRL::ComPtr<ID3D12Resource> depth_resource{};
@@ -435,27 +473,40 @@ int main()
         device->CreateDepthStencilView(depth_resource.Get(), &dsv_desc, dsv_cpu_handle);
     }
 
-    // Create a empty root signature.
     Microsoft::WRL::ComPtr<ID3DBlob> root_signature_blob{};
     Microsoft::WRL::ComPtr<ID3D12RootSignature> root_signature{};
 
-    D3D12_ROOT_PARAMETER1 root_parameter = {
-        .ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV,
-        .Descriptor =
-            D3D12_ROOT_DESCRIPTOR1{
-                .ShaderRegister = 0u,
-                .RegisterSpace = 0u,
-                .Flags = D3D12_ROOT_DESCRIPTOR_FLAG_NONE,
-            },
-        .ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX,
+    D3D12_ROOT_PARAMETER1 root_parameters[2] = {
+        // For view projection matrix.
+        D3D12_ROOT_PARAMETER1{
+            .ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV,
+            .Descriptor =
+                D3D12_ROOT_DESCRIPTOR1{
+                    .ShaderRegister = 0u,
+                    .RegisterSpace = 0u,
+                    .Flags = D3D12_ROOT_DESCRIPTOR_FLAG_NONE,
+                },
+            .ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX,
+        },
+        // For instance transform buffer.
+        D3D12_ROOT_PARAMETER1{
+            .ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV,
+            .Descriptor =
+                D3D12_ROOT_DESCRIPTOR1{
+                    .ShaderRegister = 1u,
+                    .RegisterSpace = 0u,
+                    .Flags = D3D12_ROOT_DESCRIPTOR_FLAG_NONE,
+                },
+            .ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX,
+        },
     };
 
     const D3D12_VERSIONED_ROOT_SIGNATURE_DESC root_signature_desc = {
         .Version = D3D_ROOT_SIGNATURE_VERSION_1_1,
         .Desc_1_1 =
             {
-                .NumParameters = 1u,
-                .pParameters = &root_parameter,
+                .NumParameters = 2u,
+                .pParameters = root_parameters,
                 .NumStaticSamplers = 0u,
                 .pStaticSamplers = nullptr,
                 .Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT,
@@ -470,7 +521,7 @@ int main()
     Microsoft::WRL::ComPtr<ID3DBlob> shader_error_blob{};
 
     Microsoft::WRL::ComPtr<ID3DBlob> vertex_shader_blob{};
-    throw_if_failed(D3DCompileFromFile(L"shaders/triangle_shader.hlsl", nullptr, nullptr, "vs_main", "vs_5_0", 0u, 0u,
+    throw_if_failed(D3DCompileFromFile(L"shaders/shader.hlsl", nullptr, nullptr, "vs_main", "vs_5_0", 0u, 0u,
                                        &vertex_shader_blob, &shader_error_blob));
     if (shader_error_blob)
     {
@@ -478,7 +529,7 @@ int main()
     }
 
     Microsoft::WRL::ComPtr<ID3DBlob> pixel_shader_blob{};
-    throw_if_failed(D3DCompileFromFile(L"shaders/triangle_shader.hlsl", nullptr, nullptr, "ps_main", "ps_5_0", 0u, 0u,
+    throw_if_failed(D3DCompileFromFile(L"shaders/shader.hlsl", nullptr, nullptr, "ps_main", "ps_5_0", 0u, 0u,
                                        &pixel_shader_blob, nullptr));
     if (shader_error_blob)
     {
@@ -639,7 +690,7 @@ int main()
         const float aspect_ratio = (float)window.m_width / (float)window.m_height;
         const float vertical_fov = DirectX::XMConvertToRadians(45.0f);
         const DirectX::XMMATRIX projection_matrix =
-            DirectX::XMMatrixPerspectiveFovLH(vertical_fov, aspect_ratio, 0.1, 10.0f);
+            DirectX::XMMatrixPerspectiveFovLH(vertical_fov, aspect_ratio, 0.1, 100.0f);
 
         const DirectX::XMMATRIX view_projection_matrix =
             camera.update_and_get_view_matrix(delta_time) * projection_matrix;
@@ -649,6 +700,7 @@ int main()
             .matrix = view_projection_matrix,
         };
         memcpy(constant_buffer.buffer_ptr, &buffer, sizeof(ConstantBuffer));
+        memcpy(instance_transform_buffer.buffer_ptr, &instance_transform_buffer_data, sizeof(InstanceTransformBuffer));
 
         // Main render loop.
 
@@ -678,7 +730,7 @@ int main()
         command_list->ResourceBarrier(1u, &presentation_to_render_target_barrier);
 
         // Now, clear the RTV and DSV.
-        const float clear_color[4] = {cosf(frame_count / 100.0f), sinf(frame_count / 100.0f), 0.0f, 1.0f};
+        const float clear_color[4] = {0.0f, 0.0f, 0.0f, 1.0f};
         command_list->ClearRenderTargetView(rtv_handle, clear_color, 0u, nullptr);
         command_list->ClearDepthStencilView(dsv_cpu_handle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0u, 0u, nullptr);
 
@@ -696,11 +748,16 @@ int main()
 
         command_list->OMSetRenderTargets(1u, &swapchain_backbuffer_cpu_descriptor_handles[swapchain_backbuffer_index],
                                          FALSE, &dsv_cpu_handle);
+
         command_list->SetGraphicsRootConstantBufferView(0u, constant_buffer.buffer->GetGPUVirtualAddress());
+        command_list->SetGraphicsRootConstantBufferView(1u, instance_transform_buffer.buffer->GetGPUVirtualAddress());
+
         command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         command_list->IASetIndexBuffer(&index_buffer_view);
         command_list->IASetVertexBuffers(0u, 1u, &vertex_buffer_view);
-        command_list->DrawIndexedInstanced(36u, 1u, 0u, 0u, 0u);
+        command_list->DrawIndexedInstanced(
+            36u, number_of_voxels_per_dimension * number_of_voxels_per_dimension * number_of_voxels_per_dimension, 0u,
+            0u, 0u);
 
         // Now, transition back to presentation mode.
         const D3D12_RESOURCE_BARRIER render_target_to_presentation_barrier = {
@@ -742,6 +799,8 @@ int main()
 
         delta_time = (frame_end_time.QuadPart - frame_start_time.QuadPart) * seconds_per_count;
     }
+
+    printf("%u", (u32)frame_count);
 
     wait_for_fence_value(monotonic_fence_value);
 
