@@ -363,51 +363,95 @@ int main()
     {
         // Vertex buffer construction.
         const DirectX::XMUINT3 index = convert_index_to_3d(i);
-        printf("%u %u %u\n", index.x, index.y, index.z);
         if (chunk.cubes[i].active)
         {
-            const DirectX::XMFLOAT3 position_offset = DirectX::XMFLOAT3{(float)index.x, (float)index.y, (float)index.z};
+            const DirectX::XMFLOAT3 position_offset =
+                DirectX::XMFLOAT3{voxel_cube_dimension * (float)index.x, voxel_cube_dimension * (float)index.y,
+                                  voxel_cube_dimension * (float)index.z};
             const float voxel_render_size = voxel_cube_dimension * 0.5f;
-            chunk_vertex_data.emplace_back(
-                VertexData{.position = DirectX::XMFLOAT3(position_offset.x - voxel_render_size,
-                                                         position_offset.y - voxel_render_size,
-                                                         position_offset.z - voxel_render_size),
-                           .color = DirectX::XMFLOAT3(0.0f, 0.0f, 0.0f)});
-            chunk_vertex_data.emplace_back(
-                VertexData{.position = DirectX::XMFLOAT3(position_offset.x - voxel_render_size,
-                                                         position_offset.y + voxel_render_size,
-                                                         position_offset.z - voxel_render_size),
-                           .color = DirectX::XMFLOAT3(0.0f, 1.0f, 0.0f)});
-            chunk_vertex_data.emplace_back(
-                VertexData{.position = DirectX::XMFLOAT3(position_offset.x + voxel_render_size,
-                                                         position_offset.y + voxel_render_size,
-                                                         position_offset.z - voxel_render_size),
-                           .color = DirectX::XMFLOAT3(1.0f, 1.0f, 0.0f)});
-            chunk_vertex_data.emplace_back(
-                VertexData{.position = DirectX::XMFLOAT3(position_offset.x + voxel_render_size,
-                                                         position_offset.y - voxel_render_size,
-                                                         position_offset.z - voxel_render_size),
-                           .color = DirectX::XMFLOAT3(1.0f, 0.0f, 0.0f)});
-            chunk_vertex_data.emplace_back(
-                VertexData{.position = DirectX::XMFLOAT3(position_offset.x - voxel_render_size,
-                                                         position_offset.y - voxel_render_size,
-                                                         position_offset.z + voxel_render_size),
-                           .color = DirectX::XMFLOAT3(0.0f, 0.0f, 1.0f)});
-            chunk_vertex_data.emplace_back(
-                VertexData{.position = DirectX::XMFLOAT3(position_offset.x - voxel_render_size,
-                                                         position_offset.y + voxel_render_size,
-                                                         position_offset.z + voxel_render_size),
-                           .color = DirectX::XMFLOAT3(0.0f, 1.0f, 1.0f)});
-            chunk_vertex_data.emplace_back(
-                VertexData{.position = DirectX::XMFLOAT3(position_offset.x + voxel_render_size,
-                                                         position_offset.y + voxel_render_size,
-                                                         position_offset.z + voxel_render_size),
-                           .color = DirectX::XMFLOAT3(1.0f, 1.0f, 1.0f)});
-            chunk_vertex_data.emplace_back(
-                VertexData{.position = DirectX::XMFLOAT3(position_offset.x + voxel_render_size,
-                                                         position_offset.y - voxel_render_size,
-                                                         position_offset.z + voxel_render_size),
-                           .color = DirectX::XMFLOAT3(1.0f, 0.0f, 1.0f)});
+
+            const VertexData v1 = (VertexData{.position = DirectX::XMFLOAT3(position_offset.x - voxel_render_size,
+                                                                            position_offset.y - voxel_render_size,
+                                                                            position_offset.z - voxel_render_size),
+                                              .color = DirectX::XMFLOAT3(0.0f, 0.0f, 0.0f)});
+            const VertexData v2 = (VertexData{.position = DirectX::XMFLOAT3(position_offset.x - voxel_render_size,
+                                                                            position_offset.y + voxel_render_size,
+                                                                            position_offset.z - voxel_render_size),
+                                              .color = DirectX::XMFLOAT3(0.0f, 1.0f, 0.0f)});
+            const VertexData v3 = (VertexData{.position = DirectX::XMFLOAT3(position_offset.x + voxel_render_size,
+                                                                            position_offset.y + voxel_render_size,
+                                                                            position_offset.z - voxel_render_size),
+                                              .color = DirectX::XMFLOAT3(1.0f, 1.0f, 0.0f)});
+            const VertexData v4 = (VertexData{.position = DirectX::XMFLOAT3(position_offset.x + voxel_render_size,
+                                                                            position_offset.y - voxel_render_size,
+                                                                            position_offset.z - voxel_render_size),
+                                              .color = DirectX::XMFLOAT3(1.0f, 0.0f, 0.0f)});
+            const VertexData v5 = (VertexData{.position = DirectX::XMFLOAT3(position_offset.x - voxel_render_size,
+                                                                            position_offset.y - voxel_render_size,
+                                                                            position_offset.z + voxel_render_size),
+                                              .color = DirectX::XMFLOAT3(0.0f, 0.0f, 1.0f)});
+            const VertexData v6 = (VertexData{.position = DirectX::XMFLOAT3(position_offset.x - voxel_render_size,
+                                                                            position_offset.y + voxel_render_size,
+                                                                            position_offset.z + voxel_render_size),
+                                              .color = DirectX::XMFLOAT3(0.0f, 1.0f, 1.0f)});
+            const VertexData v7 = (VertexData{.position = DirectX::XMFLOAT3(position_offset.x + voxel_render_size,
+                                                                            position_offset.y + voxel_render_size,
+                                                                            position_offset.z + voxel_render_size),
+                                              .color = DirectX::XMFLOAT3(1.0f, 1.0f, 1.0f)});
+            const VertexData v8 = (VertexData{.position = DirectX::XMFLOAT3(position_offset.x + voxel_render_size,
+                                                                            position_offset.y - voxel_render_size,
+                                                                            position_offset.z + voxel_render_size),
+                                              .color = DirectX::XMFLOAT3(1.0f, 0.0f, 1.0f)});
+
+            chunk_vertex_data.reserve(chunk_vertex_data.size() + 36);
+
+            chunk_vertex_data.emplace_back(v1);
+            chunk_vertex_data.emplace_back(v2);
+            chunk_vertex_data.emplace_back(v3);
+
+            chunk_vertex_data.emplace_back(v1);
+            chunk_vertex_data.emplace_back(v3);
+            chunk_vertex_data.emplace_back(v4);
+
+            chunk_vertex_data.emplace_back(v5);
+            chunk_vertex_data.emplace_back(v7);
+            chunk_vertex_data.emplace_back(v6);
+
+            chunk_vertex_data.emplace_back(v5);
+            chunk_vertex_data.emplace_back(v8);
+            chunk_vertex_data.emplace_back(v7);
+
+            chunk_vertex_data.emplace_back(v5);
+            chunk_vertex_data.emplace_back(v6);
+            chunk_vertex_data.emplace_back(v2);
+
+            chunk_vertex_data.emplace_back(v5);
+            chunk_vertex_data.emplace_back(v2);
+            chunk_vertex_data.emplace_back(v1);
+
+            chunk_vertex_data.emplace_back(v4);
+            chunk_vertex_data.emplace_back(v3);
+            chunk_vertex_data.emplace_back(v7);
+
+            chunk_vertex_data.emplace_back(v4);
+            chunk_vertex_data.emplace_back(v7);
+            chunk_vertex_data.emplace_back(v8);
+
+            chunk_vertex_data.emplace_back(v2);
+            chunk_vertex_data.emplace_back(v6);
+            chunk_vertex_data.emplace_back(v7);
+
+            chunk_vertex_data.emplace_back(v2);
+            chunk_vertex_data.emplace_back(v7);
+            chunk_vertex_data.emplace_back(v3);
+
+            chunk_vertex_data.emplace_back(v5);
+            chunk_vertex_data.emplace_back(v1);
+            chunk_vertex_data.emplace_back(v4);
+
+            chunk_vertex_data.emplace_back(v5);
+            chunk_vertex_data.emplace_back(v4);
+            chunk_vertex_data.emplace_back(v8);
         }
     };
 
