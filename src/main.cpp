@@ -7,14 +7,28 @@
 
 #include "camera.hpp"
 
+#include "voxel.hpp"
+
+// Helper function for indexing.
+static inline DirectX::XMUINT3 convert_index_to_3d(u64 index)
+{
+    // Note that index = x + y * N + z * N * N;
+    const u32 z = index / (Chunk::number_of_voxels_per_dimension * Chunk::number_of_voxels_per_dimension);
+    const u32 index_2d = index - z * (Chunk::number_of_voxels_per_dimension * Chunk::number_of_voxels_per_dimension);
+    const u32 y = index_2d / Chunk::number_of_voxels_per_dimension;
+    const u32 x = index_2d % Chunk::number_of_voxels_per_dimension;
+
+    return DirectX::XMUINT3{x, y, z};
+}
+
 struct Buffer
 {
     Microsoft::WRL::ComPtr<ID3D12Resource> buffer{};
     u8 *buffer_ptr{};
 };
 
-// Static buffer : contents set once cannot be reset, the resource is in fast GPU only accesible memory.
-// Dynamic buffer (a hlsl constant buffer) : Placed in memory accesible by both CPU and GPU.
+// Static buffer : contents set once cannot be updated, the resource is in fast GPU only accesible memory.
+// Dynamic buffer (a constant buffer) : Placed in memory accesible by both CPU and GPU.
 enum class BufferTypes : u8
 {
     Static,
@@ -26,8 +40,7 @@ enum class BufferTypes : u8
 static std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> intermediate_buffers{};
 
 // Helper function to create buffer. If buffer contains data, the upload operation (and GPU flush) must be done after
-// function invocation .
-
+// function invocation.
 static Buffer create_buffer(ID3D12Device *const device, ID3D12GraphicsCommandList *const command_list, const void *data,
                             const u32 buffer_size, const BufferTypes buffer_type)
 {
@@ -323,40 +336,90 @@ int main()
     };
 
     // Vertex buffer setup.
-    struct VertexBuffer
+    struct VertexData
     {
         DirectX::XMFLOAT3 position{};
         DirectX::XMFLOAT3 color{};
     };
 
-    constexpr VertexBuffer vertex_buffer_data[8] = {
-        VertexBuffer{.position = DirectX::XMFLOAT3(-1.0f, -1.0f, -1.0f),
-                     .color = DirectX::XMFLOAT3(0.0f, 0.0f, 0.0f)}, // 0
-        VertexBuffer{.position = DirectX::XMFLOAT3(-1.0f, 1.0f, -1.0f),
-                     .color = DirectX::XMFLOAT3(0.0f, 1.0f, 0.0f)}, // 1
-        VertexBuffer{.position = DirectX::XMFLOAT3(1.0f, 1.0f, -1.0f),
-                     .color = DirectX::XMFLOAT3(1.0f, 1.0f, 0.0f)}, // 2
-        VertexBuffer{.position = DirectX::XMFLOAT3(1.0f, -1.0f, -1.0f),
-                     .color = DirectX::XMFLOAT3(1.0f, 0.0f, 0.0f)}, // 3
-        VertexBuffer{.position = DirectX::XMFLOAT3(-1.0f, -1.0f, 1.0f),
-                     .color = DirectX::XMFLOAT3(0.0f, 0.0f, 1.0f)}, // 4
-        VertexBuffer{.position = DirectX::XMFLOAT3(-1.0f, 1.0f, 1.0f),
-                     .color = DirectX::XMFLOAT3(0.0f, 1.0f, 1.0f)}, // 5
-        VertexBuffer{.position = DirectX::XMFLOAT3(1.0f, 1.0f, 1.0f),
-                     .color = DirectX::XMFLOAT3(1.0f, 1.0f, 1.0f)}, // 6
-        VertexBuffer{.position = DirectX::XMFLOAT3(1.0f, -1.0f, 1.0f),
-                     .color = DirectX::XMFLOAT3(1.0f, 0.0f, 1.0f)} // 7
+    static constexpr float voxel_cube_dimension = 0.25f;
+
+    // Note : Each chunk has its own vertex buffer.
+    // The renderer has an array of vertex buffers to simply the process of rendering.
+    std::vector<VertexData> chunk_vertex_data{};
+    Chunk chunk{};
+
+    // Set voxels in chunk to active (true / false) here.
+    for (u64 i = 0; i < Chunk::number_of_voxels_per_dimension * Chunk::number_of_voxels_per_dimension *
+                            Chunk::number_of_voxels_per_dimension;
+         i++)
+    {
+    }
+
+    // Loop over chunks here...
+    for (u64 i = 0; i < Chunk::number_of_voxels_per_dimension * Chunk::number_of_voxels_per_dimension *
+                            Chunk::number_of_voxels_per_dimension;
+         i++)
+    {
+        // Vertex buffer construction.
+        const DirectX::XMUINT3 index = convert_index_to_3d(i);
+        printf("%u %u %u\n", index.x, index.y, index.z);
+        if (chunk.cubes[i].active)
+        {
+            const DirectX::XMFLOAT3 position_offset = DirectX::XMFLOAT3{(float)index.x, (float)index.y, (float)index.z};
+            const float voxel_render_size = voxel_cube_dimension * 0.5f;
+            chunk_vertex_data.emplace_back(
+                VertexData{.position = DirectX::XMFLOAT3(position_offset.x - voxel_render_size,
+                                                         position_offset.y - voxel_render_size,
+                                                         position_offset.z - voxel_render_size),
+                           .color = DirectX::XMFLOAT3(0.0f, 0.0f, 0.0f)});
+            chunk_vertex_data.emplace_back(
+                VertexData{.position = DirectX::XMFLOAT3(position_offset.x - voxel_render_size,
+                                                         position_offset.y + voxel_render_size,
+                                                         position_offset.z - voxel_render_size),
+                           .color = DirectX::XMFLOAT3(0.0f, 1.0f, 0.0f)});
+            chunk_vertex_data.emplace_back(
+                VertexData{.position = DirectX::XMFLOAT3(position_offset.x + voxel_render_size,
+                                                         position_offset.y + voxel_render_size,
+                                                         position_offset.z - voxel_render_size),
+                           .color = DirectX::XMFLOAT3(1.0f, 1.0f, 0.0f)});
+            chunk_vertex_data.emplace_back(
+                VertexData{.position = DirectX::XMFLOAT3(position_offset.x + voxel_render_size,
+                                                         position_offset.y - voxel_render_size,
+                                                         position_offset.z - voxel_render_size),
+                           .color = DirectX::XMFLOAT3(1.0f, 0.0f, 0.0f)});
+            chunk_vertex_data.emplace_back(
+                VertexData{.position = DirectX::XMFLOAT3(position_offset.x - voxel_render_size,
+                                                         position_offset.y - voxel_render_size,
+                                                         position_offset.z + voxel_render_size),
+                           .color = DirectX::XMFLOAT3(0.0f, 0.0f, 1.0f)});
+            chunk_vertex_data.emplace_back(
+                VertexData{.position = DirectX::XMFLOAT3(position_offset.x - voxel_render_size,
+                                                         position_offset.y + voxel_render_size,
+                                                         position_offset.z + voxel_render_size),
+                           .color = DirectX::XMFLOAT3(0.0f, 1.0f, 1.0f)});
+            chunk_vertex_data.emplace_back(
+                VertexData{.position = DirectX::XMFLOAT3(position_offset.x + voxel_render_size,
+                                                         position_offset.y + voxel_render_size,
+                                                         position_offset.z + voxel_render_size),
+                           .color = DirectX::XMFLOAT3(1.0f, 1.0f, 1.0f)});
+            chunk_vertex_data.emplace_back(
+                VertexData{.position = DirectX::XMFLOAT3(position_offset.x + voxel_render_size,
+                                                         position_offset.y - voxel_render_size,
+                                                         position_offset.z + voxel_render_size),
+                           .color = DirectX::XMFLOAT3(1.0f, 0.0f, 1.0f)});
+        }
     };
 
-    Buffer vertex_buffer = create_buffer(device.Get(), command_list.Get(), (void *)&vertex_buffer_data,
-                                         sizeof(VertexBuffer) * 8u, BufferTypes::Static);
+    Buffer vertex_buffer = create_buffer(device.Get(), command_list.Get(), (void *)chunk_vertex_data.data(),
+                                         sizeof(VertexData) * chunk_vertex_data.size(), BufferTypes::Static);
     D3D12_VERTEX_BUFFER_VIEW vertex_buffer_view{};
 
     // Create the vertex buffer view.
     vertex_buffer_view = {
         .BufferLocation = vertex_buffer.buffer->GetGPUVirtualAddress(),
-        .SizeInBytes = sizeof(VertexBuffer) * 8u,
-        .StrideInBytes = sizeof(VertexBuffer),
+        .SizeInBytes = (u32)(sizeof(VertexData) * chunk_vertex_data.size()),
+        .StrideInBytes = sizeof(VertexData),
     };
 
     // Create a constant buffer for simple linear algebra tests.
@@ -378,45 +441,6 @@ int main()
         cbv_srv_uav_descriptor_heap.get_cpu_descriptor_handle_at_index(0u);
 
     device->CreateConstantBufferView(&cbv_desc, constant_buffer_descriptor_handle);
-
-    // Create a constant buffer that is a array of matrices. Each matrix is the transform matrix for each instance
-    // matrix.
-    static constexpr u32 number_of_voxels_per_dimension = 8u;
-    struct alignas(256) InstanceTransformBuffer
-    {
-        DirectX::XMMATRIX transform_matrix[number_of_voxels_per_dimension * number_of_voxels_per_dimension *
-                                           number_of_voxels_per_dimension];
-    };
-
-    InstanceTransformBuffer instance_transform_buffer_data = {};
-    for (u32 i = 0; i < number_of_voxels_per_dimension; i++)
-    {
-        for (u32 j = 0; j < number_of_voxels_per_dimension; j++)
-        {
-            for (u32 k = 0; k < number_of_voxels_per_dimension; k++)
-            {
-                // Note : The dimension of each voxel cube is 1. Thats why for translation, i, j, k is multiplied by 2.
-                instance_transform_buffer_data
-                    .transform_matrix[i * number_of_voxels_per_dimension * number_of_voxels_per_dimension +
-                                      j * number_of_voxels_per_dimension + k] =
-                    DirectX::XMMatrixTranslation(i * 2, j * 2, k * 2);
-            }
-        }
-    }
-
-    Buffer instance_transform_buffer =
-        create_buffer(device.Get(), command_list.Get(), nullptr, sizeof(InstanceTransformBuffer), BufferTypes::Dynamic);
-
-    // Create constant buffer.
-    const D3D12_CONSTANT_BUFFER_VIEW_DESC instance_transform_buffer_view_desc = {
-        .BufferLocation = instance_transform_buffer.buffer->GetGPUVirtualAddress(),
-        .SizeInBytes = sizeof(InstanceTransformBuffer),
-    };
-
-    D3D12_CPU_DESCRIPTOR_HANDLE instance_transform_buffer_descriptor_handle =
-        cbv_srv_uav_descriptor_heap.get_cpu_descriptor_handle_at_index(1);
-
-    device->CreateConstantBufferView(&instance_transform_buffer_view_desc, instance_transform_buffer_descriptor_handle);
 
     // Create the depth stencil buffer.
     Microsoft::WRL::ComPtr<ID3D12Resource> depth_resource{};
@@ -476,7 +500,7 @@ int main()
     Microsoft::WRL::ComPtr<ID3DBlob> root_signature_blob{};
     Microsoft::WRL::ComPtr<ID3D12RootSignature> root_signature{};
 
-    D3D12_ROOT_PARAMETER1 root_parameters[2] = {
+    D3D12_ROOT_PARAMETER1 root_parameters[1] = {
         // For view projection matrix.
         D3D12_ROOT_PARAMETER1{
             .ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV,
@@ -488,24 +512,13 @@ int main()
                 },
             .ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX,
         },
-        // For instance transform buffer.
-        D3D12_ROOT_PARAMETER1{
-            .ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV,
-            .Descriptor =
-                D3D12_ROOT_DESCRIPTOR1{
-                    .ShaderRegister = 1u,
-                    .RegisterSpace = 0u,
-                    .Flags = D3D12_ROOT_DESCRIPTOR_FLAG_NONE,
-                },
-            .ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX,
-        },
     };
 
     const D3D12_VERSIONED_ROOT_SIGNATURE_DESC root_signature_desc = {
         .Version = D3D_ROOT_SIGNATURE_VERSION_1_1,
         .Desc_1_1 =
             {
-                .NumParameters = 2u,
+                .NumParameters = 1u,
                 .pParameters = root_parameters,
                 .NumStaticSamplers = 0u,
                 .pStaticSamplers = nullptr,
@@ -700,7 +713,6 @@ int main()
             .matrix = view_projection_matrix,
         };
         memcpy(constant_buffer.buffer_ptr, &buffer, sizeof(ConstantBuffer));
-        memcpy(instance_transform_buffer.buffer_ptr, &instance_transform_buffer_data, sizeof(InstanceTransformBuffer));
 
         // Main render loop.
 
@@ -750,14 +762,11 @@ int main()
                                          FALSE, &dsv_cpu_handle);
 
         command_list->SetGraphicsRootConstantBufferView(0u, constant_buffer.buffer->GetGPUVirtualAddress());
-        command_list->SetGraphicsRootConstantBufferView(1u, instance_transform_buffer.buffer->GetGPUVirtualAddress());
 
         command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         command_list->IASetIndexBuffer(&index_buffer_view);
         command_list->IASetVertexBuffers(0u, 1u, &vertex_buffer_view);
-        command_list->DrawIndexedInstanced(
-            36u, number_of_voxels_per_dimension * number_of_voxels_per_dimension * number_of_voxels_per_dimension, 0u,
-            0u, 0u);
+        command_list->DrawInstanced(chunk_vertex_data.size(), 1u, 0u, 0u);
 
         // Now, transition back to presentation mode.
         const D3D12_RESOURCE_BARRIER render_target_to_presentation_barrier = {
