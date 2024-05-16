@@ -16,9 +16,9 @@ static inline DirectX::XMUINT3 convert_index_to_3d(const u64 index, const u32 N)
 {
     // Note that index = x + y * N + z * N * N;
     const u32 z = index / (N * N);
-    const u32 index_2d = index - z * N * N;
-    const u32 y = index_2d / N;
-    const u32 x = index_2d % N;
+    const u32 index_2d = index - z * N * N
+    const u32 y = index_2d / Chunk::number_of_voxels_per_dimension;
+    const u32 x = index_2d % Chunk::number_of_voxels_per_dimension;
 
     return DirectX::XMUINT3{x, y, z};
 }
@@ -47,7 +47,7 @@ int main()
 
     // Note : Each chunk has its own vertex buffer and transform buffer.
     // The renderer has an array of vertex buffers to simply the process of rendering.
-    static constexpr u32 number_of_chunks_per_dimension = 2u;
+    static constexpr u32 number_of_chunks_per_dimension = 4u;
     static constexpr u64 number_of_chunks =
         number_of_chunks_per_dimension * number_of_chunks_per_dimension * number_of_chunks_per_dimension;
 
@@ -60,14 +60,14 @@ int main()
 
     for (u32 chunk_index = 0; chunk_index < number_of_chunks; chunk_index++)
     {
-        DirectX::XMFLOAT3 chunk_color =
-            DirectX::XMFLOAT3(rand() / double(RAND_MAX), rand() / double(RAND_MAX), rand() / double(RAND_MAX));
-
         std::vector<VertexData> chunk_vertex_data{};
         for (u64 i = 0; i < Chunk::number_of_voxels_per_dimension * Chunk::number_of_voxels_per_dimension *
                                 Chunk::number_of_voxels_per_dimension;
              i++)
         {
+            DirectX::XMFLOAT3 chunk_color =
+                DirectX::XMFLOAT3(rand() / double(RAND_MAX), rand() / double(RAND_MAX), rand() / double(RAND_MAX));
+
             // Vertex buffer construction.
             const DirectX::XMUINT3 index = convert_index_to_3d(i, Chunk::number_of_voxels_per_dimension);
             if (chunks[chunk_index].cubes[i].active)
@@ -203,19 +203,15 @@ int main()
     Buffer chunk_constant_buffers[number_of_chunks];
     for (u32 i = 0; i < number_of_chunks; i++)
     {
-        const DirectX::XMUINT3 index_3d = convert_index_to_3d(i, number_of_chunks_per_dimension);
-
+        const DirectX::XMUINT3 index_3d = convert_index_to_3d(i);
         chunk_constant_buffers[i] =
             renderer.create_buffer(nullptr, sizeof(ChunkConstantBuffer), BufferTypes::Dynamic).buffer;
         renderer.create_constant_buffer_view(chunk_constant_buffers[i], sizeof(ChunkConstantBuffer));
 
         ChunkConstantBuffer chunk_constant_buffer_data = {
-            .transform_buffer =
-                DirectX::XMMatrixTranslation(index_3d.x * Chunk::number_of_voxels_per_dimension * voxel_cube_dimension,
-                                             index_3d.y * Chunk::number_of_voxels_per_dimension * voxel_cube_dimension,
-                                             index_3d.z * Chunk::number_of_voxels_per_dimension * voxel_cube_dimension),
-        };
-
+            .transform_buffer = DirectX::XMMatrixTranslation(
+                i * Chunk::number_of_voxels_per_dimension * voxel_cube_dimension, 0.0f, 0.0f)};
+        ;
         memcpy(chunk_constant_buffers[i].buffer_ptr, &chunk_constant_buffer_data, sizeof(ChunkConstantBuffer));
     }
 

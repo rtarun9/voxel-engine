@@ -10,15 +10,20 @@ struct VSInput
     float3 color : COLOR;
 };
 
-cbuffer TransformBufferCBuffer : register(b0)
+cbuffer SceneConstantBuffer : register(b0)
 {
-    row_major float4x4 transform_buffer;
+    row_major float4x4 view_projection_matrix;
+};
+
+cbuffer ChunkTransformConstantBuffer : register(b1)
+{
+    row_major float4x4 transform_matrix;
 };
 
 VSOutput vs_main(VSInput input)
 {
     VSOutput output;
-    output.position = mul(float4(input.position, 1.0f), transform_buffer);
+    output.position = mul(mul(float4(input.position, 1.0f), transform_matrix), view_projection_matrix);
 
     output.color = float4(input.color, 1.0f);
     
