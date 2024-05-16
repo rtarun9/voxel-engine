@@ -55,7 +55,7 @@ DirectX::XMMATRIX Camera::update_and_get_view_matrix(const float delta_time)
     camera_front = DirectX::XMVector3Normalize(DirectX::XMVector3Transform(world_front, rotation_matrix));
     camera_up_direction = DirectX::XMVector3Normalize(DirectX::XMVector3Transform(world_up, rotation_matrix));
 
-    // Setup of simple view projection matrix.
+    // Setup of simple view matrix.
     return DirectX::XMMatrixLookAtLH(camera_position, DirectX::XMVectorAdd(camera_position, camera_front),
                                      camera_up_direction);
 }

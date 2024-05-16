@@ -1,5 +1,6 @@
 #include "pch.hpp"
 
+#include "renderer.hpp"
 #include "types.hpp"
 #include "window.hpp"
 
@@ -10,7 +11,7 @@
 #include "voxel.hpp"
 
 // Helper function for indexing.
-static inline DirectX::XMUINT3 convert_index_to_3d(u64 index)
+static inline DirectX::XMUINT3 convert_index_to_3d(const u64 index)
 {
     // Note that index = x + y * N + z * N * N;
     const u32 z = index / (Chunk::number_of_voxels_per_dimension * Chunk::number_of_voxels_per_dimension);
@@ -21,319 +22,18 @@ static inline DirectX::XMUINT3 convert_index_to_3d(u64 index)
     return DirectX::XMUINT3{x, y, z};
 }
 
-struct Buffer
-{
-    Microsoft::WRL::ComPtr<ID3D12Resource> buffer{};
-    u8 *buffer_ptr{};
-};
-
-// Static buffer : contents set once cannot be updated, the resource is in fast GPU only accesible memory.
-// Dynamic buffer (a constant buffer) : Placed in memory accesible by both CPU and GPU.
-enum class BufferTypes : u8
-{
-    Static,
-    Dynamic,
-};
-
-// Note that since intermediate buffer resources need to be in memory until the command list recorded operations are
-// executed, they are stored in a temporary vector that is cleared when intermediate buffers are no longer required.
-static std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> intermediate_buffers{};
-
-// Helper function to create buffer. If buffer contains data, the upload operation (and GPU flush) must be done after
-// function invocation.
-static Buffer create_buffer(ID3D12Device *const device, ID3D12GraphicsCommandList *const command_list, const void *data,
-                            const u32 buffer_size, const BufferTypes buffer_type)
-{
-    Buffer buffer{};
-
-    // First, create a upload buffer (that is placed in memory accesible by both GPU and CPU).
-    // If the buffer type is constant buffer, this IS the final buffer.
-    const D3D12_HEAP_PROPERTIES upload_heap_properties = {
-        .Type = D3D12_HEAP_TYPE_UPLOAD,
-        .CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
-        .MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN,
-        .CreationNodeMask = 0u,
-        .VisibleNodeMask = 0u,
-    };
-
-    const D3D12_RESOURCE_DESC buffer_resource_desc = {
-        .Dimension = D3D12_RESOURCE_DIMENSION_BUFFER,
-        .Width = buffer_size,
-        .Height = 1u,
-        .DepthOrArraySize = 1u,
-        .MipLevels = 1u,
-        .Format = DXGI_FORMAT_UNKNOWN,
-        .SampleDesc = {1u, 0u},
-        .Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
-        .Flags = D3D12_RESOURCE_FLAG_NONE,
-    };
-
-    Microsoft::WRL::ComPtr<ID3D12Resource> intermediate_buffer{};
-    throw_if_failed(device->CreateCommittedResource(
-        &upload_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES, &buffer_resource_desc,
-        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, nullptr, IID_PPV_ARGS(&intermediate_buffer)));
-
-    // Now that a resource is created, copy CPU data to this upload buffer.
-    const D3D12_RANGE read_range{.Begin = 0u, .End = 0u};
-
-    throw_if_failed(intermediate_buffer->Map(0u, &read_range, (void **)&buffer.buffer_ptr));
-
-    if (data != nullptr)
-    {
-        memcpy(buffer.buffer_ptr, data, buffer_size);
-    }
-
-    if (buffer_type == BufferTypes::Dynamic)
-    {
-        buffer.buffer = intermediate_buffer;
-        return buffer;
-    }
-
-    // Create the final resource and transfer the data from upload buffer to the final buffer.
-    // The heap type is : Default (no CPU access).
-    const D3D12_HEAP_PROPERTIES default_heap_properties = {
-        .Type = D3D12_HEAP_TYPE_DEFAULT,
-        .CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
-        .MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN,
-        .CreationNodeMask = 0u,
-        .VisibleNodeMask = 0u,
-    };
-
-    throw_if_failed(device->CreateCommittedResource(
-        &default_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES, &buffer_resource_desc,
-        D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&buffer.buffer)));
-
-    command_list->CopyResource(buffer.buffer.Get(), intermediate_buffer.Get());
-
-    intermediate_buffers.emplace_back(intermediate_buffer);
-
-    return buffer;
-}
-
-// A simple descriptor heap abstraction.
-// Provides simple methods to offset current descriptor to make creation of resources easier.
-// note(rtarun9) : Should the descriptor handle for heap start be stored in the struct?
-struct DescriptorHeap
-{
-    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> descriptor_heap{};
-    D3D12_CPU_DESCRIPTOR_HANDLE current_cpu_descriptor_handle{};
-    D3D12_GPU_DESCRIPTOR_HANDLE current_gpu_descriptor_handle{};
-    u32 descriptor_handle_size{};
-
-    D3D12_GPU_DESCRIPTOR_HANDLE get_gpu_descriptor_handle_at_index(const u32 index) const
-    {
-        D3D12_GPU_DESCRIPTOR_HANDLE handle = descriptor_heap->GetGPUDescriptorHandleForHeapStart();
-        handle.ptr += static_cast<u64>(index) * descriptor_handle_size;
-
-        return handle;
-    }
-
-    D3D12_CPU_DESCRIPTOR_HANDLE get_cpu_descriptor_handle_at_index(const u32 index) const
-    {
-        D3D12_CPU_DESCRIPTOR_HANDLE handle = descriptor_heap->GetCPUDescriptorHandleForHeapStart();
-        handle.ptr += static_cast<u64>(index) * descriptor_handle_size;
-
-        return handle;
-    }
-
-    void offset()
-    {
-        current_cpu_descriptor_handle.ptr += descriptor_handle_size;
-        current_gpu_descriptor_handle.ptr += descriptor_handle_size;
-    }
-
-    DescriptorHeap(ID3D12Device *const device, const u32 num_descriptors,
-                   const D3D12_DESCRIPTOR_HEAP_TYPE descriptor_heap_type,
-                   const D3D12_DESCRIPTOR_HEAP_FLAGS descriptor_heap_flags)
-    {
-        const D3D12_DESCRIPTOR_HEAP_DESC descriptor_heap_desc = {
-            .Type = descriptor_heap_type,
-            .NumDescriptors = num_descriptors,
-            .Flags = descriptor_heap_flags,
-            .NodeMask = 0u,
-
-        };
-
-        throw_if_failed(device->CreateDescriptorHeap(&descriptor_heap_desc, IID_PPV_ARGS(&descriptor_heap)));
-
-        current_cpu_descriptor_handle = descriptor_heap->GetCPUDescriptorHandleForHeapStart();
-
-        if (descriptor_heap_flags == D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE)
-        {
-            current_gpu_descriptor_handle = descriptor_heap->GetGPUDescriptorHandleForHeapStart();
-        }
-
-        descriptor_handle_size = device->GetDescriptorHandleIncrementSize(descriptor_heap_type);
-    }
-};
-
 int main()
 {
-    intermediate_buffers.reserve(50);
-
     const Window window(1080u, 720u);
+    Renderer renderer(window.m_handle, window.m_width, window.m_height);
 
-    // Enable the debug layer in debug mode.
-    Microsoft::WRL::ComPtr<ID3D12Debug> debug{};
-
-    if constexpr (VX_DEBUG_MODE)
-    {
-        throw_if_failed(D3D12GetDebugInterface(IID_PPV_ARGS(&debug)));
-        debug->EnableDebugLayer();
-    }
-
-    // Create the DXGI Factory so we get access to DXGI objects (like adapters).
-    u32 dxgi_factory_creation_flags = 0u;
-
-    if constexpr (VX_DEBUG_MODE)
-    {
-        dxgi_factory_creation_flags = DXGI_CREATE_FACTORY_DEBUG;
-    }
-
-    Microsoft::WRL::ComPtr<IDXGIFactory6> dxgi_factory{};
-    throw_if_failed(CreateDXGIFactory2(dxgi_factory_creation_flags, IID_PPV_ARGS(&dxgi_factory)));
-
-    // Get the adapter with best performance. Print the selected adapter's details to console.
-    Microsoft::WRL::ComPtr<IDXGIAdapter4> dxgi_adapter{};
-    throw_if_failed(dxgi_factory->EnumAdapterByGpuPreference(0u, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE,
-                                                             IID_PPV_ARGS(&dxgi_adapter)));
-
-    DXGI_ADAPTER_DESC adapter_desc{};
-    throw_if_failed(dxgi_adapter->GetDesc(&adapter_desc));
-    printf("Selected adapter desc :: %ls.\n", adapter_desc.Description);
-
-    // Create the d3d12 device (logical adapter : All d3d objects require d3d12 device for creation).
-    Microsoft::WRL::ComPtr<ID3D12Device2> device{};
-    throw_if_failed(D3D12CreateDevice(dxgi_adapter.Get(), D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&device)));
-
-    // In debug mode, setup the info queue so breakpoint is placed whenever a error / warning occurs that is d3d
-    // related.
-    Microsoft::WRL::ComPtr<ID3D12InfoQueue> info_queue{};
-    if constexpr (VX_DEBUG_MODE)
-    {
-        throw_if_failed(device.As(&info_queue));
-
-        throw_if_failed(info_queue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_CORRUPTION, TRUE));
-        throw_if_failed(info_queue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_ERROR, TRUE));
-        throw_if_failed(info_queue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_WARNING, TRUE));
-    }
-
-    // Setup the direct command queue.
-    Microsoft::WRL::ComPtr<ID3D12CommandQueue> direct_command_queue{};
-    const D3D12_COMMAND_QUEUE_DESC direct_command_queue_desc = {
-        .Type = D3D12_COMMAND_LIST_TYPE_DIRECT,
-        .Priority = D3D12_COMMAND_QUEUE_PRIORITY_NORMAL,
-        .Flags = D3D12_COMMAND_QUEUE_FLAG_NONE,
-        .NodeMask = 0u,
-    };
-    throw_if_failed(device->CreateCommandQueue(&direct_command_queue_desc, IID_PPV_ARGS(&direct_command_queue)));
-
-    // Create the dxgi swapchain.
-    constexpr u8 number_of_backbuffers = 2u;
-
-    Microsoft::WRL::ComPtr<IDXGISwapChain3> swapchain{};
-    {
-        Microsoft::WRL::ComPtr<IDXGISwapChain1> swapchain_1{};
-        const DXGI_SWAP_CHAIN_DESC1 swapchain_desc = {
-            .Width = window.m_width,
-            .Height = window.m_height,
-            .Format = DXGI_FORMAT_R10G10B10A2_UNORM,
-            .Stereo = FALSE,
-            .SampleDesc = {1, 0},
-            .BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT,
-            .BufferCount = number_of_backbuffers,
-            .Scaling = DXGI_SCALING_NONE,
-            .SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD,
-            .AlphaMode = DXGI_ALPHA_MODE_IGNORE,
-            .Flags = 0u,
-        };
-        throw_if_failed(dxgi_factory->CreateSwapChainForHwnd(direct_command_queue.Get(), window.m_handle,
-                                                             &swapchain_desc, nullptr, nullptr, &swapchain_1));
-
-        throw_if_failed(swapchain_1.As(&swapchain));
-    }
-
-    // Create a descriptor heaps.
-    DescriptorHeap cbv_srv_uav_descriptor_heap = DescriptorHeap(
-        device.Get(), 10u, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
-
-    DescriptorHeap rtv_descriptor_heap =
-        DescriptorHeap(device.Get(), 10u, D3D12_DESCRIPTOR_HEAP_TYPE_RTV, D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
-
-    DescriptorHeap dsv_descriptor_heap =
-        DescriptorHeap(device.Get(), 1u, D3D12_DESCRIPTOR_HEAP_TYPE_DSV, D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
-
-    // Create the render target view for the swapchain back buffer.
-    Microsoft::WRL::ComPtr<ID3D12Resource> swapchain_backbuffer_resources[number_of_backbuffers] = {};
-    D3D12_CPU_DESCRIPTOR_HANDLE swapchain_backbuffer_cpu_descriptor_handles[number_of_backbuffers] = {};
-
-    for (u8 i = 0; i < number_of_backbuffers; i++)
-    {
-        throw_if_failed(swapchain->GetBuffer(i, IID_PPV_ARGS(&(swapchain_backbuffer_resources[i]))));
-        swapchain_backbuffer_cpu_descriptor_handles[i] = rtv_descriptor_heap.get_cpu_descriptor_handle_at_index(i);
-
-        device->CreateRenderTargetView(swapchain_backbuffer_resources[i].Get(), nullptr,
-                                       swapchain_backbuffer_cpu_descriptor_handles[i]);
-    }
-
-    // Create the command allocator (the underlying allocation where gpu commands will be stored after being
-    // recorded by command list). Each frame has its own command allocator.
-    Microsoft::WRL::ComPtr<ID3D12CommandAllocator> direct_command_allocators[number_of_backbuffers] = {};
-    for (u8 i = 0; i < number_of_backbuffers; i++)
-    {
-        throw_if_failed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,
-                                                       IID_PPV_ARGS(&direct_command_allocators[i])));
-    }
-
-    // Create the graphics command list.
-    Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> command_list{};
-    throw_if_failed(device->CreateCommandList(0u, D3D12_COMMAND_LIST_TYPE_DIRECT, direct_command_allocators[0].Get(),
-                                              nullptr, IID_PPV_ARGS(&command_list)));
-
-    // Create a fence for CPU GPU synchronization.
-    Microsoft::WRL::ComPtr<ID3D12Fence> fence{};
-    throw_if_failed(device->CreateFence(0u, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence)));
-
-    // The monotonically increasing fence value.
-    u64 monotonic_fence_value = 0u;
-
-    // The per frame fence values (used to determine if rendering of previous frame is completed).
-    u64 frame_fence_values[2] = {};
-
-    u8 swapchain_backbuffer_index = swapchain->GetCurrentBackBufferIndex();
-
-    // Helper functions related to GPU - CPU synchronization.
-
-    // Wait for GPU to reach a specified value.
-    const auto wait_for_fence_value = [&](const u64 fence_value_to_wait_for) {
-        if (fence->GetCompletedValue() >= fence_value_to_wait_for)
-        {
-            return;
-        }
-        else
-        {
-            throw_if_failed(fence->SetEventOnCompletion(fence_value_to_wait_for, nullptr));
-        }
-    };
-
-    // Signal the command queue with a specified value.
-    const auto signal_fence = [&](const u64 fence_value_to_signal) {
-        throw_if_failed(direct_command_queue->Signal(fence.Get(), fence_value_to_signal));
-    };
+    // A vector of intermediate resources (required since intermediate buffers need to be in memory until the copy
+    // resource and other functions are executed).
+    // This vector MUST be erased once GPU resource uploading is completed.
+    std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> intermediate_resources{};
+    intermediate_resources.reserve(50);
 
     // Create the resources required for rendering.
-    // Index buffer setup.
-    constexpr u16 index_buffer_data[36] = {0, 1, 2, 0, 2, 3, 4, 6, 5, 4, 7, 6, 4, 5, 1, 4, 1, 0,
-                                           3, 2, 6, 3, 6, 7, 1, 5, 6, 1, 6, 2, 4, 0, 3, 4, 3, 7};
-    Buffer index_buffer = create_buffer(device.Get(), command_list.Get(), (void *)&index_buffer_data, sizeof(u16) * 36u,
-                                        BufferTypes::Static);
-    // Create the index buffer view.
-    const D3D12_INDEX_BUFFER_VIEW index_buffer_view = {
-
-        .BufferLocation = index_buffer.buffer->GetGPUVirtualAddress(),
-        .SizeInBytes = sizeof(u16) * 36u,
-        .Format = DXGI_FORMAT_R16_UINT,
-    };
 
     // Vertex buffer setup.
     struct VertexData
@@ -455,40 +155,39 @@ int main()
         }
     };
 
-    Buffer vertex_buffer = create_buffer(device.Get(), command_list.Get(), (void *)chunk_vertex_data.data(),
-                                         sizeof(VertexData) * chunk_vertex_data.size(), BufferTypes::Static);
-    D3D12_VERTEX_BUFFER_VIEW vertex_buffer_view{};
+    Renderer::BufferPair vertex_buffer_pair = renderer.create_buffer(
+        (void *)chunk_vertex_data.data(), sizeof(VertexData) * chunk_vertex_data.size(), BufferTypes::Static);
+
+    intermediate_resources.emplace_back(vertex_buffer_pair.intermediate_buffer.buffer);
+    Buffer vertex_buffer = vertex_buffer_pair.buffer;
 
     // Create the vertex buffer view.
-    vertex_buffer_view = {
+    D3D12_VERTEX_BUFFER_VIEW vertex_buffer_view = {
         .BufferLocation = vertex_buffer.buffer->GetGPUVirtualAddress(),
         .SizeInBytes = (u32)(sizeof(VertexData) * chunk_vertex_data.size()),
         .StrideInBytes = sizeof(VertexData),
     };
 
-    // Create a constant buffer for simple linear algebra tests.
-    struct alignas(256) ConstantBuffer
+    // Create a 'scene' constant buffer for simple linear algebra tests.
+    struct alignas(256) SceneConstantBuffer
     {
-        DirectX::XMMATRIX matrix{};
+        DirectX::XMMATRIX view_projection_matrix{};
     };
 
-    Buffer constant_buffer =
-        create_buffer(device.Get(), command_list.Get(), nullptr, sizeof(ConstantBuffer), BufferTypes::Dynamic);
+    Buffer scene_constant_buffer =
+        renderer.create_buffer(nullptr, sizeof(SceneConstantBuffer), BufferTypes::Dynamic).buffer;
 
-    // Create the constant buffer descriptor.
-    const D3D12_CONSTANT_BUFFER_VIEW_DESC cbv_desc = {
-        .BufferLocation = constant_buffer.buffer->GetGPUVirtualAddress(),
-        .SizeInBytes = sizeof(ConstantBuffer),
-    };
-
-    D3D12_CPU_DESCRIPTOR_HANDLE constant_buffer_descriptor_handle =
-        cbv_srv_uav_descriptor_heap.get_cpu_descriptor_handle_at_index(0u);
-
-    device->CreateConstantBufferView(&cbv_desc, constant_buffer_descriptor_handle);
+    // Create the scene constant buffer descriptor.
+    const D3D12_CPU_DESCRIPTOR_HANDLE scene_constant_buffer_descriptor_handle =
+        renderer.create_constant_buffer_view(scene_constant_buffer, sizeof(SceneConstantBuffer));
+    (void)scene_constant_buffer_descriptor_handle;
 
     // Create the depth stencil buffer.
+    // This process is not abstracted because depth resource will not be created multiple times.
+    // If in future this happens, a create_xyz function will be created in renderer.
     Microsoft::WRL::ComPtr<ID3D12Resource> depth_resource{};
-    D3D12_CPU_DESCRIPTOR_HANDLE dsv_cpu_handle = dsv_descriptor_heap.current_cpu_descriptor_handle;
+    D3D12_CPU_DESCRIPTOR_HANDLE dsv_cpu_handle = renderer.dsv_descriptor_heap.current_cpu_descriptor_handle;
+    renderer.dsv_descriptor_heap.offset();
     {
         const D3D12_RESOURCE_DESC ds_resource_desc = {
             .Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D,
@@ -523,9 +222,9 @@ int main()
                 },
         };
 
-        throw_if_failed(device->CreateCommittedResource(&default_heap_properties, D3D12_HEAP_FLAG_NONE,
-                                                        &ds_resource_desc, D3D12_RESOURCE_STATE_DEPTH_WRITE,
-                                                        &optimized_ds_clear_value, IID_PPV_ARGS(&depth_resource)));
+        throw_if_failed(renderer.device->CreateCommittedResource(
+            &default_heap_properties, D3D12_HEAP_FLAG_NONE, &ds_resource_desc, D3D12_RESOURCE_STATE_DEPTH_WRITE,
+            &optimized_ds_clear_value, IID_PPV_ARGS(&depth_resource)));
 
         const D3D12_DEPTH_STENCIL_VIEW_DESC dsv_desc = {
             .Format = DXGI_FORMAT_D32_FLOAT,
@@ -538,14 +237,14 @@ int main()
                 },
         };
 
-        device->CreateDepthStencilView(depth_resource.Get(), &dsv_desc, dsv_cpu_handle);
+        renderer.device->CreateDepthStencilView(depth_resource.Get(), &dsv_desc, dsv_cpu_handle);
     }
 
     Microsoft::WRL::ComPtr<ID3DBlob> root_signature_blob{};
     Microsoft::WRL::ComPtr<ID3D12RootSignature> root_signature{};
 
     D3D12_ROOT_PARAMETER1 root_parameters[1] = {
-        // For view projection matrix.
+        // For scene constant buffer.
         D3D12_ROOT_PARAMETER1{
             .ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV,
             .Descriptor =
@@ -571,8 +270,9 @@ int main()
     };
     // Serialize root signature.
     throw_if_failed(D3D12SerializeVersionedRootSignature(&root_signature_desc, &root_signature_blob, nullptr));
-    throw_if_failed(device->CreateRootSignature(0u, root_signature_blob->GetBufferPointer(),
-                                                root_signature_blob->GetBufferSize(), IID_PPV_ARGS(&root_signature)));
+    throw_if_failed(renderer.device->CreateRootSignature(0u, root_signature_blob->GetBufferPointer(),
+                                                         root_signature_blob->GetBufferSize(),
+                                                         IID_PPV_ARGS(&root_signature)));
 
     // Compile the vertex and pixel shader.
     Microsoft::WRL::ComPtr<ID3DBlob> shader_error_blob{};
@@ -672,7 +372,7 @@ int main()
             },
         .NodeMask = 0u,
     };
-    throw_if_failed(device->CreateGraphicsPipelineState(&graphics_pso_desc, IID_PPV_ARGS(&pso)));
+    throw_if_failed(renderer.device->CreateGraphicsPipelineState(&graphics_pso_desc, IID_PPV_ARGS(&pso)));
 
     // Create viewport and scissor.
     const D3D12_VIEWPORT viewport = {
@@ -693,20 +393,10 @@ int main()
     };
 
     // Flush the gpu.
-    throw_if_failed(command_list->Close());
+    renderer.execute_command_list();
+    renderer.flush_gpu();
 
-    ID3D12CommandList *const command_lists_to_execute[1] = {command_list.Get()};
-
-    direct_command_queue->ExecuteCommandLists(1u, command_lists_to_execute);
-    ++monotonic_fence_value;
-    for (auto &frame_fence_value : frame_fence_values)
-    {
-        frame_fence_value = monotonic_fence_value;
-    }
-    signal_fence(monotonic_fence_value);
-    wait_for_fence_value(frame_fence_values[swapchain_backbuffer_index]);
-
-    intermediate_buffers.clear();
+    intermediate_resources.clear();
 
     u64 frame_count = 0u;
 
@@ -753,22 +443,27 @@ int main()
             camera.update_and_get_view_matrix(delta_time) * projection_matrix;
 
         // Update cbuffers.
-        ConstantBuffer buffer = {
-            .matrix = view_projection_matrix,
+        SceneConstantBuffer buffer = {
+            .view_projection_matrix = view_projection_matrix,
         };
-        memcpy(constant_buffer.buffer_ptr, &buffer, sizeof(ConstantBuffer));
+        memcpy(scene_constant_buffer.buffer_ptr, &buffer, sizeof(SceneConstantBuffer));
 
         // Main render loop.
 
         // First, reset the command allocator and command list.
-        throw_if_failed(direct_command_allocators[swapchain_backbuffer_index]->Reset());
-        throw_if_failed(command_list->Reset(direct_command_allocators[swapchain_backbuffer_index].Get(), nullptr));
+        u8 &swapchain_backbuffer_index = renderer.swapchain_backbuffer_index;
+        ID3D12GraphicsCommandList *command_list = renderer.command_list.Get();
+
+        throw_if_failed(renderer.direct_command_allocators[swapchain_backbuffer_index]->Reset());
+        throw_if_failed(
+            command_list->Reset(renderer.direct_command_allocators[swapchain_backbuffer_index].Get(), nullptr));
 
         // Get the backbuffer rtv cpu descriptor handle, transition the back buffer to render target, and clear rt.
         D3D12_CPU_DESCRIPTOR_HANDLE rtv_handle =
-            swapchain_backbuffer_cpu_descriptor_handles[swapchain_backbuffer_index];
+            renderer.swapchain_backbuffer_cpu_descriptor_handles[swapchain_backbuffer_index];
 
-        ID3D12Resource *current_backbuffer_resource = swapchain_backbuffer_resources[swapchain_backbuffer_index].Get();
+        ID3D12Resource *const current_backbuffer_resource =
+            renderer.swapchain_backbuffer_resources[swapchain_backbuffer_index].Get();
 
         // Transition the backbuffer from presentation mode to render target mode.
         const D3D12_RESOURCE_BARRIER presentation_to_render_target_barrier = {
@@ -799,16 +494,16 @@ int main()
         command_list->SetPipelineState(pso.Get());
 
         ID3D12DescriptorHeap *const shader_visible_descriptor_heaps = {
-            cbv_srv_uav_descriptor_heap.descriptor_heap.Get()};
+            renderer.cbv_srv_uav_descriptor_heap.descriptor_heap.Get()};
         command_list->SetDescriptorHeaps(1u, &shader_visible_descriptor_heaps);
 
-        command_list->OMSetRenderTargets(1u, &swapchain_backbuffer_cpu_descriptor_handles[swapchain_backbuffer_index],
-                                         FALSE, &dsv_cpu_handle);
+        command_list->OMSetRenderTargets(
+            1u, &renderer.swapchain_backbuffer_cpu_descriptor_handles[swapchain_backbuffer_index], FALSE,
+            &dsv_cpu_handle);
 
-        command_list->SetGraphicsRootConstantBufferView(0u, constant_buffer.buffer->GetGPUVirtualAddress());
+        command_list->SetGraphicsRootConstantBufferView(0u, scene_constant_buffer.buffer->GetGPUVirtualAddress());
 
         command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-        command_list->IASetIndexBuffer(&index_buffer_view);
         command_list->IASetVertexBuffers(0u, 1u, &vertex_buffer_view);
         command_list->DrawInstanced(chunk_vertex_data.size(), 1u, 0u, 0u);
 
@@ -828,23 +523,16 @@ int main()
         command_list->ResourceBarrier(1u, &render_target_to_presentation_barrier);
 
         // Submit command list to queue for execution.
-        throw_if_failed(command_list->Close());
-
-        ID3D12CommandList *const command_lists_to_execute[1] = {command_list.Get()};
-
-        direct_command_queue->ExecuteCommandLists(1u, command_lists_to_execute);
+        renderer.execute_command_list();
 
         // Now, present the rendertarget and signal command queue.
-        throw_if_failed(swapchain->Present(1u, 0u));
-        monotonic_fence_value++;
-        frame_fence_values[swapchain_backbuffer_index] = monotonic_fence_value;
+        throw_if_failed(renderer.swapchain->Present(1u, 0u));
+        renderer.signal_fence();
 
-        signal_fence(monotonic_fence_value);
-
-        swapchain_backbuffer_index = swapchain->GetCurrentBackBufferIndex();
+        renderer.swapchain_backbuffer_index = renderer.swapchain->GetCurrentBackBufferIndex();
 
         // Wait for the previous frame (that is presenting to swpachain_backbuffer_index) to complete execution.
-        wait_for_fence_value(frame_fence_values[swapchain_backbuffer_index]);
+        renderer.wait_for_fence_value_at_index(renderer.swapchain_backbuffer_index);
 
         ++frame_count;
 
@@ -853,9 +541,9 @@ int main()
         delta_time = (frame_end_time.QuadPart - frame_start_time.QuadPart) * seconds_per_count;
     }
 
-    printf("%u", (u32)frame_count);
+    printf("Frames renderer :: %u", (u32)frame_count);
 
-    wait_for_fence_value(monotonic_fence_value);
+    renderer.flush_gpu();
 
     return 0;
 }

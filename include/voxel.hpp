@@ -24,7 +24,7 @@ struct Chunk
             new Cube[number_of_voxels_per_dimension * number_of_voxels_per_dimension * number_of_voxels_per_dimension];
     }
 
-    virtual ~Chunk()
+    ~Chunk()
     {
         delete[] cubes;
     }
@@ -32,7 +32,4 @@ struct Chunk
     static constexpr u32 number_of_voxels_per_dimension = 16u;
 
     Cube *cubes{};
-
-    // Index into the renderer's vertex buffer vector.
-    u32 vertex_buffer_index{};
 };
