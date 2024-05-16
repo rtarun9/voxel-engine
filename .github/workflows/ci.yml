@@ -23,5 +23,8 @@ jobs:
     - name: Generate VS solution file
       run: ./premake5.exe vs2022
     
-    - name: Build
-      run: msbuild voxel-engine.sln
+    - name: Build-Debug
+      run: msbuild voxel-engine.sln /p:Configuration=Debug
+
+    - name: Build-Release
+      run: msbuild voxel-engine.sln /p:Configuration=Release
