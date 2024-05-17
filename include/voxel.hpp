@@ -11,8 +11,8 @@ enum class CubeTypes : u8
 // A voxel (3d cube) abstraction.
 struct Cube
 {
-    CubeTypes cube_type{};
-    bool active{true};
+    CubeTypes m_cube_type{};
+    bool m_active{true};
 };
 
 // A chunk (volume) of voxels.
@@ -20,16 +20,16 @@ struct Chunk
 {
     Chunk()
     {
-        cubes =
+        m_cubes =
             new Cube[number_of_voxels_per_dimension * number_of_voxels_per_dimension * number_of_voxels_per_dimension];
     }
 
     ~Chunk()
     {
-        delete[] cubes;
+        delete[] m_cubes;
     }
 
     static constexpr u32 number_of_voxels_per_dimension = 16u;
 
-    Cube *cubes{};
+    Cube *m_cubes{};
 };

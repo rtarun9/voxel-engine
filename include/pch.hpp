@@ -10,7 +10,9 @@
 #include <wrl/client.h>
 
 // note(rtarun9) : Use the dx shader compiler api in the future instead of d3dcompiler.h.
+#include <d3d12shader.h>
 #include <d3dcompiler.h>
+#include <dxcapi.h>
 
 // Simd - math library.
 #include <DirectXMath.h>
