@@ -1,6 +1,7 @@
 #include "pch.hpp"
 
 #include "renderer.hpp"
+#include "shader_compiler.hpp"
 #include "types.hpp"
 #include "window.hpp"
 
@@ -339,23 +340,11 @@ int main()
                                                            IID_PPV_ARGS(&root_signature)));
 
     // Compile the vertex and pixel shader.
-    Microsoft::WRL::ComPtr<ID3DBlob> shader_error_blob{};
+    Microsoft::WRL::ComPtr<IDxcBlob> vertex_shader_blob =
+        ShaderCompiler::compile(L"shaders/shader.hlsl", L"vs_main", L"vs_6_0");
 
-    Microsoft::WRL::ComPtr<ID3DBlob> vertex_shader_blob{};
-    throw_if_failed(D3DCompileFromFile(L"shaders/shader.hlsl", nullptr, nullptr, "vs_main", "vs_5_0", 0u, 0u,
-                                       &vertex_shader_blob, &shader_error_blob));
-    if (shader_error_blob)
-    {
-        printf("Shader compiler error (vertex) : %s.\n", (const char *)(shader_error_blob->GetBufferPointer()));
-    }
-
-    Microsoft::WRL::ComPtr<ID3DBlob> pixel_shader_blob{};
-    throw_if_failed(D3DCompileFromFile(L"shaders/shader.hlsl", nullptr, nullptr, "ps_main", "ps_5_0", 0u, 0u,
-                                       &pixel_shader_blob, nullptr));
-    if (shader_error_blob)
-    {
-        printf("Shader compiler error (pixel) : %s.\n", (const char *)(shader_error_blob->GetBufferPointer()));
-    }
+    Microsoft::WRL::ComPtr<IDxcBlob> pixel_shader_blob =
+        ShaderCompiler::compile(L"shaders/shader.hlsl", L"ps_main", L"ps_6_0");
 
     // Create the root signature.
     const D3D12_INPUT_ELEMENT_DESC input_element_descs[2] = {

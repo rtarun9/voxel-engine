@@ -5,4 +5,9 @@
 *.vs
 bin/
 obj/
+external/
+agility.zip
+dxc.zip
+`
+'
 

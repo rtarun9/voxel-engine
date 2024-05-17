@@ -9,19 +9,19 @@
 #include <dxgi1_6.h>
 #include <wrl/client.h>
 
-// note(rtarun9) : Use the dx shader compiler api in the future instead of d3dcompiler.h.
+// Shader compiler related headers.
 #include <d3d12shader.h>
-#include <d3dcompiler.h>
 #include <dxcapi.h>
 
 // Simd - math library.
 #include <DirectXMath.h>
 
-// stdlib includes.
+// stdlib headers.
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 
 #include <source_location>
+#include <string>
 #include <vector>

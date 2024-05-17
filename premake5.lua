@@ -22,7 +22,7 @@ project("voxel-engine")
 
 	files { "src/**.cpp" }
 
-	links { "d3d12", "dxgi", "d3dcompiler" }
+	links { "d3d12", "dxgi", "dxcompiler.lib", "dxcompiler.dll", "dxil.dll" }
 
 	-- In debug mode, the VX_DEBUG #define must be set.
 	-- Also, in debug mode optimization is set to Debug, while in release it is for speed.

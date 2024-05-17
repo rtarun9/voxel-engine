@@ -2,6 +2,17 @@
 
 #include "renderer.hpp"
 
+// Agility SDK setup.
+// Setting the Agility SDK parameters.
+extern "C"
+{
+    __declspec(dllexport) extern const UINT D3D12SDKVersion = 711u;
+}
+extern "C"
+{
+    __declspec(dllexport) extern const char *D3D12SDKPath = ".\\D3D12\\";
+}
+
 D3D12_GPU_DESCRIPTOR_HANDLE DescriptorHeap::get_gpu_descriptor_handle_at_index(const u32 index) const
 {
     D3D12_GPU_DESCRIPTOR_HANDLE handle = m_descriptor_heap->GetGPUDescriptorHandleForHeapStart();
