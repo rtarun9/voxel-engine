@@ -35,6 +35,12 @@ int main()
     std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> intermediate_resources{};
     intermediate_resources.reserve(50);
 
+    // A naive approach on chunk loading:
+    // From the player position, find the chunk that is to be loaded.
+    // If player moves to a new *chunk*, unload (not sure if that means clear memory), or dont display it and load
+    // (allocate memory?) to the new one.
+    // For now, the same chunk will be used (to test the player / camera chunk detection logic).
+
     // Create the resources required for rendering.
 
     // Vertex buffer setup.
@@ -44,11 +50,11 @@ int main()
         DirectX::XMFLOAT3 color{};
     };
 
-    static constexpr float voxel_cube_dimension = 0.25f;
+    static constexpr float voxel_cube_dimension = 1.0f;
 
     // Note : Each chunk has its own vertex buffer and transform buffer.
     // The renderer has an array of vertex buffers to simply the process of rendering.
-    static constexpr u32 number_of_chunks_per_dimension = 2u;
+    static constexpr u32 number_of_chunks_per_dimension = 1u;
     static constexpr u64 number_of_chunks =
         number_of_chunks_per_dimension * number_of_chunks_per_dimension * number_of_chunks_per_dimension;
 
@@ -470,7 +476,6 @@ int main()
 
     Camera camera{};
     camera.m_camera_rotation_speed = 1.0f;
-
     while (!quit)
     {
         QueryPerformanceCounter(&frame_start_time);
@@ -495,11 +500,30 @@ int main()
         const DirectX::XMMATRIX view_projection_matrix =
             camera.update_and_get_view_matrix(delta_time) * projection_matrix;
 
+        // Now, for finding *which chunk* the camera is in.
+        // What about -ve values of camera position? No idea.
+        DirectX::XMFLOAT3 camera_position{};
+        DirectX::XMStoreFloat3(&camera_position, camera.m_camera_position);
+
+        const DirectX::XMINT3 current_chunk_3d_index = {
+            (i32)(floor(camera_position.x / i32(Chunk::number_of_voxels_per_dimension))),
+            (i32)(floor(camera_position.y / i32(Chunk::number_of_voxels_per_dimension))),
+            (i32)(floor(camera_position.z / i32(Chunk::number_of_voxels_per_dimension))),
+        };
+
         // Update cbuffers.
         SceneConstantBuffer buffer = {
             .view_projection_matrix = view_projection_matrix,
         };
         memcpy(scene_constant_buffer_ptr, &buffer, sizeof(SceneConstantBuffer));
+
+        ChunkConstantBuffer chunk_constant_buffer_data = {
+            .transform_buffer = DirectX::XMMatrixTranslation(
+                current_chunk_3d_index.x * (i32)Chunk::number_of_voxels_per_dimension,
+                (current_chunk_3d_index.y - 1) * (i32)Chunk::number_of_voxels_per_dimension,
+                current_chunk_3d_index.z * (i32)Chunk::number_of_voxels_per_dimension),
+        };
+        memcpy(chunk_constant_buffer_ptrs[0], &chunk_constant_buffer_data, sizeof(ChunkConstantBuffer));
 
         // Main render loop.
 
