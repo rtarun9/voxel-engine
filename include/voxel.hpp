@@ -32,4 +32,5 @@ struct Chunk
     static constexpr u32 number_of_voxels_per_dimension = 16u;
 
     Cube *m_cubes{};
+    u64 m_chunk_index{};
 };
