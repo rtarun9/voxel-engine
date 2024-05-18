@@ -5,7 +5,9 @@
 // Simple abstraction class over win32 window.
 struct Window
 {
-    Window(const u16 width, const u16 height);
+    // The width and height is based on percentage of the screen width and height.
+    Window(const float width_percentage, const float height_percentage);
+
     ~Window();
 
     static inline constexpr const char WINDOW_CLASS_NAME[] = "Base Window Class";

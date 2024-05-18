@@ -24,4 +24,5 @@
 
 #include <source_location>
 #include <string>
+#include <unordered_map>
 #include <vector>

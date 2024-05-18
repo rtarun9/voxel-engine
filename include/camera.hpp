@@ -3,7 +3,7 @@
 // A simple camera class.
 struct Camera
 {
-    float m_camera_movement_speed{20.0f};
+    float m_camera_movement_speed{50.0f};
     float m_camera_rotation_speed{1.0f};
 
     float m_pitch{0.0f};

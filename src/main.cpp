@@ -26,12 +26,6 @@ static inline DirectX::XMUINT3 convert_index_to_3d(const u64 index, const u32 N)
     return DirectX::XMUINT3{x, y, z};
 }
 
-[[maybe_unused]] static inline u64 convert_index_to_1d(const DirectX::XMUINT3 index, const u32 N,
-                                                       const u32 bias_value = 0u)
-{
-    return (bias_value + index.x) + (bias_value + index.y) * N + (bias_value + index.z) * N * N;
-}
-
 static inline u64 convert_index_to_1d(const DirectX::XMINT3 index, const u32 N, const u32 bias_value = 0u)
 {
     return ((i32)bias_value + index.x) + ((i32)bias_value + index.y) * N + ((i32)bias_value + index.z) * N * N;
@@ -39,20 +33,13 @@ static inline u64 convert_index_to_1d(const DirectX::XMINT3 index, const u32 N, 
 
 int main()
 {
-    const Window window(1440u, 720u);
+    const Window window(100.0f, 100.0f);
     Renderer renderer(window.m_handle, window.m_width, window.m_height);
 
     // A vector of intermediate resources (required since intermediate buffers need to be in memory until the copy
     // resource and other functions are executed).
-    // This vector MUST be erased once GPU resource uploading is completed.
     std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> intermediate_resources{};
-    intermediate_resources.reserve(50);
-
-    // A naive approach on chunk loading:
-    // From the player position, find the chunk that is to be loaded.
-    // If player moves to a new *chunk*, unload (not sure if that means clear memory), or dont display it and load
-    // (allocate memory?) to the new one.
-    // For this, number of chunks is not fixed, but variable.
+    intermediate_resources.reserve(128);
 
     // Create the resources required for rendering.
 
@@ -64,11 +51,20 @@ int main()
     };
 
     // Note : This value is fixed to 1.0 to make sure calculations are as simple as possible.
+    // When core functionality (chunk loading / unloading) is ready, the code will be modified to scale up / down based
+    // on this value.
     static constexpr float voxel_cube_dimension = 1.0f;
 
-    static constexpr u32 number_of_chunks_in_each_dimension = 16u;
+    // If a chunk that is loaded is 'chunk_render_distance' units away from the player in any direction, it is moved
+    // into the unloaded_chunks vector.
+    static constexpr u64 chunk_render_distance = 8u;
+
+    static constexpr u32 number_of_chunks_in_each_dimension = 64u;
+    static constexpr u64 number_of_chunks =
+        number_of_chunks_in_each_dimension * number_of_chunks_in_each_dimension * number_of_chunks_in_each_dimension;
 
     // Resources for the *debug draw*, a wireframe rendering to visualize all the chunks.
+    // the debug draw will use instanced rendering. The 3D offset is determined in the shader itself.
 
     // Index buffer setup.
     Buffer debug_grid_index_buffer{};
@@ -79,23 +75,41 @@ int main()
     constexpr u16 index_buffer_data[24] = {0, 1, 1, 2, 2, 3, 3, 0, 4, 5, 5, 6, 6, 7, 7, 4, 0, 4, 1, 5, 2, 6, 3, 7};
 
     // Vertex buffer setup.
-    // In this engine, the *voxel* is the LOWER LEFT point in the actual CUBE.
+    // In this engine, the *voxel* is a point sample and represents(sort of) the FRONT LOWER LEFT point in the actual
+    // CUBE.
     constexpr VertexData vertex_buffer_data[8] = {
-        VertexData{.position = DirectX::XMFLOAT3(0.0f, 0.0f, 0.0f), .color = DirectX::XMFLOAT3(0.0f, 0.0f, 0.0f)}, // 0
-        VertexData{.position = DirectX::XMFLOAT3(0.0f, voxel_cube_dimension, 0.0f),
-                   .color = DirectX::XMFLOAT3(0.0f, 0.5f, 0.0f)}, // 1
-        VertexData{.position = DirectX::XMFLOAT3(voxel_cube_dimension, voxel_cube_dimension, 0.0f),
-                   .color = DirectX::XMFLOAT3(0.5f, 0.5f, 0.0f)}, // 2
-        VertexData{.position = DirectX::XMFLOAT3(voxel_cube_dimension, 0.0f, 0.0f),
-                   .color = DirectX::XMFLOAT3(0.5f, 0.0f, 0.0f)}, // 3
-        VertexData{.position = DirectX::XMFLOAT3(0.0f, 0.0f, voxel_cube_dimension),
-                   .color = DirectX::XMFLOAT3(0.0f, 0.0f, 0.5f)}, // 4
-        VertexData{.position = DirectX::XMFLOAT3(0.0f, voxel_cube_dimension, voxel_cube_dimension),
-                   .color = DirectX::XMFLOAT3(0.0f, 0.5f, 0.5f)}, // 5
-        VertexData{.position = DirectX::XMFLOAT3(voxel_cube_dimension, voxel_cube_dimension, voxel_cube_dimension),
-                   .color = DirectX::XMFLOAT3(0.5f, 0.5f, 0.5f)}, // 6
-        VertexData{.position = DirectX::XMFLOAT3(voxel_cube_dimension, 0.0f, voxel_cube_dimension),
-                   .color = DirectX::XMFLOAT3(0.5f, 0.0f, 0.5f)} // 7
+        VertexData{
+            .position = DirectX::XMFLOAT3(0.0f, 0.0f, 0.0f),
+            .color = DirectX::XMFLOAT3(0.0f, 0.0f, 0.0f),
+        }, // 0
+        VertexData{
+            .position = DirectX::XMFLOAT3(0.0f, voxel_cube_dimension, 0.0f),
+            .color = DirectX::XMFLOAT3(0.0f, 0.5f, 0.0f),
+        }, // 1
+        VertexData{
+            .position = DirectX::XMFLOAT3(voxel_cube_dimension, voxel_cube_dimension, 0.0f),
+            .color = DirectX::XMFLOAT3(0.5f, 0.5f, 0.0f),
+        }, // 2
+        VertexData{
+            .position = DirectX::XMFLOAT3(voxel_cube_dimension, 0.0f, 0.0f),
+            .color = DirectX::XMFLOAT3(0.5f, 0.0f, 0.0f),
+        }, // 3
+        VertexData{
+            .position = DirectX::XMFLOAT3(0.0f, 0.0f, voxel_cube_dimension),
+            .color = DirectX::XMFLOAT3(0.0f, 0.0f, 0.5f),
+        }, // 4
+        VertexData{
+            .position = DirectX::XMFLOAT3(0.0f, voxel_cube_dimension, voxel_cube_dimension),
+            .color = DirectX::XMFLOAT3(0.0f, 0.5f, 0.5f),
+        }, // 5
+        VertexData{
+            .position = DirectX::XMFLOAT3(voxel_cube_dimension, voxel_cube_dimension, voxel_cube_dimension),
+            .color = DirectX::XMFLOAT3(0.5f, 0.5f, 0.5f),
+        }, // 6
+        VertexData{
+            .position = DirectX::XMFLOAT3(voxel_cube_dimension, 0.0f, voxel_cube_dimension),
+            .color = DirectX::XMFLOAT3(0.5f, 0.0f, 0.5f),
+        } // 7
     };
 
     {
@@ -128,132 +142,143 @@ int main()
     }
 
     // Note : Each chunk has its own vertex buffer and transform buffer.
-    // The renderer has an array of vertex buffers to simply the process of rendering.
-    // For simplicity, all chunks will SHARE the same vertex data. This is because for now the focus is on how to load
-    // and unload chunks.
 
-    std::vector<u64> loaded_chunk_indices{};
+    // Loaded chunks : In memory, and can be rendered.
+    std::vector<Chunk> loaded_chunks{};
 
-    // Data shared amongst all chunks.
-    u64 chunk_vertices_count{};
-    Buffer chunk_vertex_buffer{};
-    D3D12_VERTEX_BUFFER_VIEW chunk_vertex_buffer_view{};
-    std::vector<VertexData> chunk_vertex_data{};
+    // Chunks which are to be created (memory must be allocated).
+    std::vector<Chunk> chunks_to_load{};
 
-    // The chunk which is used as template for all chunks (FOR NOW).
-    Chunk place_holder_chunk{};
+    // Chunks which are in memory, but are no longer rendered.
+    std::vector<Chunk> unloaded_chunks{};
 
-    for (u64 i = 0; i < Chunk::number_of_voxels_per_dimension * Chunk::number_of_voxels_per_dimension *
-                            Chunk::number_of_voxels_per_dimension;
-         i++)
-    {
-        const DirectX::XMFLOAT3 voxel_color =
-            DirectX::XMFLOAT3(rand() / double(RAND_MAX), rand() / double(RAND_MAX), rand() / double(RAND_MAX));
-        // Vertex buffer construction.
-        const DirectX::XMUINT3 index = convert_index_to_3d(i, Chunk::number_of_voxels_per_dimension);
+    // Data for chunks.
+    // In the hashmap, the key is the chunk index (each chunks knows this information), and the value is as the hahsmap
+    // name.
+    std::unordered_map<u64, u64> chunk_vertices_counts{};
+    std::unordered_map<u64, Buffer> chunk_vertex_buffers{};
+    std::unordered_map<u64, std::vector<VertexData>> chunk_vertex_datas{};
 
-        if (place_holder_chunk.m_cubes[i].m_active)
+    // For now, create a single chunk upfront.
+    // This function adds the chunk to the chunks_to_load vector.
+    const auto create_chunk = [&](const auto chunk_index) {
+        Chunk chunk{};
+
+        chunk_vertex_datas[chunk_index] = std::vector<VertexData>{};
+
+        for (u64 i = 0; i < Chunk::number_of_voxels; i++)
         {
-            const DirectX::XMFLOAT3 position_offset =
-                DirectX::XMFLOAT3{voxel_cube_dimension * (float)index.x, voxel_cube_dimension * (float)index.y,
-                                  voxel_cube_dimension * (float)index.z};
+            chunk.m_chunk_index = chunk_index;
 
-            const VertexData v1 =
-                (VertexData{.position = DirectX::XMFLOAT3(position_offset.x, position_offset.y, position_offset.z),
-                            .color = voxel_color});
-            const VertexData v2 =
-                (VertexData{.position = DirectX::XMFLOAT3(position_offset.x, position_offset.y + voxel_cube_dimension,
-                                                          position_offset.z),
-                            .color = voxel_color});
-            const VertexData v3 =
-                (VertexData{.position = DirectX::XMFLOAT3(position_offset.x + voxel_cube_dimension,
-                                                          position_offset.y + voxel_cube_dimension, position_offset.z),
-                            .color = voxel_color});
-            const VertexData v4 = (VertexData{.position = DirectX::XMFLOAT3(position_offset.x + voxel_cube_dimension,
-                                                                            position_offset.y, position_offset.z),
-                                              .color = voxel_color});
-            const VertexData v5 = (VertexData{.position = DirectX::XMFLOAT3(position_offset.x, position_offset.y,
-                                                                            position_offset.z + voxel_cube_dimension),
-                                              .color = voxel_color});
-            const VertexData v6 =
-                (VertexData{.position = DirectX::XMFLOAT3(position_offset.x, position_offset.y + voxel_cube_dimension,
-                                                          position_offset.z + voxel_cube_dimension),
-                            .color = voxel_color});
-            const VertexData v7 = (VertexData{.position = DirectX::XMFLOAT3(position_offset.x + voxel_cube_dimension,
-                                                                            position_offset.y + voxel_cube_dimension,
-                                                                            position_offset.z + voxel_cube_dimension),
-                                              .color = voxel_color});
-            const VertexData v8 =
-                (VertexData{.position = DirectX::XMFLOAT3(position_offset.x + voxel_cube_dimension, position_offset.y,
-                                                          position_offset.z + voxel_cube_dimension),
-                            .color = voxel_color});
+            chunk_vertex_datas[chunk_index].reserve(chunk_vertex_datas.size() + 36u);
 
-            chunk_vertex_data.reserve(chunk_vertex_data.size() + 36);
+            const DirectX::XMFLOAT3 voxel_color =
+                DirectX::XMFLOAT3(rand() / double(RAND_MAX), rand() / double(RAND_MAX), rand() / double(RAND_MAX));
 
-            chunk_vertex_data.emplace_back(v1);
-            chunk_vertex_data.emplace_back(v2);
-            chunk_vertex_data.emplace_back(v3);
+            // Vertex buffer construction.
+            const DirectX::XMUINT3 index = convert_index_to_3d(i, Chunk::number_of_voxels_per_dimension);
 
-            chunk_vertex_data.emplace_back(v1);
-            chunk_vertex_data.emplace_back(v3);
-            chunk_vertex_data.emplace_back(v4);
+            chunk.m_cubes[i].m_active = index.y < Chunk::number_of_voxels_per_dimension / 2u;
 
-            chunk_vertex_data.emplace_back(v5);
-            chunk_vertex_data.emplace_back(v7);
-            chunk_vertex_data.emplace_back(v6);
+            if (chunk.m_cubes[i].m_active)
+            {
+                const DirectX::XMFLOAT3 position_offset =
+                    DirectX::XMFLOAT3{(float)index.x, (float)index.y, (float)index.z};
 
-            chunk_vertex_data.emplace_back(v5);
-            chunk_vertex_data.emplace_back(v8);
-            chunk_vertex_data.emplace_back(v7);
+                const VertexData v1 =
+                    (VertexData{.position = DirectX::XMFLOAT3(position_offset.x, position_offset.y, position_offset.z),
+                                .color = voxel_color});
+                const VertexData v2 =
+                    (VertexData{.position = DirectX::XMFLOAT3(
+                                    position_offset.x, position_offset.y + voxel_cube_dimension, position_offset.z),
+                                .color = voxel_color});
+                const VertexData v3 = (VertexData{
+                    .position = DirectX::XMFLOAT3(position_offset.x + voxel_cube_dimension,
+                                                  position_offset.y + voxel_cube_dimension, position_offset.z),
+                    .color = voxel_color});
+                const VertexData v4 =
+                    (VertexData{.position = DirectX::XMFLOAT3(position_offset.x + voxel_cube_dimension,
+                                                              position_offset.y, position_offset.z),
+                                .color = voxel_color});
+                const VertexData v5 =
+                    (VertexData{.position = DirectX::XMFLOAT3(position_offset.x, position_offset.y,
+                                                              position_offset.z + voxel_cube_dimension),
+                                .color = voxel_color});
+                const VertexData v6 = (VertexData{
+                    .position = DirectX::XMFLOAT3(position_offset.x, position_offset.y + voxel_cube_dimension,
+                                                  position_offset.z + voxel_cube_dimension),
+                    .color = voxel_color});
+                const VertexData v7 =
+                    (VertexData{.position = DirectX::XMFLOAT3(position_offset.x + voxel_cube_dimension,
+                                                              position_offset.y + voxel_cube_dimension,
+                                                              position_offset.z + voxel_cube_dimension),
+                                .color = voxel_color});
+                const VertexData v8 = (VertexData{
+                    .position = DirectX::XMFLOAT3(position_offset.x + voxel_cube_dimension, position_offset.y,
+                                                  position_offset.z + voxel_cube_dimension),
+                    .color = voxel_color});
 
-            chunk_vertex_data.emplace_back(v5);
-            chunk_vertex_data.emplace_back(v6);
-            chunk_vertex_data.emplace_back(v2);
+                chunk_vertex_datas[chunk_index].emplace_back(v1);
+                chunk_vertex_datas[chunk_index].emplace_back(v2);
+                chunk_vertex_datas[chunk_index].emplace_back(v3);
 
-            chunk_vertex_data.emplace_back(v5);
-            chunk_vertex_data.emplace_back(v2);
-            chunk_vertex_data.emplace_back(v1);
+                chunk_vertex_datas[chunk_index].emplace_back(v1);
+                chunk_vertex_datas[chunk_index].emplace_back(v3);
+                chunk_vertex_datas[chunk_index].emplace_back(v4);
 
-            chunk_vertex_data.emplace_back(v4);
-            chunk_vertex_data.emplace_back(v3);
-            chunk_vertex_data.emplace_back(v7);
+                chunk_vertex_datas[chunk_index].emplace_back(v5);
+                chunk_vertex_datas[chunk_index].emplace_back(v7);
+                chunk_vertex_datas[chunk_index].emplace_back(v6);
 
-            chunk_vertex_data.emplace_back(v4);
-            chunk_vertex_data.emplace_back(v7);
-            chunk_vertex_data.emplace_back(v8);
+                chunk_vertex_datas[chunk_index].emplace_back(v5);
+                chunk_vertex_datas[chunk_index].emplace_back(v8);
+                chunk_vertex_datas[chunk_index].emplace_back(v7);
 
-            chunk_vertex_data.emplace_back(v2);
-            chunk_vertex_data.emplace_back(v6);
-            chunk_vertex_data.emplace_back(v7);
+                chunk_vertex_datas[chunk_index].emplace_back(v5);
+                chunk_vertex_datas[chunk_index].emplace_back(v6);
+                chunk_vertex_datas[chunk_index].emplace_back(v2);
 
-            chunk_vertex_data.emplace_back(v2);
-            chunk_vertex_data.emplace_back(v7);
-            chunk_vertex_data.emplace_back(v3);
+                chunk_vertex_datas[chunk_index].emplace_back(v5);
+                chunk_vertex_datas[chunk_index].emplace_back(v2);
+                chunk_vertex_datas[chunk_index].emplace_back(v1);
 
-            chunk_vertex_data.emplace_back(v5);
-            chunk_vertex_data.emplace_back(v1);
-            chunk_vertex_data.emplace_back(v4);
+                chunk_vertex_datas[chunk_index].emplace_back(v4);
+                chunk_vertex_datas[chunk_index].emplace_back(v3);
+                chunk_vertex_datas[chunk_index].emplace_back(v7);
 
-            chunk_vertex_data.emplace_back(v5);
-            chunk_vertex_data.emplace_back(v4);
-            chunk_vertex_data.emplace_back(v8);
-        }
+                chunk_vertex_datas[chunk_index].emplace_back(v4);
+                chunk_vertex_datas[chunk_index].emplace_back(v7);
+                chunk_vertex_datas[chunk_index].emplace_back(v8);
+
+                chunk_vertex_datas[chunk_index].emplace_back(v2);
+                chunk_vertex_datas[chunk_index].emplace_back(v6);
+                chunk_vertex_datas[chunk_index].emplace_back(v7);
+
+                chunk_vertex_datas[chunk_index].emplace_back(v2);
+                chunk_vertex_datas[chunk_index].emplace_back(v7);
+                chunk_vertex_datas[chunk_index].emplace_back(v3);
+
+                chunk_vertex_datas[chunk_index].emplace_back(v5);
+                chunk_vertex_datas[chunk_index].emplace_back(v1);
+                chunk_vertex_datas[chunk_index].emplace_back(v4);
+
+                chunk_vertex_datas[chunk_index].emplace_back(v5);
+                chunk_vertex_datas[chunk_index].emplace_back(v4);
+                chunk_vertex_datas[chunk_index].emplace_back(v8);
+            }
+        };
+
+        Renderer::BufferPair vertex_buffer_pair =
+            renderer.create_buffer((void *)chunk_vertex_datas[chunk_index].data(),
+                                   sizeof(VertexData) * chunk_vertex_datas[chunk_index].size(), BufferTypes::Static);
+
+        intermediate_resources.emplace_back(vertex_buffer_pair.m_intermediate_buffer.m_buffer);
+
+        chunk_vertex_buffers[chunk_index] = vertex_buffer_pair.m_buffer;
+        chunk_vertices_counts[chunk_index] = (u64)chunk_vertex_datas[chunk_index].size();
+
+        chunks_to_load.push_back(std::move(chunk));
     };
-
-    Renderer::BufferPair vertex_buffer_pair = renderer.create_buffer(
-        (void *)chunk_vertex_data.data(), sizeof(VertexData) * chunk_vertex_data.size(), BufferTypes::Static);
-
-    intermediate_resources.emplace_back(vertex_buffer_pair.m_intermediate_buffer.m_buffer);
-    chunk_vertex_buffer = vertex_buffer_pair.m_buffer;
-
-    // Create the vertex buffer view.
-    chunk_vertex_buffer_view = {
-        .BufferLocation = chunk_vertex_buffer.m_buffer->GetGPUVirtualAddress(),
-        .SizeInBytes = (u32)(sizeof(VertexData) * chunk_vertex_data.size()),
-        .StrideInBytes = sizeof(VertexData),
-    };
-
-    chunk_vertices_count = chunk_vertex_data.size();
 
     // Create a 'scene' constant buffer.
     struct alignas(256) SceneConstantBuffer
@@ -410,14 +435,15 @@ int main()
                 },
             .ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX,
         },
-        // For instance transform buffer (inline root constant) of a float4x4.
+        // For instance transform buffer (inline root constant) of a float4x4 for transform data and 3 uint's for
+        // instance count and number of chunks per dimensions and number of voxels per dimension.
         D3D12_ROOT_PARAMETER1{
             .ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
             .Constants =
                 D3D12_ROOT_CONSTANTS{
                     .ShaderRegister = 1u,
                     .RegisterSpace = 0u,
-                    .Num32BitValues = 16u,
+                    .Num32BitValues = 20u,
                 },
             .ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX,
         },
@@ -664,16 +690,6 @@ int main()
         const DirectX::XMMATRIX view_projection_matrix =
             camera.update_and_get_view_matrix(delta_time) * projection_matrix;
 
-        // Now, for finding *which chunk* the camera is in.
-        DirectX::XMFLOAT3 camera_position{};
-        DirectX::XMStoreFloat3(&camera_position, camera.m_camera_position);
-
-        const DirectX::XMINT3 current_chunk_3d_index = {
-            (i32)(floor((camera_position.x) / i32(Chunk::number_of_voxels_per_dimension))),
-            (i32)(floor((camera_position.y) / i32(Chunk::number_of_voxels_per_dimension))),
-            (i32)(floor((camera_position.z) / i32(Chunk::number_of_voxels_per_dimension))),
-        };
-
         // Update cbuffers.
         SceneConstantBuffer buffer = {
             .view_projection_matrix = view_projection_matrix,
@@ -740,119 +756,193 @@ int main()
             command_list->IASetVertexBuffers(0u, 1u, &debug_grid_vertex_buffer_view);
             command_list->IASetIndexBuffer(&debug_grid_index_buffer_view);
 
-            for (u64 grid_index = 0;
-                 grid_index < number_of_chunks_in_each_dimension * number_of_chunks_in_each_dimension *
-                                  number_of_chunks_in_each_dimension;
-                 grid_index++)
             {
-                const DirectX::XMUINT3 grid_offset =
-                    convert_index_to_3d(grid_index, number_of_chunks_in_each_dimension);
-
-                const DirectX::XMMATRIX transform_matrix =
-                    DirectX::XMMatrixScaling((float)Chunk::number_of_voxels_per_dimension,
-                                             (float)Chunk::number_of_voxels_per_dimension,
-                                             (float)Chunk::number_of_voxels_per_dimension) *
-
-                    DirectX::XMMatrixTranslation((i32)((grid_offset.x - number_of_chunks_in_each_dimension / 2u) *
-                                                       Chunk::number_of_voxels_per_dimension),
-                                                 (i32)((grid_offset.y - number_of_chunks_in_each_dimension / 2u) *
-                                                       Chunk::number_of_voxels_per_dimension),
-                                                 (i32)((grid_offset.z - number_of_chunks_in_each_dimension / 2u) *
-                                                       Chunk::number_of_voxels_per_dimension));
-
-                command_list->SetGraphicsRoot32BitConstants(1u, 16u, &transform_matrix, 0u);
-
-                command_list->DrawIndexedInstanced(24u, 1u, 0u, 0u, 0u);
-            }
-        }
-
-        // Set the index buffer, pso and all config settings for rendering.
-        command_list->SetGraphicsRootSignature(chunks_root_signature.Get());
-        command_list->SetPipelineState(chunks_pso.Get());
-
-        command_list->SetGraphicsRootConstantBufferView(0u, scene_constant_buffer.m_buffer->GetGPUVirtualAddress());
-
-        command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-
-        // Render all chunks.
-        // Check if there is a chunk loaded at current position.
-        const u64 current_chunk_index = convert_index_to_1d(current_chunk_3d_index, number_of_chunks_in_each_dimension,
-                                                            number_of_chunks_in_each_dimension / 2u);
-
-        // Check if current chunk is in memory.
-        bool chunk_already_in_memory = false;
-        for (const auto &chunk_index : loaded_chunk_indices)
-        {
-            if (chunk_index == current_chunk_index)
-            {
-                chunk_already_in_memory = true;
-            }
-        }
-
-        // FOR DEBUG PURPOSES ONLY.
-        // If caps lock key is pressed, do not load the current chunk.
-        if (!(GetKeyState(VK_CAPITAL) & 0x0001) && !chunk_already_in_memory)
-        {
-            // Create chunk and add to vector.
-            loaded_chunk_indices.push_back(current_chunk_index);
-        }
-
-        for (const auto &chunk_index : loaded_chunk_indices)
-        {
-            const DirectX::XMUINT3 _chunk_index_3d =
-                convert_index_to_3d(chunk_index, number_of_chunks_in_each_dimension);
-            const DirectX::XMINT3 chunk_index_3d = {
-                (i32)_chunk_index_3d.x - (i32)(number_of_chunks_in_each_dimension / 2u),
-                (i32)_chunk_index_3d.y - (i32)(number_of_chunks_in_each_dimension / 2u),
-                (i32)_chunk_index_3d.z - (i32)(number_of_chunks_in_each_dimension / 2u),
-            };
-
-            ChunkConstantBuffer chunk_constant_buffer_data = {
-                .transform_buffer =
-                    DirectX::XMMatrixTranslation(chunk_index_3d.x * (i32)Chunk::number_of_voxels_per_dimension,
-                                                 (chunk_index_3d.y - 1) * (i32)Chunk::number_of_voxels_per_dimension,
-                                                 (chunk_index_3d.z * (i32)Chunk::number_of_voxels_per_dimension)),
-            };
-
-            command_list->SetGraphicsRoot32BitConstants(1u, 16u, &chunk_constant_buffer_data.transform_buffer, 0u);
-            command_list->IASetVertexBuffers(0u, 1u, &chunk_vertex_buffer_view);
-            command_list->DrawInstanced(chunk_vertices_count, 1u, 0u, 0u);
-        }
-
-        // Now, transition back to presentation mode.
-        const D3D12_RESOURCE_BARRIER render_target_to_presentation_barrier = {
-            .Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
-            .Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE,
-            .Transition =
+                struct DebugGridRootConstants
                 {
-                    .pResource = current_backbuffer_resource,
-                    .Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
-                    .StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET,
-                    .StateAfter = D3D12_RESOURCE_STATE_PRESENT,
-                },
-        };
+                    DirectX::XMMATRIX matrix{};
+                    u32 number_of_chunks_per_dimension{};
+                    u32 number_of_voxels_per_dimension{};
+                };
 
-        command_list->ResourceBarrier(1u, &render_target_to_presentation_barrier);
+                DebugGridRootConstants root_constants = {
+                    .matrix = DirectX::XMMatrixScaling((float)Chunk::number_of_voxels_per_dimension,
+                                                       (float)Chunk::number_of_voxels_per_dimension,
+                                                       (float)Chunk::number_of_voxels_per_dimension),
+                    .number_of_chunks_per_dimension = number_of_chunks_in_each_dimension,
+                    .number_of_voxels_per_dimension = Chunk::number_of_voxels_per_dimension,
+                };
 
-        // Submit command list to queue for execution.
-        renderer.execute_command_list();
+                command_list->SetGraphicsRoot32BitConstants(1u, 18u, &root_constants, 0u);
 
-        // Now, present the rendertarget and signal command queue.
-        throw_if_failed(renderer.m_swapchain->Present(1u, 0u));
-        renderer.signal_fence();
+                command_list->DrawIndexedInstanced(24u, number_of_chunks, 0u, 0u, 0u);
+            }
 
-        renderer.m_swapchain_backbuffer_index = renderer.m_swapchain->GetCurrentBackBufferIndex();
+            // Set the index buffer, pso and all config settings for rendering.
+            command_list->SetGraphicsRootSignature(chunks_root_signature.Get());
+            command_list->SetPipelineState(chunks_pso.Get());
 
-        // Wait for the previous frame (that is presenting to swpachain_backbuffer_index) to complete execution.
-        renderer.wait_for_fence_value_at_index(renderer.m_swapchain_backbuffer_index);
+            command_list->SetGraphicsRootConstantBufferView(0u, scene_constant_buffer.m_buffer->GetGPUVirtualAddress());
 
-        ++frame_count;
+            command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-        QueryPerformanceCounter(&frame_end_time);
+            // From the previous frames chunk to load vector, move thos chunks to the *loaded chunks* array.
+            for (auto &newly_loaded_chunks : chunks_to_load)
+            {
+                loaded_chunks.emplace_back(std::move(newly_loaded_chunks));
+            }
 
-        delta_time = (frame_end_time.QuadPart - frame_start_time.QuadPart) * seconds_per_count;
+            chunks_to_load.clear();
+
+            // Now, if there is a chunk that is already loaded,
+            // Render all chunks.
+            // Check if there is a chunk loaded at current position.
+            // Now, for finding *which chunk* the camera is in.
+            DirectX::XMFLOAT3 camera_position{};
+            DirectX::XMStoreFloat3(&camera_position, camera.m_camera_position);
+
+            const DirectX::XMINT3 current_chunk_3d_index = {
+                (i32)(floor((camera_position.x) / i32(Chunk::number_of_voxels_per_dimension))),
+                (i32)(floor((camera_position.y) / i32(Chunk::number_of_voxels_per_dimension))),
+                (i32)(floor((camera_position.z) / i32(Chunk::number_of_voxels_per_dimension))),
+            };
+
+            const u64 current_chunk_index = convert_index_to_1d(
+                current_chunk_3d_index, number_of_chunks_in_each_dimension, number_of_chunks_in_each_dimension / 2u);
+
+            // Loop through the unloaded chunk vector.
+            // and load the chunks that are close enough to the player.
+            u32 reloaded_chunk_count = 0u;
+            const u32 unloaded_chunks_size = unloaded_chunks.size();
+
+            for (u32 i = 0; i < unloaded_chunks_size; i++)
+            {
+                const DirectX::XMUINT3 _chunk_index_3d =
+                    convert_index_to_3d(loaded_chunks[i].m_chunk_index, number_of_chunks_in_each_dimension);
+
+                const DirectX::XMINT3 chunk_index_3d = {
+                    (i32)_chunk_index_3d.x - (i32)(number_of_chunks_in_each_dimension / 2u),
+                    (i32)_chunk_index_3d.y - (i32)(number_of_chunks_in_each_dimension / 2u),
+                    (i32)_chunk_index_3d.z - (i32)(number_of_chunks_in_each_dimension / 2u),
+                };
+                if ((u64)fabs(chunk_index_3d.x - current_chunk_3d_index.x) <= chunk_render_distance ||
+                    (u64)fabs(chunk_index_3d.y - current_chunk_3d_index.y) <= chunk_render_distance ||
+                    (u64)fabs(chunk_index_3d.z - current_chunk_3d_index.z) <= chunk_render_distance)
+                {
+                    loaded_chunks.emplace_back(std::move(unloaded_chunks[i]));
+                    unloaded_chunks.erase(unloaded_chunks.begin() + i - reloaded_chunk_count++);
+                }
+            }
+
+            // Check if current chunk is in memory.
+            bool chunk_already_in_memory = false;
+            for (u64 i = 0; i < loaded_chunks.size(); i++)
+            {
+                if (loaded_chunks[i].m_chunk_index == current_chunk_index)
+                {
+                    chunk_already_in_memory = true;
+                }
+            }
+
+            // FOR DEBUG PURPOSES ONLY.
+            // If caps lock key is pressed, do not load the current chunk.
+            if (!(GetKeyState(VK_CAPITAL) & 0x0001) && !chunk_already_in_memory)
+            {
+                create_chunk(current_chunk_index);
+            }
+
+            // Loop through loaded chunks, and whatever is too far, move to the unloaded vector.
+            const u32 loaded_chunk_size = loaded_chunks.size();
+
+            // :(
+            u32 chunks_unloaded = 0u;
+
+            for (u64 i = 0; i < loaded_chunk_size; i++)
+            {
+                const DirectX::XMUINT3 _chunk_index_3d =
+                    convert_index_to_3d(loaded_chunks[i].m_chunk_index, number_of_chunks_in_each_dimension);
+
+                // If a loaded chunk is too *far* from player, move it into the unloaded chunks vector.
+                const DirectX::XMINT3 chunk_index_3d = {
+                    (i32)_chunk_index_3d.x - (i32)(number_of_chunks_in_each_dimension / 2u),
+                    (i32)_chunk_index_3d.y - (i32)(number_of_chunks_in_each_dimension / 2u),
+                    (i32)_chunk_index_3d.z - (i32)(number_of_chunks_in_each_dimension / 2u),
+                };
+
+                if ((u64)fabs(chunk_index_3d.x - current_chunk_3d_index.x) > chunk_render_distance ||
+                    (u64)fabs(chunk_index_3d.y - current_chunk_3d_index.y) > chunk_render_distance ||
+                    (u64)fabs(chunk_index_3d.z - current_chunk_3d_index.z) > chunk_render_distance)
+                {
+                    unloaded_chunks.emplace_back(std::move(loaded_chunks[i]));
+                    loaded_chunks.erase(loaded_chunks.begin() + i - chunks_unloaded++);
+                }
+            }
+
+            // Loop through the loaded chunks and render.
+            for (auto &chunk : loaded_chunks)
+            {
+                const u64 chunk_index = chunk.m_chunk_index;
+
+                const DirectX::XMUINT3 _chunk_index_3d =
+                    convert_index_to_3d(chunk_index, number_of_chunks_in_each_dimension);
+
+                const DirectX::XMINT3 chunk_index_3d = {
+                    (i32)_chunk_index_3d.x - (i32)(number_of_chunks_in_each_dimension / 2u),
+                    (i32)_chunk_index_3d.y - (i32)(number_of_chunks_in_each_dimension / 2u),
+                    (i32)_chunk_index_3d.z - (i32)(number_of_chunks_in_each_dimension / 2u),
+                };
+
+                ChunkConstantBuffer chunk_constant_buffer_data = {
+                    .transform_buffer = DirectX::XMMatrixTranslation(
+                        chunk_index_3d.x * (i32)Chunk::number_of_voxels_per_dimension,
+                        (chunk_index_3d.y - 1) * (i32)Chunk::number_of_voxels_per_dimension,
+                        (chunk_index_3d.z * (i32)Chunk::number_of_voxels_per_dimension)),
+                };
+
+                const D3D12_VERTEX_BUFFER_VIEW chunk_vertex_buffer_view = {
+                    .BufferLocation = chunk_vertex_buffers[chunk_index].m_buffer->GetGPUVirtualAddress(),
+                    .SizeInBytes = (u32)(sizeof(VertexData) * chunk_vertices_counts[chunk_index]),
+                    .StrideInBytes = sizeof(VertexData),
+                };
+
+                command_list->SetGraphicsRoot32BitConstants(1u, 16u, &chunk_constant_buffer_data.transform_buffer, 0u);
+                command_list->IASetVertexBuffers(0u, 1u, &chunk_vertex_buffer_view);
+                command_list->DrawInstanced(chunk_vertices_counts[chunk_index], 1u, 0u, 0u);
+            }
+
+            // Now, transition back to presentation mode.
+            const D3D12_RESOURCE_BARRIER render_target_to_presentation_barrier = {
+                .Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
+                .Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE,
+                .Transition =
+                    {
+                        .pResource = current_backbuffer_resource,
+                        .Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+                        .StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET,
+                        .StateAfter = D3D12_RESOURCE_STATE_PRESENT,
+                    },
+            };
+
+            command_list->ResourceBarrier(1u, &render_target_to_presentation_barrier);
+
+            // Submit command list to queue for execution.
+            renderer.execute_command_list();
+
+            // Now, present the rendertarget and signal command queue.
+            throw_if_failed(renderer.m_swapchain->Present(1u, 0u));
+            renderer.signal_fence();
+
+            renderer.m_swapchain_backbuffer_index = renderer.m_swapchain->GetCurrentBackBufferIndex();
+
+            // Wait for the previous frame (that is presenting to swpachain_backbuffer_index) to complete execution.
+            renderer.wait_for_fence_value_at_index(renderer.m_swapchain_backbuffer_index);
+
+            ++frame_count;
+
+            QueryPerformanceCounter(&frame_end_time);
+
+            delta_time = (frame_end_time.QuadPart - frame_start_time.QuadPart) * seconds_per_count;
+        }
     }
-
     printf("Frames renderer :: %u", (u32)frame_count);
 
     renderer.flush_gpu();

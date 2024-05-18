@@ -6,6 +6,8 @@ constexpr bool VX_DEBUG_MODE = true;
 constexpr bool VX_DEBUG_MODE = false;
 #endif
 
+#define USE(x) (void)x
+
 // Helper function to print to console in debug mode if the passed Hresult has failed.
 inline void throw_if_failed(const HRESULT hr, const std::source_location src_loc = std::source_location::current())
 {
