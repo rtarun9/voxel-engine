@@ -66,6 +66,65 @@ int main()
 
     static constexpr u32 number_of_chunks_in_each_dimension = 64;
 
+    // Resources for the *debug draw*, a wireframe rendering to visualize all the chunks.
+
+    // Index buffer setup.
+    Buffer debug_grid_index_buffer{};
+    Buffer debug_grid_vertex_buffer{};
+    D3D12_INDEX_BUFFER_VIEW debug_grid_index_buffer_view{};
+    D3D12_VERTEX_BUFFER_VIEW debug_grid_vertex_buffer_view{};
+
+    {
+        constexpr u16 index_buffer_data[36] = {0, 1, 2, 0, 2, 3, 4, 6, 5, 4, 7, 6, 4, 5, 1, 4, 1, 0,
+                                               3, 2, 6, 3, 6, 7, 1, 5, 6, 1, 6, 2, 4, 0, 3, 4, 3, 7};
+        Renderer::BufferPair debug_grid_index_buffer_pair =
+            renderer.create_buffer((void *)&index_buffer_data, sizeof(u16) * 36u, BufferTypes::Static);
+
+        intermediate_resources.emplace_back(debug_grid_index_buffer_pair.m_intermediate_buffer.m_buffer);
+        debug_grid_index_buffer = debug_grid_index_buffer_pair.m_buffer;
+
+        // Create the index buffer view.
+        debug_grid_index_buffer_view = {
+
+            .BufferLocation = debug_grid_index_buffer.m_buffer->GetGPUVirtualAddress(),
+            .SizeInBytes = sizeof(u16) * 36u,
+            .Format = DXGI_FORMAT_R16_UINT,
+        };
+
+        // Vertex buffer setup.
+        constexpr VertexData vertex_buffer_data[8] = {
+            VertexData{.position = DirectX::XMFLOAT3(-1.0f, -1.0f, -1.0f),
+                       .color = DirectX::XMFLOAT3(0.0f, 0.0f, 0.0f)}, // 0
+            VertexData{.position = DirectX::XMFLOAT3(-1.0f, 1.0f, -1.0f),
+                       .color = DirectX::XMFLOAT3(0.0f, 1.0f, 0.0f)}, // 1
+            VertexData{.position = DirectX::XMFLOAT3(1.0f, 1.0f, -1.0f),
+                       .color = DirectX::XMFLOAT3(1.0f, 1.0f, 0.0f)}, // 2
+            VertexData{.position = DirectX::XMFLOAT3(1.0f, -1.0f, -1.0f),
+                       .color = DirectX::XMFLOAT3(1.0f, 0.0f, 0.0f)}, // 3
+            VertexData{.position = DirectX::XMFLOAT3(-1.0f, -1.0f, 1.0f),
+                       .color = DirectX::XMFLOAT3(0.0f, 0.0f, 1.0f)}, // 4
+            VertexData{.position = DirectX::XMFLOAT3(-1.0f, 1.0f, 1.0f),
+                       .color = DirectX::XMFLOAT3(0.0f, 1.0f, 1.0f)}, // 5
+            VertexData{.position = DirectX::XMFLOAT3(1.0f, 1.0f, 1.0f),
+                       .color = DirectX::XMFLOAT3(1.0f, 1.0f, 1.0f)}, // 6
+            VertexData{.position = DirectX::XMFLOAT3(1.0f, -1.0f, 1.0f),
+                       .color = DirectX::XMFLOAT3(1.0f, 0.0f, 1.0f)} // 7
+        };
+
+        Renderer::BufferPair debug_grid_vertex_buffer_pair =
+            renderer.create_buffer((void *)&vertex_buffer_data, sizeof(VertexData) * 8u, BufferTypes::Static);
+
+        intermediate_resources.emplace_back(debug_grid_vertex_buffer_pair.m_intermediate_buffer.m_buffer);
+        debug_grid_vertex_buffer = debug_grid_vertex_buffer_pair.m_buffer;
+
+        // Create the vertex buffer view.
+        debug_grid_vertex_buffer_view = {
+            .BufferLocation = debug_grid_vertex_buffer.m_buffer->GetGPUVirtualAddress(),
+            .SizeInBytes = sizeof(VertexData) * 8u,
+            .StrideInBytes = sizeof(VertexData),
+        };
+    }
+
     // Note : Each chunk has its own vertex buffer and transform buffer.
     // The renderer has an array of vertex buffers to simply the process of rendering.
     // For simplicity, all chunks will SHARE the same vertex data. This is because for now the focus is on how to load
@@ -92,14 +151,12 @@ int main()
         // Vertex buffer construction.
         const DirectX::XMUINT3 index = convert_index_to_3d(i, Chunk::number_of_voxels_per_dimension);
 
-        place_holder_chunk.m_cubes[i].m_active = (index.x % 2 == 0);
-
         if (place_holder_chunk.m_cubes[i].m_active)
         {
             const DirectX::XMFLOAT3 position_offset =
                 DirectX::XMFLOAT3{voxel_cube_dimension * (float)index.x, voxel_cube_dimension * (float)index.y,
                                   voxel_cube_dimension * (float)index.z};
-            const float voxel_render_size = voxel_cube_dimension * 0.5f;
+            const float voxel_render_size = voxel_cube_dimension;
 
             const VertexData v1 = (VertexData{.position = DirectX::XMFLOAT3(position_offset.x - voxel_render_size,
                                                                             position_offset.y - voxel_render_size,
@@ -292,10 +349,11 @@ int main()
         renderer.m_device->CreateDepthStencilView(depth_resource.Get(), &dsv_desc, dsv_cpu_handle);
     }
 
-    Microsoft::WRL::ComPtr<ID3DBlob> root_signature_blob{};
-    Microsoft::WRL::ComPtr<ID3D12RootSignature> root_signature{};
+    // There are 2 root signatures : one for the debug grid draw, and one for chunks.
+    Microsoft::WRL::ComPtr<ID3DBlob> chunks_root_signature_blob{};
+    Microsoft::WRL::ComPtr<ID3D12RootSignature> chunks_root_signature{};
 
-    D3D12_ROOT_PARAMETER1 root_parameters[2] = {
+    D3D12_ROOT_PARAMETER1 chunks_root_parameters[2] = {
         // For scene constant buffer.
         D3D12_ROOT_PARAMETER1{
             .ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV,
@@ -320,22 +378,69 @@ int main()
         },
     };
 
-    const D3D12_VERSIONED_ROOT_SIGNATURE_DESC root_signature_desc = {
+    const D3D12_VERSIONED_ROOT_SIGNATURE_DESC chunks_root_signature_desc = {
         .Version = D3D_ROOT_SIGNATURE_VERSION_1_1,
         .Desc_1_1 =
             {
                 .NumParameters = 2u,
-                .pParameters = root_parameters,
+                .pParameters = chunks_root_parameters,
                 .NumStaticSamplers = 0u,
                 .pStaticSamplers = nullptr,
                 .Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT,
             },
     };
     // Serialize root signature.
-    throw_if_failed(D3D12SerializeVersionedRootSignature(&root_signature_desc, &root_signature_blob, nullptr));
-    throw_if_failed(renderer.m_device->CreateRootSignature(0u, root_signature_blob->GetBufferPointer(),
-                                                           root_signature_blob->GetBufferSize(),
-                                                           IID_PPV_ARGS(&root_signature)));
+    throw_if_failed(
+        D3D12SerializeVersionedRootSignature(&chunks_root_signature_desc, &chunks_root_signature_blob, nullptr));
+    throw_if_failed(renderer.m_device->CreateRootSignature(0u, chunks_root_signature_blob->GetBufferPointer(),
+                                                           chunks_root_signature_blob->GetBufferSize(),
+                                                           IID_PPV_ARGS(&chunks_root_signature)));
+
+    Microsoft::WRL::ComPtr<ID3DBlob> debug_grid_root_signature_blob{};
+    Microsoft::WRL::ComPtr<ID3D12RootSignature> debug_grid_root_signature{};
+
+    D3D12_ROOT_PARAMETER1 debug_grid_root_parameters[2] = {
+        // For scene constant buffer.
+        D3D12_ROOT_PARAMETER1{
+            .ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV,
+            .Descriptor =
+                D3D12_ROOT_DESCRIPTOR1{
+                    .ShaderRegister = 0u,
+                    .RegisterSpace = 0u,
+                    .Flags = D3D12_ROOT_DESCRIPTOR_FLAG_NONE,
+                },
+            .ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX,
+        },
+        // For instance transform buffer (inline root constant) of a float4x4.
+        D3D12_ROOT_PARAMETER1{
+            .ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
+            .Constants =
+                D3D12_ROOT_CONSTANTS{
+                    .ShaderRegister = 1u,
+                    .RegisterSpace = 0u,
+                    .Num32BitValues = 16u,
+                },
+            .ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX,
+        },
+    };
+
+    const D3D12_VERSIONED_ROOT_SIGNATURE_DESC debug_grid_root_signature_desc = {
+        .Version = D3D_ROOT_SIGNATURE_VERSION_1_1,
+        .Desc_1_1 =
+            {
+                .NumParameters = 2u,
+                .pParameters = debug_grid_root_parameters,
+                .NumStaticSamplers = 0u,
+                .pStaticSamplers = nullptr,
+                .Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT,
+            },
+    };
+    // Serialize root signature.
+    throw_if_failed(D3D12SerializeVersionedRootSignature(&debug_grid_root_signature_desc,
+                                                         &debug_grid_root_signature_blob, nullptr));
+    throw_if_failed(renderer.m_device->CreateRootSignature(0u, debug_grid_root_signature_blob->GetBufferPointer(),
+                                                           debug_grid_root_signature_blob->GetBufferSize(),
+                                                           IID_PPV_ARGS(&debug_grid_root_signature)));
 
     // Compile the vertex and pixel shader.
     Microsoft::WRL::ComPtr<IDxcBlob> vertex_shader_blob =
@@ -344,7 +449,7 @@ int main()
     Microsoft::WRL::ComPtr<IDxcBlob> pixel_shader_blob =
         ShaderCompiler::compile(L"shaders/shader.hlsl", L"ps_main", L"ps_6_0");
 
-    // Create the root signature.
+    // Create the graphics pso.
     const D3D12_INPUT_ELEMENT_DESC input_element_descs[2] = {
         D3D12_INPUT_ELEMENT_DESC{
             .SemanticName = "POSITION",
@@ -366,9 +471,9 @@ int main()
         },
     };
 
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> pso{};
-    const D3D12_GRAPHICS_PIPELINE_STATE_DESC graphics_pso_desc = {
-        .pRootSignature = root_signature.Get(),
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> chunks_pso{};
+    const D3D12_GRAPHICS_PIPELINE_STATE_DESC chunks_graphics_pso_desc = {
+        .pRootSignature = chunks_root_signature.Get(),
         .VS =
             {
                 .pShaderBytecode = vertex_shader_blob->GetBufferPointer(),
@@ -423,7 +528,75 @@ int main()
             },
         .NodeMask = 0u,
     };
-    throw_if_failed(renderer.m_device->CreateGraphicsPipelineState(&graphics_pso_desc, IID_PPV_ARGS(&pso)));
+    throw_if_failed(
+        renderer.m_device->CreateGraphicsPipelineState(&chunks_graphics_pso_desc, IID_PPV_ARGS(&chunks_pso)));
+
+    // Compile the vertex and pixel shader.
+    Microsoft::WRL::ComPtr<IDxcBlob> debug_grid_vertex_shader_blob =
+        ShaderCompiler::compile(L"shaders/debug_grid_shader.hlsl", L"vs_main", L"vs_6_0");
+
+    Microsoft::WRL::ComPtr<IDxcBlob> debug_grid_pixel_shader_blob =
+        ShaderCompiler::compile(L"shaders/debug_grid_shader.hlsl", L"ps_main", L"ps_6_0");
+
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> debug_grid_pso{};
+    const D3D12_GRAPHICS_PIPELINE_STATE_DESC debug_grid_graphics_pso_desc = {
+        .pRootSignature = debug_grid_root_signature.Get(),
+        .VS =
+            {
+                .pShaderBytecode = debug_grid_vertex_shader_blob->GetBufferPointer(),
+                .BytecodeLength = debug_grid_vertex_shader_blob->GetBufferSize(),
+            },
+        .PS =
+            {
+                .pShaderBytecode = debug_grid_pixel_shader_blob->GetBufferPointer(),
+                .BytecodeLength = debug_grid_pixel_shader_blob->GetBufferSize(),
+            },
+        .BlendState =
+            {
+                .AlphaToCoverageEnable = FALSE,
+                .IndependentBlendEnable = FALSE,
+                .RenderTarget =
+                    {
+                        D3D12_RENDER_TARGET_BLEND_DESC{
+                            .RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL,
+                        },
+                    },
+            },
+        .SampleMask = 0xffff'ffff,
+        .RasterizerState =
+            {
+                .FillMode = D3D12_FILL_MODE_WIREFRAME,
+                .CullMode = D3D12_CULL_MODE_BACK,
+                .FrontCounterClockwise = FALSE,
+            },
+        .DepthStencilState =
+            {
+                .DepthEnable = TRUE,
+                .DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL,
+                .DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL,
+                .StencilEnable = FALSE,
+            },
+        .InputLayout =
+            {
+                .pInputElementDescs = input_element_descs,
+                .NumElements = 2u,
+            },
+        .PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE,
+        .NumRenderTargets = 1u,
+        .RTVFormats =
+            {
+                DXGI_FORMAT_R10G10B10A2_UNORM,
+            },
+        .DSVFormat = DXGI_FORMAT_D32_FLOAT,
+        .SampleDesc =
+            {
+                1u,
+                0u,
+            },
+        .NodeMask = 0u,
+    };
+    throw_if_failed(
+        renderer.m_device->CreateGraphicsPipelineState(&debug_grid_graphics_pso_desc, IID_PPV_ARGS(&debug_grid_pso)));
 
     // Create viewport and scissor.
     const D3D12_VIEWPORT viewport = {
@@ -549,17 +722,50 @@ int main()
         command_list->RSSetViewports(1u, &viewport);
         command_list->RSSetScissorRects(1u, &scissor_rect);
 
-        // Set the index buffer, pso and all config settings for rendering.
-        command_list->SetGraphicsRootSignature(root_signature.Get());
-        command_list->SetPipelineState(pso.Get());
+        command_list->OMSetRenderTargets(
+            1u, &renderer.m_swapchain_backbuffer_cpu_descriptor_handles[swapchain_backbuffer_index], FALSE,
+            &dsv_cpu_handle);
 
         ID3D12DescriptorHeap *const shader_visible_descriptor_heaps = {
             renderer.m_cbv_srv_uav_descriptor_heap.m_descriptor_heap.Get()};
         command_list->SetDescriptorHeaps(1u, &shader_visible_descriptor_heaps);
 
-        command_list->OMSetRenderTargets(
-            1u, &renderer.m_swapchain_backbuffer_cpu_descriptor_handles[swapchain_backbuffer_index], FALSE,
-            &dsv_cpu_handle);
+        // Render the debug grid.
+        {
+            command_list->SetGraphicsRootSignature(debug_grid_root_signature.Get());
+            command_list->SetPipelineState(debug_grid_pso.Get());
+
+            command_list->SetGraphicsRootConstantBufferView(0u, scene_constant_buffer.m_buffer->GetGPUVirtualAddress());
+            command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+            command_list->IASetVertexBuffers(0u, 1u, &debug_grid_vertex_buffer_view);
+            command_list->IASetIndexBuffer(&debug_grid_index_buffer_view);
+
+            for (u64 grid_index = 0; grid_index < number_of_chunks_in_each_dimension; grid_index++)
+            {
+                const DirectX::XMUINT3 grid_offset =
+                    convert_index_to_3d(grid_index, number_of_chunks_in_each_dimension);
+                (void)grid_offset;
+
+                const DirectX::XMMATRIX transform_matrix = DirectX::XMMatrixScaling(
+                    (float)Chunk::number_of_voxels_per_dimension, (float)Chunk::number_of_voxels_per_dimension,
+                    (float)Chunk::number_of_voxels_per_dimension);
+                /*
+                    DirectX::XMMatrixTranslation(grid_offset.x * Chunk::number_of_voxels_per_dimension,
+                                                 grid_offset.y * Chunk::number_of_voxels_per_dimension,
+                                                 grid_offset.z * Chunk::number_of_voxels_per_dimension);
+                                                 */
+                ;
+
+                command_list->SetGraphicsRoot32BitConstants(1u, 16u, &transform_matrix, 0u);
+
+                command_list->DrawIndexedInstanced(36u, 1u, 0u, 0u, 0u);
+            }
+        }
+
+        // Set the index buffer, pso and all config settings for rendering.
+        command_list->SetGraphicsRootSignature(chunks_root_signature.Get());
+        command_list->SetPipelineState(chunks_pso.Get());
 
         command_list->SetGraphicsRootConstantBufferView(0u, scene_constant_buffer.m_buffer->GetGPUVirtualAddress());
 
