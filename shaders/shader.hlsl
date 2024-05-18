@@ -25,7 +25,7 @@ VSOutput vs_main(VSInput input)
     VSOutput output;
     output.position = mul(mul(float4(input.position, 1.0f), transform_matrix), view_projection_matrix);
 
-    output.color = float4(input.color, 1.0f);
+    output.color = float4(input.color, 0.5f);
     
     return output;
 }
