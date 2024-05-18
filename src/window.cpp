@@ -33,7 +33,7 @@ static LRESULT CALLBACK window_proc(HWND window_handle, UINT message, WPARAM w_p
     return DefWindowProcA(window_handle, message, w_param, l_param);
 }
 
-Window::Window(const float width_percentage, const float height_percentage)
+Window::Window()
 {
     // Get screen dimension.
     const i32 screen_width = GetSystemMetrics(SM_CXSCREEN);

@@ -33,7 +33,7 @@ static inline u64 convert_index_to_1d(const DirectX::XMINT3 index, const u32 N, 
 
 int main()
 {
-    const Window window(100.0f, 100.0f);
+    const Window window{};
     Renderer renderer(window.m_handle, window.m_width, window.m_height);
 
     // A vector of intermediate resources (required since intermediate buffers need to be in memory until the copy
@@ -158,13 +158,26 @@ int main()
     std::unordered_map<u64, u64> chunk_vertices_counts{};
     std::unordered_map<u64, Buffer> chunk_vertex_buffers{};
     std::unordered_map<u64, std::vector<VertexData>> chunk_vertex_datas{};
+    std::unordered_map<u64, Cube *> chunk_cubes{};
 
     // For now, create a single chunk upfront.
     // This function adds the chunk to the chunks_to_load vector.
+    // Will not create a chunk if index is already in loaded_chunks vector.
     const auto create_chunk = [&](const auto chunk_index) {
+        for (const auto &loaded_chunk : loaded_chunks)
+        {
+            if (loaded_chunk.m_chunk_index == chunk_index)
+            {
+                return;
+            }
+        }
         Chunk chunk{};
 
         chunk_vertex_datas[chunk_index] = std::vector<VertexData>{};
+        chunk_cubes[chunk_index] = new Cube[Chunk::number_of_voxels];
+
+        const DirectX::XMFLOAT3 voxel_color =
+            DirectX::XMFLOAT3(rand() / double(RAND_MAX), rand() / double(RAND_MAX), rand() / double(RAND_MAX));
 
         for (u64 i = 0; i < Chunk::number_of_voxels; i++)
         {
@@ -172,15 +185,12 @@ int main()
 
             chunk_vertex_datas[chunk_index].reserve(chunk_vertex_datas.size() + 36u);
 
-            const DirectX::XMFLOAT3 voxel_color =
-                DirectX::XMFLOAT3(rand() / double(RAND_MAX), rand() / double(RAND_MAX), rand() / double(RAND_MAX));
-
             // Vertex buffer construction.
             const DirectX::XMUINT3 index = convert_index_to_3d(i, Chunk::number_of_voxels_per_dimension);
 
-            chunk.m_cubes[i].m_active = index.y < Chunk::number_of_voxels_per_dimension / 2u;
+            chunk_cubes[chunk_index][i].m_active = index.y < Chunk::number_of_voxels_per_dimension / 2u;
 
-            if (chunk.m_cubes[i].m_active)
+            if (chunk_cubes[chunk_index][i].m_active)
             {
                 const DirectX::XMFLOAT3 position_offset =
                     DirectX::XMFLOAT3{(float)index.x, (float)index.y, (float)index.z};
@@ -785,18 +795,14 @@ int main()
 
             command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-            // From the previous frames chunk to load vector, move thos chunks to the *loaded chunks* array.
+            // From the previous frames chunk to load vector, move thoss chunks to the *loaded chunks* array.
             for (auto &newly_loaded_chunks : chunks_to_load)
             {
-                loaded_chunks.emplace_back(std::move(newly_loaded_chunks));
+                loaded_chunks.emplace_back(newly_loaded_chunks);
             }
 
             chunks_to_load.clear();
 
-            // Now, if there is a chunk that is already loaded,
-            // Render all chunks.
-            // Check if there is a chunk loaded at current position.
-            // Now, for finding *which chunk* the camera is in.
             DirectX::XMFLOAT3 camera_position{};
             DirectX::XMStoreFloat3(&camera_position, camera.m_camera_position);
 
@@ -811,10 +817,8 @@ int main()
 
             // Loop through the unloaded chunk vector.
             // and load the chunks that are close enough to the player.
-            u32 reloaded_chunk_count = 0u;
-            const u32 unloaded_chunks_size = unloaded_chunks.size();
 
-            for (u32 i = 0; i < unloaded_chunks_size; i++)
+            for (u32 i = 0; i < unloaded_chunks.size();)
             {
                 const DirectX::XMUINT3 _chunk_index_3d =
                     convert_index_to_3d(loaded_chunks[i].m_chunk_index, number_of_chunks_in_each_dimension);
@@ -828,8 +832,12 @@ int main()
                     (u64)fabs(chunk_index_3d.y - current_chunk_3d_index.y) <= chunk_render_distance ||
                     (u64)fabs(chunk_index_3d.z - current_chunk_3d_index.z) <= chunk_render_distance)
                 {
-                    loaded_chunks.emplace_back(std::move(unloaded_chunks[i]));
-                    unloaded_chunks.erase(unloaded_chunks.begin() + i - reloaded_chunk_count++);
+                    loaded_chunks.emplace_back(unloaded_chunks[i]);
+                    unloaded_chunks.erase(unloaded_chunks.begin() + i);
+                }
+                else
+                {
+                    ++i;
                 }
             }
 
@@ -848,15 +856,28 @@ int main()
             if (!(GetKeyState(VK_CAPITAL) & 0x0001) && !chunk_already_in_memory)
             {
                 create_chunk(current_chunk_index);
+
+                // Also load the surrounding chunks, if they are not yet loaded.
+                create_chunk(convert_index_to_1d(
+                    DirectX::XMINT3{current_chunk_3d_index.x - 1, current_chunk_3d_index.y, current_chunk_3d_index.z},
+                    number_of_chunks_in_each_dimension, number_of_chunks_in_each_dimension / 2u));
+
+                create_chunk(convert_index_to_1d(
+                    DirectX::XMINT3{current_chunk_3d_index.x + 1, current_chunk_3d_index.y, current_chunk_3d_index.z},
+                    number_of_chunks_in_each_dimension, number_of_chunks_in_each_dimension / 2u));
+
+                create_chunk(convert_index_to_1d(
+                    DirectX::XMINT3{current_chunk_3d_index.x, current_chunk_3d_index.y, current_chunk_3d_index.z - 1},
+                    number_of_chunks_in_each_dimension, number_of_chunks_in_each_dimension / 2u));
+
+                create_chunk(convert_index_to_1d(DirectX::XMINT3{current_chunk_3d_index.x + 1, current_chunk_3d_index.y,
+                                                                 current_chunk_3d_index.z + 1},
+                                                 number_of_chunks_in_each_dimension,
+                                                 number_of_chunks_in_each_dimension / 2u));
             }
 
             // Loop through loaded chunks, and whatever is too far, move to the unloaded vector.
-            const u32 loaded_chunk_size = loaded_chunks.size();
-
-            // :(
-            u32 chunks_unloaded = 0u;
-
-            for (u64 i = 0; i < loaded_chunk_size; i++)
+            for (u64 i = 0; i < loaded_chunks.size();)
             {
                 const DirectX::XMUINT3 _chunk_index_3d =
                     convert_index_to_3d(loaded_chunks[i].m_chunk_index, number_of_chunks_in_each_dimension);
@@ -872,8 +893,12 @@ int main()
                     (u64)fabs(chunk_index_3d.y - current_chunk_3d_index.y) > chunk_render_distance ||
                     (u64)fabs(chunk_index_3d.z - current_chunk_3d_index.z) > chunk_render_distance)
                 {
-                    unloaded_chunks.emplace_back(std::move(loaded_chunks[i]));
-                    loaded_chunks.erase(loaded_chunks.begin() + i - chunks_unloaded++);
+                    unloaded_chunks.emplace_back(loaded_chunks[i]);
+                    loaded_chunks.erase(loaded_chunks.begin() + i);
+                }
+                else
+                {
+                    ++i;
                 }
             }
 
@@ -943,6 +968,12 @@ int main()
             delta_time = (frame_end_time.QuadPart - frame_start_time.QuadPart) * seconds_per_count;
         }
     }
+
+    for (const auto &[chunk_index, chunk_cube] : chunk_cubes)
+    {
+        delete[] chunk_cube;
+    }
+
     printf("Frames renderer :: %u", (u32)frame_count);
 
     renderer.flush_gpu();

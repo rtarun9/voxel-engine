@@ -5,8 +5,8 @@
 // Simple abstraction class over win32 window.
 struct Window
 {
-    // The width and height is based on percentage of the screen width and height.
-    Window(const float width_percentage, const float height_percentage);
+    // For now window is only created in full screen mode.
+    Window();
 
     ~Window();
 
