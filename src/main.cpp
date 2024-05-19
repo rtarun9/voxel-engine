@@ -49,7 +49,6 @@ int main()
         DirectX::XMFLOAT3 position{};
         DirectX::XMFLOAT3 color{};
     };
-
     static constexpr float voxel_cube_dimension = 16.0f;
 
     // If a chunk that is loaded is 'chunk_render_distance' units away from the player in any direction, it is moved
@@ -74,37 +73,38 @@ int main()
     // Vertex buffer setup.
     // In this engine, the *voxel* is a point sample and represents(sort of) the FRONT LOWER LEFT point in the actual
     // CUBE.
+    constexpr float grid_cube_dimension = Chunk::number_of_voxels_per_dimension * voxel_cube_dimension;
     constexpr VertexData vertex_buffer_data[8] = {
         VertexData{
             .position = DirectX::XMFLOAT3(0.0f, 0.0f, 0.0f),
             .color = DirectX::XMFLOAT3(0.0f, 0.0f, 0.0f),
         }, // 0
         VertexData{
-            .position = DirectX::XMFLOAT3(0.0f, voxel_cube_dimension, 0.0f),
+            .position = DirectX::XMFLOAT3(0.0f, grid_cube_dimension, 0.0f),
             .color = DirectX::XMFLOAT3(0.0f, 0.5f, 0.0f),
         }, // 1
         VertexData{
-            .position = DirectX::XMFLOAT3(voxel_cube_dimension, voxel_cube_dimension, 0.0f),
+            .position = DirectX::XMFLOAT3(grid_cube_dimension, grid_cube_dimension, 0.0f),
             .color = DirectX::XMFLOAT3(0.5f, 0.5f, 0.0f),
         }, // 2
         VertexData{
-            .position = DirectX::XMFLOAT3(voxel_cube_dimension, 0.0f, 0.0f),
+            .position = DirectX::XMFLOAT3(grid_cube_dimension, 0.0f, 0.0f),
             .color = DirectX::XMFLOAT3(0.5f, 0.0f, 0.0f),
         }, // 3
         VertexData{
-            .position = DirectX::XMFLOAT3(0.0f, 0.0f, voxel_cube_dimension),
+            .position = DirectX::XMFLOAT3(0.0f, 0.0f, grid_cube_dimension),
             .color = DirectX::XMFLOAT3(0.0f, 0.0f, 0.5f),
         }, // 4
         VertexData{
-            .position = DirectX::XMFLOAT3(0.0f, voxel_cube_dimension, voxel_cube_dimension),
+            .position = DirectX::XMFLOAT3(0.0f, grid_cube_dimension, grid_cube_dimension),
             .color = DirectX::XMFLOAT3(0.0f, 0.5f, 0.5f),
         }, // 5
         VertexData{
-            .position = DirectX::XMFLOAT3(voxel_cube_dimension, voxel_cube_dimension, voxel_cube_dimension),
+            .position = DirectX::XMFLOAT3(grid_cube_dimension, grid_cube_dimension, grid_cube_dimension),
             .color = DirectX::XMFLOAT3(0.5f, 0.5f, 0.5f),
         }, // 6
         VertexData{
-            .position = DirectX::XMFLOAT3(voxel_cube_dimension, 0.0f, voxel_cube_dimension),
+            .position = DirectX::XMFLOAT3(grid_cube_dimension, 0.0f, grid_cube_dimension),
             .color = DirectX::XMFLOAT3(0.5f, 0.0f, 0.5f),
         } // 7
     };
@@ -227,10 +227,11 @@ int main()
                 }
             };
 
-            if (chunk_cubes[chunk_index][i].m_active && check_if_voxel_is_covered_on_all_sides(index))
+            if (index.x == 0u && chunk_cubes[chunk_index][i].m_active && check_if_voxel_is_covered_on_all_sides(index))
             {
                 const DirectX::XMFLOAT3 position_offset =
-                    DirectX::XMFLOAT3{(float)index.x, (float)index.y, (float)index.z};
+                    DirectX::XMFLOAT3{(float)index.x * voxel_cube_dimension, (float)index.y * voxel_cube_dimension,
+                                      (float)index.z * voxel_cube_dimension};
 
                 const VertexData v1 =
                     (VertexData{.position = DirectX::XMFLOAT3(position_offset.x, position_offset.y, position_offset.z),
@@ -482,15 +483,13 @@ int main()
                 },
             .ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX,
         },
-        // For instance transform buffer (inline root constant) of a float4x4 for transform data and 3 uint's for
-        // instance count and number of chunks per dimensions and number of voxels per dimension.
         D3D12_ROOT_PARAMETER1{
             .ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
             .Constants =
                 D3D12_ROOT_CONSTANTS{
                     .ShaderRegister = 1u,
                     .RegisterSpace = 0u,
-                    .Num32BitValues = 20u,
+                    .Num32BitValues = 2u,
                 },
             .ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX,
         },
@@ -732,7 +731,7 @@ int main()
         const float aspect_ratio = (float)window.m_width / (float)window.m_height;
         const float vertical_fov = DirectX::XMConvertToRadians(45.0f);
         const DirectX::XMMATRIX projection_matrix =
-            DirectX::XMMatrixPerspectiveFovLH(vertical_fov, aspect_ratio, 0.1, 1000.0f);
+            DirectX::XMMatrixPerspectiveFovLH(vertical_fov, aspect_ratio, 0.1, 10'000.0f);
 
         const DirectX::XMMATRIX view_projection_matrix =
             camera.update_and_get_view_matrix(delta_time) * projection_matrix;
@@ -806,20 +805,17 @@ int main()
             {
                 struct DebugGridRootConstants
                 {
-                    DirectX::XMMATRIX matrix{};
                     u32 number_of_chunks_per_dimension{};
-                    u32 number_of_voxels_per_dimension{};
+                    float grid_cube_dimension{};
                 };
 
                 DebugGridRootConstants root_constants = {
-                    .matrix = DirectX::XMMatrixScaling((float)Chunk::number_of_voxels_per_dimension,
-                                                       (float)Chunk::number_of_voxels_per_dimension,
-                                                       (float)Chunk::number_of_voxels_per_dimension),
+
                     .number_of_chunks_per_dimension = number_of_chunks_in_each_dimension,
-                    .number_of_voxels_per_dimension = Chunk::number_of_voxels_per_dimension,
+                    .grid_cube_dimension = grid_cube_dimension,
                 };
 
-                command_list->SetGraphicsRoot32BitConstants(1u, 18u, &root_constants, 0u);
+                command_list->SetGraphicsRoot32BitConstants(1u, 2u, &root_constants, 0u);
 
                 command_list->DrawIndexedInstanced(24u, number_of_chunks, 0u, 0u, 0u);
             }
@@ -856,7 +852,8 @@ int main()
             // Loop through the unloaded chunk vector.
             // and load the chunks that are close enough to the player.
 
-            // note(rtarun9) : In future, convert this code to be more optimized (some sort of spatial data structure).
+            // note(rtarun9) : In future, convert this code to be more optimized (some sort of spatial data
+            // structure).
             for (u32 i = 0; i < unloaded_chunks.size();)
             {
                 const DirectX::XMUINT3 _chunk_index_3d =
@@ -967,9 +964,9 @@ int main()
 
                 ChunkConstantBuffer chunk_constant_buffer_data = {
                     .transform_buffer = DirectX::XMMatrixTranslation(
-                        chunk_index_3d.x * (i32)Chunk::number_of_voxels_per_dimension,
-                        (chunk_index_3d.y - 1) * (i32)Chunk::number_of_voxels_per_dimension,
-                        (chunk_index_3d.z * (i32)Chunk::number_of_voxels_per_dimension)),
+                        chunk_index_3d.x * (i32)Chunk::number_of_voxels_per_dimension * voxel_cube_dimension,
+                        chunk_index_3d.y * (i32)Chunk::number_of_voxels_per_dimension * voxel_cube_dimension,
+                        chunk_index_3d.z * (i32)Chunk::number_of_voxels_per_dimension * voxel_cube_dimension),
                 };
 
                 const D3D12_VERTEX_BUFFER_VIEW chunk_vertex_buffer_view = {

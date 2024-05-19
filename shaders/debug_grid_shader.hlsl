@@ -17,9 +17,8 @@ cbuffer SceneConstantBuffer : register(b0)
 
 cbuffer TransformConstantBuffer : register(b1)
 {
-    float4x4 transform_buffer;
     uint number_of_chunks_per_dimension;
-    uint number_of_voxels_per_dimension;
+    float grid_cube_dimension;
 };
 
 VSOutput vs_main(VSInput input, uint instanceID : SV_InstanceID)
@@ -32,9 +31,7 @@ VSOutput vs_main(VSInput input, uint instanceID : SV_InstanceID)
     const uint y = index_2d / number_of_chunks_per_dimension;
     const uint x = index_2d % number_of_chunks_per_dimension;
 
-
-    output.position = mul(float4(input.position, 1.0f), transform_buffer);
-    output.position = float4(output.position.xyz + (float3(x, y, z) - float3(number_of_chunks_per_dimension, number_of_chunks_per_dimension, number_of_chunks_per_dimension) / 2u) * number_of_voxels_per_dimension, 1.0f);
+    output.position = float4(input.position.xyz + (float3(x, y, z) - float3(number_of_chunks_per_dimension, number_of_chunks_per_dimension, number_of_chunks_per_dimension) / 2.0f) * grid_cube_dimension, 1.0f);
     output.position = mul(output.position, view_projection_matrix);
 
     output.color = float4(input.color, 1.0f);
