@@ -39,7 +39,7 @@ int main()
     // A vector of intermediate resources (required since intermediate buffers need to be in memory until the copy
     // resource and other functions are executed).
     std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> intermediate_resources{};
-    intermediate_resources.reserve(128);
+    intermediate_resources.reserve(4096);
 
     // Create the resources required for rendering.
 
@@ -49,11 +49,14 @@ int main()
         DirectX::XMFLOAT3 position{};
         DirectX::XMFLOAT3 color{};
     };
-    static constexpr float voxel_cube_dimension = 16.0f;
+
+    static constexpr float voxel_cube_dimension = 32.0f;
+
+    constexpr float grid_cube_dimension = Chunk::number_of_voxels_per_dimension * voxel_cube_dimension;
 
     // If a chunk that is loaded is 'chunk_render_distance' units away from the player in any direction, it is moved
     // into the unloaded_chunks vector.
-    static constexpr u64 chunk_render_distance = 1u;
+    static constexpr u64 chunk_render_distance = 9u;
 
     // Chunks range from -number_of_chunks_each_dimension / 2 to the positive axis.
     static constexpr u32 number_of_chunks_in_each_dimension = 64u;
@@ -74,7 +77,6 @@ int main()
     // Vertex buffer setup.
     // In this engine, the *voxel* is a point sample and represents(sort of) the FRONT LOWER LEFT point in the actual
     // CUBE.
-    constexpr float grid_cube_dimension = Chunk::number_of_voxels_per_dimension * voxel_cube_dimension;
     constexpr VertexData vertex_buffer_data[8] = {
         VertexData{
             .position = DirectX::XMFLOAT3(0.0f, 0.0f, 0.0f),
@@ -141,26 +143,35 @@ int main()
 
     // Note : Each chunk has its own vertex buffer and transform buffer.
 
+    // Different states a chunk can be in:
     // Loaded chunks : In memory, and can be rendered.
     std::vector<Chunk> loaded_chunks{};
 
-    // Chunks which are to be created (memory must be allocated).
-    std::vector<Chunk> chunks_to_load{};
-
     // Chunks which are in memory, but are no longer rendered.
     std::vector<Chunk> unloaded_chunks{};
+
+    // A chunk that has its datasetup but not yet allocated memory is said to be in "created state".
+    // Chunks which are to be created (memory must be allocated).
+    // Acts as a backlog for all chunks to be created.
+    std::queue<u64> total_chunks_to_be_created{};
+
+    // Chunks that are created, but need to be loaded.
+    std::queue<Chunk> created_chunks{};
 
     // Data for chunks.
     // In the hashmap, the key is the chunk index (each chunks knows this information), and the value is as the hahsmap
     // name.
     std::unordered_map<u64, u64> chunk_vertices_counts{};
+    chunk_vertices_counts.reserve(1024u);
+
     std::unordered_map<u64, Buffer> chunk_vertex_buffers{};
     std::unordered_map<u64, std::vector<VertexData>> chunk_vertex_datas{};
     std::unordered_map<u64, Cube *> chunk_cubes{};
 
-    // This function adds the chunk to the chunks_to_load vector.
+    // This function adds the chunk to the created_chunks queue.
     const auto create_chunk = [&](const auto chunk_index) {
         Chunk chunk{};
+        chunk.m_chunk_index = chunk_index;
 
         chunk_vertex_datas[chunk_index] = std::vector<VertexData>{};
         chunk_cubes[chunk_index] = new Cube[Chunk::number_of_voxels];
@@ -168,10 +179,8 @@ int main()
         const DirectX::XMFLOAT3 voxel_color =
             DirectX::XMFLOAT3(rand() / double(RAND_MAX), rand() / double(RAND_MAX), rand() / double(RAND_MAX));
 
-        for (u64 i = 0; i < Chunk::number_of_voxels; i++)
+        for (u64 i = 0; i < 1u; /* Chunk::number_of_voxels */ i++)
         {
-            chunk.m_chunk_index = chunk_index;
-
             chunk_vertex_datas[chunk_index].reserve(chunk_vertex_datas.size() + 36u);
 
             // Vertex buffer construction.
@@ -220,7 +229,8 @@ int main()
                 }
             };
 
-            if (chunk_cubes[chunk_index][i].m_active && check_if_voxel_is_covered_on_all_sides(index))
+            if (index.y < Chunk::number_of_voxels_per_dimension / 2u && chunk_cubes[chunk_index][i].m_active &&
+                check_if_voxel_is_covered_on_all_sides(index))
             {
                 const DirectX::XMFLOAT3 position_offset =
                     DirectX::XMFLOAT3{(float)index.x * voxel_cube_dimension, (float)index.y * voxel_cube_dimension,
@@ -309,16 +319,32 @@ int main()
             }
         };
 
-        Renderer::BufferPair vertex_buffer_pair =
+        const Renderer::BufferPair vertex_buffer_pair =
             renderer.create_buffer((void *)chunk_vertex_datas[chunk_index].data(),
                                    sizeof(VertexData) * chunk_vertex_datas[chunk_index].size(), BufferTypes::Static);
 
         intermediate_resources.emplace_back(vertex_buffer_pair.m_intermediate_buffer.m_buffer);
+        chunk_vertex_buffers[chunk_index].m_buffer = vertex_buffer_pair.m_buffer.m_buffer;
 
-        chunk_vertex_buffers[chunk_index] = vertex_buffer_pair.m_buffer;
         chunk_vertices_counts[chunk_index] = (u64)chunk_vertex_datas[chunk_index].size();
 
-        chunks_to_load.push_back(std::move(chunk));
+        chunk_vertex_buffers[chunk_index].m_buffer->SetName(
+            (std::wstring(L"Vertex buffer") + std::to_wstring(chunk_index)).c_str());
+
+        const D3D12_RESOURCE_BARRIER copy_dest_to_vertex_buffer_barrier = {
+            .Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
+            .Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE,
+            .Transition =
+                {
+                    .pResource = chunk_vertex_buffers[chunk_index].m_buffer.Get(),
+                    .Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+                    .StateBefore = D3D12_RESOURCE_STATE_COPY_DEST,
+                    .StateAfter = D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER,
+                },
+        };
+
+        renderer.m_command_list->ResourceBarrier(1u, &copy_dest_to_vertex_buffer_barrier);
+        created_chunks.emplace(std::move(chunk));
     };
 
     // Create a 'scene' constant buffer.
@@ -703,6 +729,11 @@ int main()
 
     float delta_time = 0.0;
 
+    // Chunks arent created all at once. Each frame, only a certain number of chunks are created, and the remaining
+    // chunks are createdin subsequent frames.
+
+    static constexpr u32 chunks_to_create_per_frame = 27u;
+
     Camera camera{};
     camera.m_camera_rotation_speed = 1.0f;
     while (!quit)
@@ -822,14 +853,21 @@ int main()
 
         command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-        // From the previous frames chunk to load vector, move those chunks to the *loaded chunks* array.
-        for (auto &newly_loaded_chunks : chunks_to_load)
+        // Load the chunks that were created last frame.
+        while (!created_chunks.empty())
         {
-            chunk_vertex_datas[newly_loaded_chunks.m_chunk_index].clear();
-            loaded_chunks.emplace_back(newly_loaded_chunks);
+            const Chunk top = created_chunks.front();
+            loaded_chunks.emplace_back(std::move(top));
+            created_chunks.pop();
         }
 
-        chunks_to_load.clear();
+        // Now create some of the left over chunks.
+        for (u32 i = 0; (i < chunks_to_create_per_frame) && !total_chunks_to_be_created.empty(); i++)
+        {
+            const u64 top = total_chunks_to_be_created.front();
+            create_chunk(top);
+            total_chunks_to_be_created.pop();
+        }
 
         DirectX::XMFLOAT3 camera_position{};
         DirectX::XMStoreFloat3(&camera_position, camera.m_camera_position);
@@ -849,7 +887,6 @@ int main()
 
         // note(rtarun9) : In future, convert this code to be more optimized (some sort of spatial data
         // structure).
-        /*
         for (u32 i = 0; i < unloaded_chunks.size();)
         {
             const DirectX::XMUINT3 _chunk_index_3d =
@@ -872,11 +909,10 @@ int main()
                 ++i;
             }
         }
-        */
 
         // Check if current chunk (and chunk_render_distance chunks around it) is in memory.
         // Unoptimized code, focus is on getting things done first and later optimize.
-
+        // Start from 0 (i.e near player), and go in +ve and -ve direction.
         std::vector<u64> chunks_to_check{};
         chunks_to_check.reserve(chunk_render_distance * chunk_render_distance * chunk_render_distance);
 
@@ -898,28 +934,23 @@ int main()
             }
         }
 
-        // Unoptimized...
-        for (const auto &chunk_to_check : chunks_to_check)
+        for (const u64 chunk_to_check : chunks_to_check)
         {
-            bool chunk_already_in_memory = false;
-            for (u64 i = 0; i < loaded_chunks.size(); i++)
-            {
-                if (loaded_chunks[i].m_chunk_index == chunk_to_check)
-                {
-                    chunk_already_in_memory = true;
-                }
-            }
-
-            // FOR DEBUG PURPOSES ONLY.
             // If caps lock key is pressed, do not load the current chunk.
-            if (!(GetKeyState(VK_CAPITAL) & 0x0001) && !chunk_already_in_memory)
+            if (!(GetKeyState(VK_CAPITAL) & 0x0001) && !chunk_vertex_buffers.contains(chunk_to_check))
             {
-                create_chunk(chunk_to_check);
+                if (created_chunks.size() < chunks_to_create_per_frame)
+                {
+                    create_chunk(chunk_to_check);
+                }
+                else
+                {
+                    total_chunks_to_be_created.push(chunk_to_check);
+                }
             }
         }
 
         // Loop through loaded chunks, and whatever is too far, move to the unloaded vector.
-        /*
         for (u64 i = 0; i < loaded_chunks.size();)
         {
             const DirectX::XMUINT3 _chunk_index_3d =
@@ -944,7 +975,6 @@ int main()
                 ++i;
             }
         }
-        */
 
         // Loop through the loaded chunks and render.
         for (auto &chunk : loaded_chunks)

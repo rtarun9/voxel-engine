@@ -16,8 +16,8 @@ struct Buffer
     Microsoft::WRL::ComPtr<ID3D12Resource> m_buffer{};
 };
 
-// A simple descriptor heap abstraction.
-// Provides simple methods to offset current descriptor to make creation of resources easier.
+// A simple descrip tr heap abstraction.
+// Provides simpl e methods to o ffset current descriptor to make creation of resources easier.
 struct DescriptorHeap
 {
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_descriptor_heap{};

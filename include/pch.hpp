@@ -22,6 +22,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include <queue>
 #include <set>
 #include <source_location>
 #include <string>
