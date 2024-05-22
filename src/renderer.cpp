@@ -221,16 +221,14 @@ Renderer::BufferPair Renderer::create_buffer(const void *data, const u32 buffer_
         .Flags = D3D12_RESOURCE_FLAG_NONE,
     };
 
-    throw_if_failed(
-        m_device->CreateCommittedResource(&upload_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES,
-                                          &buffer_resource_desc, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
-                                          nullptr, IID_PPV_ARGS(&buffer_pair.m_intermediate_buffer.m_buffer)));
+    throw_if_failed(m_device->CreateCommittedResource(
+        &upload_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES, &buffer_resource_desc,
+        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, nullptr, IID_PPV_ARGS(&buffer_pair.m_intermediate_buffer)));
 
     // Now that a resource is created, copy CPU data to this upload buffer.
     const D3D12_RANGE read_range{.Begin = 0u, .End = 0u};
 
-    throw_if_failed(
-        buffer_pair.m_intermediate_buffer.m_buffer->Map(0u, &read_range, (void **)&buffer_pair.m_buffer_ptr));
+    throw_if_failed(buffer_pair.m_intermediate_buffer->Map(0u, &read_range, (void **)&buffer_pair.m_buffer_ptr));
 
     if (data != nullptr)
     {
@@ -239,7 +237,7 @@ Renderer::BufferPair Renderer::create_buffer(const void *data, const u32 buffer_
 
     if (buffer_type == BufferTypes::Dynamic)
     {
-        buffer_pair.m_buffer = buffer_pair.m_intermediate_buffer;
+        buffer_pair.m_buffer = std::move(buffer_pair.m_intermediate_buffer);
         return buffer_pair;
     }
 
@@ -255,9 +253,9 @@ Renderer::BufferPair Renderer::create_buffer(const void *data, const u32 buffer_
 
     throw_if_failed(m_device->CreateCommittedResource(
         &default_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES, &buffer_resource_desc,
-        D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&buffer_pair.m_buffer.m_buffer)));
+        D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&buffer_pair.m_buffer)));
 
-    m_command_list->CopyResource(buffer_pair.m_buffer.m_buffer.Get(), buffer_pair.m_intermediate_buffer.m_buffer.Get());
+    m_command_list->CopyResource(buffer_pair.m_buffer, buffer_pair.m_intermediate_buffer);
     return buffer_pair;
 }
 

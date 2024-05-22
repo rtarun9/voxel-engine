@@ -58,8 +58,8 @@ struct Renderer
     // can be ignored.
     struct BufferPair
     {
-        Buffer m_intermediate_buffer;
-        Buffer m_buffer;
+        ID3D12Resource *m_intermediate_buffer;
+        ID3D12Resource *m_buffer;
         u8 *m_buffer_ptr;
     };
 

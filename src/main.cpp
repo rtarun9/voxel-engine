@@ -116,8 +116,10 @@ int main()
         Renderer::BufferPair debug_grid_index_buffer_pair =
             renderer.create_buffer((void *)&index_buffer_data, sizeof(u16) * 24u, BufferTypes::Static);
 
-        intermediate_resources.emplace_back(debug_grid_index_buffer_pair.m_intermediate_buffer.m_buffer);
-        debug_grid_index_buffer = debug_grid_index_buffer_pair.m_buffer;
+        intermediate_resources.emplace_back(debug_grid_index_buffer_pair.m_intermediate_buffer);
+        debug_grid_index_buffer = Buffer{
+            .m_buffer = debug_grid_index_buffer_pair.m_buffer,
+        };
 
         // Create the index buffer view.
         debug_grid_index_buffer_view = {
@@ -130,8 +132,10 @@ int main()
         Renderer::BufferPair debug_grid_vertex_buffer_pair =
             renderer.create_buffer((void *)&vertex_buffer_data, sizeof(VertexData) * 8u, BufferTypes::Static);
 
-        intermediate_resources.emplace_back(debug_grid_vertex_buffer_pair.m_intermediate_buffer.m_buffer);
-        debug_grid_vertex_buffer = debug_grid_vertex_buffer_pair.m_buffer;
+        intermediate_resources.emplace_back(debug_grid_vertex_buffer_pair.m_intermediate_buffer);
+        debug_grid_vertex_buffer = Buffer{
+            .m_buffer = debug_grid_vertex_buffer_pair.m_buffer,
+        };
 
         // Create the vertex buffer view.
         debug_grid_vertex_buffer_view = {
@@ -156,7 +160,7 @@ int main()
     std::queue<u64> total_chunks_to_be_created{};
 
     // Chunks that are created, but need to be loaded.
-    std::queue<Chunk> created_chunks{};
+    std::stack<Chunk> created_chunks{};
 
     // Data for chunks.
     // In the hashmap, the key is the chunk index (each chunks knows this information), and the value is as the hahsmap
@@ -170,6 +174,12 @@ int main()
 
     // This function adds the chunk to the created_chunks queue.
     const auto create_chunk = [&](const auto chunk_index) {
+        // If chunk already exist, do not create again.
+        if (chunk_vertex_buffers.contains(chunk_index))
+        {
+            return;
+        }
+
         Chunk chunk{};
         chunk.m_chunk_index = chunk_index;
 
@@ -179,6 +189,7 @@ int main()
         const DirectX::XMFLOAT3 voxel_color =
             DirectX::XMFLOAT3(rand() / double(RAND_MAX), rand() / double(RAND_MAX), rand() / double(RAND_MAX));
 
+        // note(rtarun9) : Revert the if statement condition to original state.
         for (u64 i = 0; i < 1u; /* Chunk::number_of_voxels */ i++)
         {
             chunk_vertex_datas[chunk_index].reserve(chunk_vertex_datas.size() + 36u);
@@ -229,8 +240,7 @@ int main()
                 }
             };
 
-            if (index.y < Chunk::number_of_voxels_per_dimension / 2u && chunk_cubes[chunk_index][i].m_active &&
-                check_if_voxel_is_covered_on_all_sides(index))
+            if (chunk_cubes[chunk_index][i].m_active && check_if_voxel_is_covered_on_all_sides(index))
             {
                 const DirectX::XMFLOAT3 position_offset =
                     DirectX::XMFLOAT3{(float)index.x * voxel_cube_dimension, (float)index.y * voxel_cube_dimension,
@@ -323,8 +333,10 @@ int main()
             renderer.create_buffer((void *)chunk_vertex_datas[chunk_index].data(),
                                    sizeof(VertexData) * chunk_vertex_datas[chunk_index].size(), BufferTypes::Static);
 
-        intermediate_resources.emplace_back(vertex_buffer_pair.m_intermediate_buffer.m_buffer);
-        chunk_vertex_buffers[chunk_index].m_buffer = vertex_buffer_pair.m_buffer.m_buffer;
+        intermediate_resources.emplace_back(vertex_buffer_pair.m_intermediate_buffer);
+        chunk_vertex_buffers[chunk_index] = Buffer{
+            .m_buffer = vertex_buffer_pair.m_buffer,
+        };
 
         chunk_vertices_counts[chunk_index] = (u64)chunk_vertex_datas[chunk_index].size();
 
@@ -355,7 +367,9 @@ int main()
 
     Renderer::BufferPair scene_constant_buffer_pair =
         renderer.create_buffer(nullptr, sizeof(SceneConstantBuffer), BufferTypes::Dynamic);
-    Buffer scene_constant_buffer = scene_constant_buffer_pair.m_buffer;
+    Buffer scene_constant_buffer = Buffer{
+        .m_buffer = scene_constant_buffer_pair.m_buffer,
+    };
     u8 *scene_constant_buffer_ptr = scene_constant_buffer_pair.m_buffer_ptr;
 
     // Create the scene constant buffer descriptor.
@@ -376,7 +390,10 @@ int main()
     Renderer::BufferPair chunk_constant_buffers_pair =
         renderer.create_buffer(nullptr, sizeof(ChunkConstantBuffer), BufferTypes::Dynamic);
 
-    chunk_constant_buffer = chunk_constant_buffers_pair.m_buffer;
+    chunk_constant_buffer = Buffer{
+        .m_buffer = chunk_constant_buffers_pair.m_buffer,
+    };
+
     chunk_constant_buffer_ptr = chunk_constant_buffers_pair.m_buffer_ptr;
 
     renderer.create_constant_buffer_view(chunk_constant_buffer, sizeof(ChunkConstantBuffer));
@@ -856,8 +873,8 @@ int main()
         // Load the chunks that were created last frame.
         while (!created_chunks.empty())
         {
-            const Chunk top = created_chunks.front();
-            loaded_chunks.emplace_back(std::move(top));
+            const Chunk top = created_chunks.top();
+            loaded_chunks.emplace_back(top);
             created_chunks.pop();
         }
 
@@ -865,6 +882,7 @@ int main()
         for (u32 i = 0; (i < chunks_to_create_per_frame) && !total_chunks_to_be_created.empty(); i++)
         {
             const u64 top = total_chunks_to_be_created.front();
+
             create_chunk(top);
             total_chunks_to_be_created.pop();
         }
@@ -912,24 +930,33 @@ int main()
 
         // Check if current chunk (and chunk_render_distance chunks around it) is in memory.
         // Unoptimized code, focus is on getting things done first and later optimize.
-        // Start from 0 (i.e near player), and go in +ve and -ve direction.
+        // Only load chunks that are
         std::vector<u64> chunks_to_check{};
         chunks_to_check.reserve(chunk_render_distance * chunk_render_distance * chunk_render_distance);
 
-        for (i32 x = -(i32)chunk_render_distance; x <= (i32)chunk_render_distance; x++)
+        for (u32 dist = 0; dist < chunk_render_distance; dist++)
         {
-            for (i32 z = -(i32)chunk_render_distance; z <= (i32)chunk_render_distance; z++)
+            for (i32 x = -(i32)dist; x <= (i32)dist; x++)
             {
-                for (i32 y = -(i32)chunk_render_distance; y <= (i32)chunk_render_distance; y++)
+                for (i32 z = -(i32)dist; z <= (i32)dist; z++)
                 {
-                    DirectX::XMINT3 chunk_3d_index = {
-                        current_chunk_3d_index.x + x,
-                        current_chunk_3d_index.y + y,
-                        current_chunk_3d_index.z + z,
-                    };
+                    // note(rtarun9) : Why doesnt just y = -dist and y = dist work?
+                    for (i32 y = -(i32)dist; y <= (i32)dist; y++)
+                    {
+                        if (x == -dist || x == dist || y == -dist || y == dist || z == -dist || z == dist)
+                        {
 
-                    chunks_to_check.emplace_back(convert_index_to_1d(chunk_3d_index, number_of_chunks_in_each_dimension,
-                                                                     number_of_chunks_in_each_dimension / 2u));
+                            DirectX::XMINT3 chunk_3d_index = {
+                                current_chunk_3d_index.x + x,
+                                current_chunk_3d_index.y + y,
+                                current_chunk_3d_index.z + z,
+                            };
+
+                            chunks_to_check.emplace_back(convert_index_to_1d(chunk_3d_index,
+                                                                             number_of_chunks_in_each_dimension,
+                                                                             number_of_chunks_in_each_dimension / 2u));
+                        }
+                    }
                 }
             }
         }
