@@ -35,7 +35,7 @@ struct Chunk
 // A chunk can be in several states:
 // (i) unloaded_chunks : Chunks that are loaded in memory but are not rendered.
 // (ii) loaded_chunks : Chunks that are laoded in memory and are rendered.
-// (iii) setup_chunks : Chunks that have to be setup and loaded.
+// (iii) setup_chunks_indices : Chunks (specified by index) that have to be setup and loaded.
 struct VertexData
 {
     DirectX::XMFLOAT3 position{};
@@ -47,19 +47,19 @@ class ChunkManager
   public:
     // The number of chunks in each dimension the player can look at.
     // The chunk loading / unloaded logic heavily depends on this value.
-    static constexpr u64 chunk_render_distance = 3u;
+    static constexpr u64 chunk_render_distance = 9u;
 
     static constexpr u64 number_of_chunks_in_each_dimension = 32u;
     static constexpr u64 number_of_chunks =
         number_of_chunks_in_each_dimension * number_of_chunks_in_each_dimension * number_of_chunks_in_each_dimension;
 
     // Each frame, only a certain number of chunks are setup.
-    static constexpr u32 chunks_to_create_per_frame = 27u;
+    static constexpr u32 chunks_to_create_per_frame = 9u;
 
   public:
     std::vector<Chunk> m_loaded_chunks{};
     std::vector<Chunk> m_unloaded_chunks{};
-    std::vector<Chunk> m_setup_chunks{};
+    std::stack<u64> m_setup_chunk_indices{};
 
     std::unordered_map<u64, Buffer> m_chunk_vertex_buffers{};
     std::unordered_map<u64, std::vector<VertexData>> m_chunk_vertex_datas{};
