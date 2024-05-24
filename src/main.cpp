@@ -127,10 +127,19 @@ int main()
         const DirectX::XMFLOAT3 voxel_color =
             DirectX::XMFLOAT3(rand() / double(RAND_MAX), rand() / double(RAND_MAX), rand() / double(RAND_MAX));
 
-        // Experimental : Set some voxel cubes to inactive.
+        // Draw circles.
         for (u64 voxel_index = 0; voxel_index < Chunk::number_of_voxels; voxel_index++)
         {
-            if (voxel_index % 5 == 0u)
+            // Vertex buffer construction.
+            const DirectX::XMUINT3 index = convert_index_to_3d(voxel_index, Chunk::number_of_voxels_per_dimension);
+
+            constexpr DirectX::XMUINT3 center =
+                DirectX::XMUINT3(Chunk::number_of_voxels_per_dimension / 2u, Chunk::number_of_voxels_per_dimension / 2u,
+                                 Chunk::number_of_voxels_per_dimension / 2u);
+
+            if (const float distance = pow((i32)center.x - (i32)index.x, 2) + pow((i32)center.y - (i32)index.y, 2) +
+                                       pow((i32)center.z - (i32)index.z, 2);
+                distance <= pow((float)Chunk::number_of_voxels_per_dimension / 2u, 2))
             {
                 chunk_manager.m_chunk_cubes[chunk_index][voxel_index].m_active = true;
             }
@@ -145,55 +154,7 @@ int main()
             // Vertex buffer construction.
             const DirectX::XMUINT3 index = convert_index_to_3d(voxel_index, Chunk::number_of_voxels_per_dimension);
 
-            // If a voxel is being surrounded on all sides by another voxel, dont render it at all.
-            const auto check_if_voxel_is_covered_on_all_sides = [&](const DirectX::XMUINT3 voxel_index) -> bool {
-                // If there is a axis where the value is 0 or number_of_chunks, (i.e this voxel is on edge of the cube,
-                // render it.
-                if (voxel_index.x == 0 || voxel_index.y == 0 || voxel_index.z == 0 ||
-                    voxel_index.x == Chunk::number_of_voxels_per_dimension - 1 ||
-                    voxel_index.y == Chunk::number_of_voxels_per_dimension - 1 ||
-                    voxel_index.z == Chunk::number_of_voxels_per_dimension - 1)
-                {
-                    return true;
-                }
-                else
-                {
-                    // If all 8 neighbouring voxels are being rendered, dont render this.
-                    u8 number_of_neighbouring_active_voxels = 0;
-                    for (i8 i = -1; i <= 1; i++)
-                    {
-                        for (i8 j = -1; j <= 1; j++)
-                        {
-                            for (i8 k = -1; k <= 1; k++)
-                            {
-                                const Cube neighbouring_voxel =
-                                    chunk_manager.m_chunk_cubes[chunk_index][convert_index_to_1d(
-                                        DirectX::XMINT3{
-                                            (i32)voxel_index.x + i,
-                                            (i32)voxel_index.y + j,
-                                            (i32)voxel_index.z + k,
-                                        },
-                                        Chunk::number_of_voxels_per_dimension)];
-
-                                if (neighbouring_voxel.m_active)
-                                {
-                                    number_of_neighbouring_active_voxels++;
-                                }
-                            }
-                        }
-                    }
-
-                    if (number_of_neighbouring_active_voxels != 8u)
-                    {
-                        return false;
-                    }
-
-                    return true;
-                }
-            };
-
-            if (chunk_manager.m_chunk_cubes[chunk_index][voxel_index].m_active &&
-                check_if_voxel_is_covered_on_all_sides(index))
+            if (chunk_manager.m_chunk_cubes[chunk_index][voxel_index].m_active)
             {
                 const DirectX::XMFLOAT3 position_offset = DirectX::XMFLOAT3{
                     (float)index.x * Cube::voxel_cube_dimension,
@@ -1027,6 +988,7 @@ int main()
         }
 
         // Loop through the loaded chunks and render.
+        // If a chunk is covered on ALL sides by other chunks, dont render said chunk.
         for (auto &chunk : chunk_manager.m_loaded_chunks)
         {
             const u64 chunk_index = chunk.m_chunk_index;
