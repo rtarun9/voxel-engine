@@ -127,10 +127,23 @@ int main()
         const DirectX::XMFLOAT3 voxel_color =
             DirectX::XMFLOAT3(rand() / double(RAND_MAX), rand() / double(RAND_MAX), rand() / double(RAND_MAX));
 
-        for (u64 i = 0; i < /* Chunk::number_of_voxels*/ 1; i++)
+        // Experimental : Set some voxel cubes to inactive.
+        for (u64 voxel_index = 0; voxel_index < Chunk::number_of_voxels; voxel_index++)
+        {
+            if (voxel_index % 5 == 0u)
+            {
+                chunk_manager.m_chunk_cubes[chunk_index][voxel_index].m_active = true;
+            }
+            else
+            {
+                chunk_manager.m_chunk_cubes[chunk_index][voxel_index].m_active = false;
+            }
+        }
+
+        for (u64 voxel_index = 0; voxel_index < Chunk::number_of_voxels; voxel_index++)
         {
             // Vertex buffer construction.
-            const DirectX::XMUINT3 index = convert_index_to_3d(i, Chunk::number_of_voxels_per_dimension);
+            const DirectX::XMUINT3 index = convert_index_to_3d(voxel_index, Chunk::number_of_voxels_per_dimension);
 
             // If a voxel is being surrounded on all sides by another voxel, dont render it at all.
             const auto check_if_voxel_is_covered_on_all_sides = [&](const DirectX::XMUINT3 voxel_index) -> bool {
@@ -179,7 +192,8 @@ int main()
                 }
             };
 
-            if (chunk_manager.m_chunk_cubes[chunk_index][i].m_active && check_if_voxel_is_covered_on_all_sides(index))
+            if (chunk_manager.m_chunk_cubes[chunk_index][voxel_index].m_active &&
+                check_if_voxel_is_covered_on_all_sides(index))
             {
                 const DirectX::XMFLOAT3 position_offset = DirectX::XMFLOAT3{
                     (float)index.x * Cube::voxel_cube_dimension,
@@ -187,94 +201,171 @@ int main()
                     (float)index.z * Cube::voxel_cube_dimension,
                 };
 
+                // v1 : lower front left.
                 const VertexData v1 = (VertexData{
                     .position = DirectX::XMFLOAT3(position_offset.x, position_offset.y, position_offset.z),
                     .color = voxel_color,
                 });
+
+                // v2 : upper front left.
                 const VertexData v2 = (VertexData{
                     .position = DirectX::XMFLOAT3(position_offset.x, position_offset.y + Cube::voxel_cube_dimension,
                                                   position_offset.z),
                     .color = voxel_color,
                 });
+
+                // v3 : upper front right.
                 const VertexData v3 = (VertexData{
                     .position = DirectX::XMFLOAT3(position_offset.x + Cube::voxel_cube_dimension,
                                                   position_offset.y + Cube::voxel_cube_dimension, position_offset.z),
                     .color = voxel_color,
                 });
+
+                // v4 : lower front right.
                 const VertexData v4 = (VertexData{
                     .position = DirectX::XMFLOAT3(position_offset.x + Cube::voxel_cube_dimension, position_offset.y,
                                                   position_offset.z),
                     .color = voxel_color,
                 });
+
+                // v5 : lower back left.
                 const VertexData v5 = (VertexData{
                     .position = DirectX::XMFLOAT3(position_offset.x, position_offset.y,
                                                   position_offset.z + Cube::voxel_cube_dimension),
                     .color = voxel_color,
                 });
+
+                // v6 : upper back left.
                 const VertexData v6 = (VertexData{
                     .position = DirectX::XMFLOAT3(position_offset.x, position_offset.y + Cube::voxel_cube_dimension,
                                                   position_offset.z + Cube::voxel_cube_dimension),
                     .color = voxel_color,
                 });
+
+                // v7 : upper back right.
                 const VertexData v7 = (VertexData{
                     .position = DirectX::XMFLOAT3(position_offset.x + Cube::voxel_cube_dimension,
                                                   position_offset.y + Cube::voxel_cube_dimension,
                                                   position_offset.z + Cube::voxel_cube_dimension),
                     .color = voxel_color,
                 });
+
+                // v8 : lower back right.
                 const VertexData v8 = (VertexData{
                     .position = DirectX::XMFLOAT3(position_offset.x + Cube::voxel_cube_dimension, position_offset.y,
                                                   position_offset.z + Cube::voxel_cube_dimension),
                     .color = voxel_color,
                 });
 
-                chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v1);
-                chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v2);
-                chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v3);
+                // Logic for optimizing the data in vertex buffer.
 
-                chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v1);
-                chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v3);
-                chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v4);
+                // If there is a cube that is a neighbour and sharing a "face" of the cube, those 2 triangles that make
+                // up that "face" will not be seen and do not need to be added to vertex buffer.
 
-                chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v5);
-                chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v7);
-                chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v6);
+                // Check if there is a cube in *FRONT* of current voxel cube.
+                const u64 index_of_front_voxel =
+                    convert_index_to_1d(DirectX::XMINT3{(i32)index.x, (i32)index.y, (i32)index.z - 1},
+                                        Chunk::number_of_voxels_per_dimension);
 
-                chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v5);
-                chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v8);
-                chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v7);
+                if (index.z == 0 ||
+                    (index.z > 0u && !chunk_manager.m_chunk_cubes[chunk_index][index_of_front_voxel].m_active))
+                {
+                    chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v1);
+                    chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v2);
+                    chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v3);
 
-                chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v5);
-                chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v6);
-                chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v2);
+                    chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v1);
+                    chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v3);
+                    chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v4);
+                }
 
-                chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v5);
-                chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v2);
-                chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v1);
+                // Check if there is a cube *behind* of current voxel cube.
+                const u64 index_of_behind_voxel =
+                    convert_index_to_1d(DirectX::XMINT3{(i32)index.x, (i32)index.y, (i32)index.z + 1},
+                                        Chunk::number_of_voxels_per_dimension);
 
-                chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v4);
-                chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v3);
-                chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v7);
+                if ((i32)index.z == (i32)(Chunk::number_of_voxels_per_dimension - 1u) ||
+                    (index.z < Chunk::number_of_voxels_per_dimension &&
+                     !chunk_manager.m_chunk_cubes[chunk_index][index_of_behind_voxel].m_active))
+                {
+                    chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v5);
+                    chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v7);
+                    chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v6);
 
-                chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v4);
-                chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v7);
-                chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v8);
+                    chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v5);
+                    chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v8);
+                    chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v7);
+                }
 
-                chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v2);
-                chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v6);
-                chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v7);
+                // Check if there is a cube *left* of current voxel cube.
+                const u64 index_of_left_voxel =
+                    convert_index_to_1d(DirectX::XMINT3{(i32)index.x - 1, (i32)index.y, (i32)index.z},
+                                        Chunk::number_of_voxels_per_dimension);
 
-                chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v2);
-                chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v7);
-                chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v3);
+                if (index.x == 0 ||
+                    (index.x > 0 && !chunk_manager.m_chunk_cubes[chunk_index][index_of_left_voxel].m_active))
+                {
+                    chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v5);
+                    chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v6);
+                    chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v2);
 
-                chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v5);
-                chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v1);
-                chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v4);
+                    chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v5);
+                    chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v2);
+                    chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v1);
+                }
 
-                chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v5);
-                chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v4);
-                chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v8);
+                // Check if there is a cube *right* of current voxel cube.
+                const u64 index_of_right_voxel =
+                    convert_index_to_1d(DirectX::XMINT3{(i32)index.x + 1, (i32)index.y, (i32)index.z},
+                                        Chunk::number_of_voxels_per_dimension);
+
+                if ((i32)index.x == (i32)Chunk::number_of_voxels_per_dimension - 1 ||
+                    (index.x < Chunk::number_of_voxels_per_dimension &&
+                     !chunk_manager.m_chunk_cubes[chunk_index][index_of_right_voxel].m_active))
+                {
+                    chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v4);
+                    chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v3);
+                    chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v7);
+
+                    chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v4);
+                    chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v7);
+                    chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v8);
+                }
+
+                // Check if there is a cube *top* of current voxel cube.
+                const u64 index_of_top_voxel =
+                    convert_index_to_1d(DirectX::XMINT3{(i32)index.x, (i32)index.y + 1, (i32)index.z},
+                                        Chunk::number_of_voxels_per_dimension);
+
+                if ((i32)index.y == (i32)Chunk::number_of_voxels_per_dimension - 1 ||
+                    (index.y < Chunk::number_of_voxels_per_dimension &&
+                     !chunk_manager.m_chunk_cubes[chunk_index][index_of_top_voxel].m_active))
+                {
+                    chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v2);
+                    chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v6);
+                    chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v7);
+
+                    chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v2);
+                    chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v7);
+                    chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v3);
+                }
+
+                // Check if there is a cube *bottom* of current voxel cube.
+                const u64 index_of_bottom_voxel =
+                    convert_index_to_1d(DirectX::XMINT3{(i32)index.x, (i32)index.y - 1, (i32)index.z},
+                                        Chunk::number_of_voxels_per_dimension);
+
+                if (index.y == 0 ||
+                    (index.y > 0 && !chunk_manager.m_chunk_cubes[chunk_index][index_of_bottom_voxel].m_active))
+                {
+                    chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v5);
+                    chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v1);
+                    chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v4);
+
+                    chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v5);
+                    chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v4);
+                    chunk_manager.m_chunk_vertex_datas[chunk_index].emplace_back(v8);
+                }
             }
         };
 
@@ -558,7 +649,7 @@ int main()
         .SampleMask = 0xffff'ffff,
         .RasterizerState =
             {
-                .FillMode = D3D12_FILL_MODE_SOLID,
+                .FillMode = D3D12_FILL_MODE_WIREFRAME,
                 .CullMode = D3D12_CULL_MODE_BACK,
                 .FrontCounterClockwise = TRUE,
             },
