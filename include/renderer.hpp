@@ -16,8 +16,8 @@ struct Buffer
     Microsoft::WRL::ComPtr<ID3D12Resource> m_buffer{};
 };
 
-// A simple descrip tr heap abstraction.
-// Provides simpl e methods to o ffset current descriptor to make creation of resources easier.
+// A simple descriptor heap abstraction.
+// Provides simple methods to offset current descriptor to make creation of resources easier.
 struct DescriptorHeap
 {
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_descriptor_heap{};
@@ -64,7 +64,7 @@ struct Renderer
     };
 
     // Resource creation functions.
-    BufferPair create_buffer(const void *data, const u32 buffer_size, const BufferTypes buffer_type);
+    BufferPair create_buffer(const void *data, const u32 buffer_size, const BufferTypes buffer_type) const;
 
     // This function automatically offset's the current descriptor handle of descriptor heap.
     D3D12_CPU_DESCRIPTOR_HANDLE create_constant_buffer_view(const Buffer &buffer, const u32 size);
@@ -85,8 +85,8 @@ struct Renderer
     Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_direct_command_queue{};
     Microsoft::WRL::ComPtr<IDXGISwapChain4> m_swapchain{};
 
-    Microsoft::WRL::ComPtr<ID3D12Resource> m_swapchain_backbuffer_resources[NUMBER_OF_BACKBUFFERS];
-    D3D12_CPU_DESCRIPTOR_HANDLE m_swapchain_backbuffer_cpu_descriptor_handles[NUMBER_OF_BACKBUFFERS];
+    std::array<Microsoft::WRL::ComPtr<ID3D12Resource>, NUMBER_OF_BACKBUFFERS> m_swapchain_backbuffer_resources{};
+    std::array<D3D12_CPU_DESCRIPTOR_HANDLE, NUMBER_OF_BACKBUFFERS> m_swapchain_backbuffer_cpu_descriptor_handles{};
 
     DescriptorHeap m_cbv_srv_uav_descriptor_heap{};
     DescriptorHeap m_rtv_descriptor_heap{};
@@ -97,7 +97,7 @@ struct Renderer
 
     Microsoft::WRL::ComPtr<ID3D12Fence> m_fence{};
     u64 m_monotonic_fence_value{};
-    u64 m_frame_fence_values[NUMBER_OF_BACKBUFFERS];
+    std::array<u64, NUMBER_OF_BACKBUFFERS> m_frame_fence_values{};
 
     u8 m_swapchain_backbuffer_index{};
 };

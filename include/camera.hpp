@@ -14,5 +14,5 @@ struct Camera
     DirectX::XMVECTOR m_camera_position{DirectX::XMVectorSet(0.0f, 0.0f, -5.0f, 1.0f)};
     DirectX::XMVECTOR m_camera_front{DirectX::XMVectorSet(0.0f, 0.0f, 1.0f, 1.0f)};
 
-    DirectX::XMMATRIX update_and_get_view_matrix(const float delta_time);
+    DirectX::XMMATRIX update_and_get_view_matrix(const float delta_time) noexcept;
 };

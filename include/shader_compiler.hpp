@@ -5,6 +5,5 @@
 // DXC is used for shader compilation.
 namespace ShaderCompiler
 {
-Microsoft::WRL::ComPtr<IDxcBlob> compile(const wchar_t *const file_path, const wchar_t *const entry_point,
-                                         const wchar_t *const target);
+IDxcBlob *compile(const wchar_t *const file_path, const wchar_t *const entry_point, const wchar_t *const target);
 }

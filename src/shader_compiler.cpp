@@ -10,8 +10,7 @@ Microsoft::WRL::ComPtr<IDxcUtils> g_utils{};
 Microsoft::WRL::ComPtr<IDxcCompiler3> g_compiler{};
 Microsoft::WRL::ComPtr<IDxcIncludeHandler> g_include_handler{};
 
-Microsoft::WRL::ComPtr<IDxcBlob> compile(const wchar_t *const file_path, const wchar_t *const entry_point,
-                                         const wchar_t *const target)
+IDxcBlob *compile(const wchar_t *const file_path, const wchar_t *const entry_point, const wchar_t *const target)
 {
     // Check if the compiler object has been created.
     if (!g_utils)
@@ -56,7 +55,7 @@ Microsoft::WRL::ComPtr<IDxcBlob> compile(const wchar_t *const file_path, const w
     }
 
     // Get the shader object and return.
-    Microsoft::WRL::ComPtr<IDxcBlob> shader_blob{};
+    IDxcBlob *shader_blob{nullptr};
     throw_if_failed(results->GetOutput(DXC_OUT_OBJECT, IID_PPV_ARGS(&shader_blob), nullptr));
     return shader_blob;
 }

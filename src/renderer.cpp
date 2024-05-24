@@ -20,6 +20,7 @@ D3D12_GPU_DESCRIPTOR_HANDLE DescriptorHeap::get_gpu_descriptor_handle_at_index(c
 
     return handle;
 }
+
 D3D12_CPU_DESCRIPTOR_HANDLE DescriptorHeap::get_cpu_descriptor_handle_at_index(const u32 index) const
 {
     D3D12_CPU_DESCRIPTOR_HANDLE handle = m_descriptor_heap->GetCPUDescriptorHandleForHeapStart();
@@ -27,6 +28,7 @@ D3D12_CPU_DESCRIPTOR_HANDLE DescriptorHeap::get_cpu_descriptor_handle_at_index(c
 
     return handle;
 }
+
 void DescriptorHeap::create(ID3D12Device *const device, const u32 num_descriptors,
                             const D3D12_DESCRIPTOR_HEAP_TYPE descriptor_heap_type,
                             const D3D12_DESCRIPTOR_HEAP_FLAGS descriptor_heap_flags)
@@ -187,7 +189,7 @@ void Renderer::signal_fence()
 void Renderer::flush_gpu()
 {
     signal_fence();
-    for (u32 i = 0; i < Renderer::NUMBER_OF_BACKBUFFERS; i++)
+    for (u32 i = 0; i < NUMBER_OF_BACKBUFFERS; i++)
     {
         m_frame_fence_values[i] = m_monotonic_fence_value;
     }
@@ -195,7 +197,8 @@ void Renderer::flush_gpu()
     wait_for_fence_value_at_index(m_swapchain_backbuffer_index);
 }
 
-Renderer::BufferPair Renderer::create_buffer(const void *data, const u32 buffer_size, const BufferTypes buffer_type)
+Renderer::BufferPair Renderer::create_buffer(const void *data, const u32 buffer_size,
+                                             const BufferTypes buffer_type) const
 {
     BufferPair buffer_pair{};
 

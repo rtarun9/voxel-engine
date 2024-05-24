@@ -41,5 +41,5 @@ VSOutput vs_main(VSInput input, uint instanceID : SV_InstanceID)
 
 float4 ps_main(VSOutput input) : SV_Target
 {
-    return float4(0.2f, 0.2f, 0.2f, 1.0f);
+    return float4(0.05f, 0.05f, 0.05f, 1.0f);
 }

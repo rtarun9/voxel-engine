@@ -2,7 +2,7 @@
 
 #include "camera.hpp"
 
-DirectX::XMMATRIX Camera::update_and_get_view_matrix(const float delta_time)
+DirectX::XMMATRIX Camera::update_and_get_view_matrix(const float delta_time) noexcept
 {
     const DirectX::XMVECTOR camera_right =
         DirectX::XMVector3Normalize(DirectX::XMVector3Cross(m_camera_front, m_camera_up_direction));
@@ -31,8 +31,7 @@ DirectX::XMMATRIX Camera::update_and_get_view_matrix(const float delta_time)
     {
         m_yaw += m_camera_rotation_speed * delta_time;
     }
-
-    if (GetKeyState(VK_LEFT) & 0x8000)
+    else if (GetKeyState(VK_LEFT) & 0x8000)
     {
         m_yaw -= m_camera_rotation_speed * delta_time;
     }
@@ -41,8 +40,7 @@ DirectX::XMMATRIX Camera::update_and_get_view_matrix(const float delta_time)
     {
         m_pitch -= m_camera_rotation_speed * delta_time;
     }
-
-    if (GetKeyState(VK_DOWN) & 0x8000)
+    else if (GetKeyState(VK_DOWN) & 0x8000)
     {
         m_pitch += m_camera_rotation_speed * delta_time;
     }
