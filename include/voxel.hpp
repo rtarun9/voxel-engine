@@ -15,7 +15,7 @@ struct Cube
     static constexpr float voxel_cube_dimension = 16.0f;
 
     CubeTypes m_cube_type{};
-    bool m_active{true};
+    bool m_active{false};
 };
 
 // A chunk (volume) of voxels.
@@ -47,7 +47,7 @@ class ChunkManager
   public:
     // The number of chunks in each dimension the player can look at.
     // The chunk loading / unloaded logic heavily depends on this value.
-    static constexpr u64 chunk_render_distance = 9u;
+    static constexpr u64 chunk_render_distance = 27u;
 
     static constexpr u64 number_of_chunks_in_each_dimension = 32u;
     static constexpr u64 number_of_chunks =

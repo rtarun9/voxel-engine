@@ -11,6 +11,8 @@
 
 #include "voxel.hpp"
 
+#include "FastNoiseLite/FastNoiseLite.hpp"
+
 int main()
 {
     const Window window{};
@@ -22,6 +24,8 @@ int main()
     intermediate_resources.reserve(4096);
 
     // Rendering related constants.
+    // The maximum 'height' in y dimension generated terrain can be.
+    static constexpr u32 max_terrain_height = 64u;
 
     // Create the resources required for rendering.
 
@@ -109,11 +113,15 @@ int main()
         };
     }
 
+    // Setup for FastNoiseLite library.
+    FastNoiseLite noise{};
+    noise.SetNoiseType(FastNoiseLite::NoiseType_Perlin);
+
     ChunkManager chunk_manager{};
 
     const auto create_chunk = [&](const auto chunk_index) -> Chunk {
         // If chunk already exist, do not create again.
-        if (chunk_manager.m_chunk_vertex_buffers.contains(chunk_index))
+        if (chunk_manager.m_chunk_cubes.contains(chunk_index))
         {
             return Chunk{.m_chunk_index = -1u};
         }
@@ -127,25 +135,47 @@ int main()
         const DirectX::XMFLOAT3 voxel_color =
             DirectX::XMFLOAT3(rand() / double(RAND_MAX), rand() / double(RAND_MAX), rand() / double(RAND_MAX));
 
-        // Draw circles.
-        for (u64 voxel_index = 0; voxel_index < Chunk::number_of_voxels; voxel_index++)
+        // For each voxel cube, first determine the y height. Everything with a y height that is > this value is set to
+        // inactive.
+        // To determine the index (i.e parameter to the GetNoise function), use the chunk index 3D + voxel index 3D.
+        const DirectX::XMUINT3 _chunk_index_3d =
+            convert_index_to_3d(chunk_index, ChunkManager::number_of_chunks_in_each_dimension);
+
+        const DirectX::XMINT3 chunk_index_3d = {
+            (i32)_chunk_index_3d.x - (i32)(ChunkManager::number_of_chunks_in_each_dimension / 2u),
+            (i32)_chunk_index_3d.y - (i32)(ChunkManager::number_of_chunks_in_each_dimension / 2u),
+            (i32)_chunk_index_3d.z - (i32)(ChunkManager::number_of_chunks_in_each_dimension / 2u),
+        };
+
+        for (u32 x = 0; x < Chunk::number_of_voxels_per_dimension; x++)
         {
-            // Vertex buffer construction.
-            const DirectX::XMUINT3 index = convert_index_to_3d(voxel_index, Chunk::number_of_voxels_per_dimension);
-
-            constexpr DirectX::XMUINT3 center =
-                DirectX::XMUINT3(Chunk::number_of_voxels_per_dimension / 2u, Chunk::number_of_voxels_per_dimension / 2u,
-                                 Chunk::number_of_voxels_per_dimension / 2u);
-
-            if (const float distance = pow((i32)center.x - (i32)index.x, 2) + pow((i32)center.y - (i32)index.y, 2) +
-                                       pow((i32)center.z - (i32)index.z, 2);
-                distance <= pow((float)Chunk::number_of_voxels_per_dimension / 2u, 2))
+            for (u32 z = 0; z < Chunk::number_of_voxels_per_dimension; z++)
             {
-                chunk_manager.m_chunk_cubes[chunk_index][voxel_index].m_active = true;
-            }
-            else
-            {
-                chunk_manager.m_chunk_cubes[chunk_index][voxel_index].m_active = false;
+                const DirectX::XMINT3 voxel_index_3d_in_grid = DirectX::XMINT3{
+                    (chunk_index_3d.x * (i32)Chunk::number_of_voxels_per_dimension) + (i32)x,
+                    (chunk_index_3d.y * (i32)Chunk::number_of_voxels_per_dimension),
+                    (chunk_index_3d.z * (i32)Chunk::number_of_voxels_per_dimension) + (i32)z,
+                };
+
+                const i32 height = (noise.GetNoise((float)voxel_index_3d_in_grid.x, (float)voxel_index_3d_in_grid.z) *
+                                    (i32)max_terrain_height);
+                // max_terrain_height;
+
+                // Check to see if voxel in the 'grid' / 'world' with y = height lines inside this chunk or not.
+                if (height >= voxel_index_3d_in_grid.y)
+                {
+                    const u32 max_height_for_chunk =
+                        (u32)min(height - voxel_index_3d_in_grid.y, (i32)Chunk::number_of_voxels_per_dimension);
+
+                    for (u32 y = 0u; y < max_height_for_chunk; y++)
+                    {
+
+                        chunk_manager
+                            .m_chunk_cubes[chunk_index][convert_index_to_1d(DirectX::XMINT3{(i32)x, (i32)(y), (i32)z},
+                                                                            Chunk::number_of_voxels_per_dimension)]
+                            .m_active = true;
+                    }
+                }
             }
         }
 
@@ -220,8 +250,8 @@ int main()
 
                 // Logic for optimizing the data in vertex buffer.
 
-                // If there is a cube that is a neighbour and sharing a "face" of the cube, those 2 triangles that make
-                // up that "face" will not be seen and do not need to be added to vertex buffer.
+                // If there is a cube that is a neighbour and sharing a "face" of the cube, those 2 triangles that
+                // make up that "face" will not be seen and do not need to be added to vertex buffer.
 
                 // Check if there is a cube in *FRONT* of current voxel cube.
                 const u64 index_of_front_voxel =
@@ -330,34 +360,46 @@ int main()
             }
         };
 
-        const Renderer::BufferPair vertex_buffer_pair = renderer.create_buffer(
-            (void *)chunk_manager.m_chunk_vertex_datas[chunk_index].data(),
-            sizeof(VertexData) * chunk_manager.m_chunk_vertex_datas[chunk_index].size(), BufferTypes::Static);
+        if (!chunk_manager.m_chunk_vertex_datas[chunk_index].empty())
 
-        intermediate_resources.emplace_back(vertex_buffer_pair.m_intermediate_buffer);
-        chunk_manager.m_chunk_vertex_buffers[chunk_index] = Buffer{
-            .m_buffer = vertex_buffer_pair.m_buffer,
-        };
+        {
+
+            const Renderer::BufferPair vertex_buffer_pair = renderer.create_buffer(
+                (void *)chunk_manager.m_chunk_vertex_datas[chunk_index].data(),
+                sizeof(VertexData) * chunk_manager.m_chunk_vertex_datas[chunk_index].size(), BufferTypes::Static);
+
+            intermediate_resources.emplace_back(vertex_buffer_pair.m_intermediate_buffer);
+            chunk_manager.m_chunk_vertex_buffers[chunk_index] = Buffer{
+                .m_buffer = vertex_buffer_pair.m_buffer,
+            };
+
+            chunk_manager.m_chunk_vertex_buffers[chunk_index].m_buffer->SetName(
+                (std::wstring(L"Vertex buffer") + std::to_wstring(chunk_index)).c_str());
+
+            const D3D12_RESOURCE_BARRIER copy_dest_to_vertex_buffer_barrier = {
+                .Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
+                .Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE,
+                .Transition =
+                    {
+                        .pResource = chunk_manager.m_chunk_vertex_buffers[chunk_index].m_buffer.Get(),
+                        .Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+                        .StateBefore = D3D12_RESOURCE_STATE_COPY_DEST,
+                        .StateAfter = D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER,
+                    },
+            };
+
+            renderer.m_command_list->ResourceBarrier(1u, &copy_dest_to_vertex_buffer_barrier);
+        }
+        else
+        {
+            chunk_manager.m_chunk_vertex_buffers[chunk_index] = Buffer{
+                .m_buffer = nullptr,
+            };
+            chunk_manager.m_chunk_cubes[chunk_index].clear();
+        }
 
         chunk_manager.m_chunk_vertices_counts[chunk_index] =
             (u64)chunk_manager.m_chunk_vertex_datas[chunk_index].size();
-
-        chunk_manager.m_chunk_vertex_buffers[chunk_index].m_buffer->SetName(
-            (std::wstring(L"Vertex buffer") + std::to_wstring(chunk_index)).c_str());
-
-        const D3D12_RESOURCE_BARRIER copy_dest_to_vertex_buffer_barrier = {
-            .Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
-            .Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE,
-            .Transition =
-                {
-                    .pResource = chunk_manager.m_chunk_vertex_buffers[chunk_index].m_buffer.Get(),
-                    .Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
-                    .StateBefore = D3D12_RESOURCE_STATE_COPY_DEST,
-                    .StateAfter = D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER,
-                },
-        };
-
-        renderer.m_command_list->ResourceBarrier(1u, &copy_dest_to_vertex_buffer_barrier);
 
         return chunk;
     };
@@ -477,7 +519,8 @@ int main()
                 },
             .ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX,
         },
-        // For chunk constant buffer (in future make this a constant buffer, but for testing purposes it is a inline 32
+        // For chunk constant buffer (in future make this a constant buffer, but for testing purposes it is a inline
+        // 32
         // bit root constants).
         D3D12_ROOT_PARAMETER1{
             .ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
@@ -610,7 +653,7 @@ int main()
         .SampleMask = 0xffff'ffff,
         .RasterizerState =
             {
-                .FillMode = D3D12_FILL_MODE_WIREFRAME,
+                .FillMode = D3D12_FILL_MODE_SOLID,
                 .CullMode = D3D12_CULL_MODE_BACK,
                 .FrontCounterClockwise = TRUE,
             },
@@ -618,7 +661,7 @@ int main()
             {
                 .DepthEnable = TRUE,
                 .DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL,
-                .DepthFunc = D3D12_COMPARISON_FUNC_LESS,
+                .DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL,
                 .StencilEnable = FALSE,
             },
         .InputLayout =
@@ -754,7 +797,8 @@ int main()
     Camera camera{};
     camera.m_camera_rotation_speed = 1.0f;
 
-    // Precompute the offset which is used to check chunks around the camera (and determine if they are to be created).
+    // Precompute the offset which is used to check chunks around the camera (and determine if they are to be
+    // created).
     std::vector<DirectX::XMINT3> offsets_to_check_chunk_around_player{};
     offsets_to_check_chunk_around_player.reserve(ChunkManager::chunk_render_distance *
                                                  ChunkManager::chunk_render_distance *
@@ -890,7 +934,7 @@ int main()
 
                 command_list->SetGraphicsRoot32BitConstants(1u, 2u, &root_constants, 0u);
 
-                command_list->DrawIndexedInstanced(24u, ChunkManager::number_of_chunks, 0u, 0u, 0u);
+                // command_list->DrawIndexedInstanced(24u, ChunkManager::number_of_chunks, 0u, 0u, 0u);
             }
         }
 
@@ -955,7 +999,7 @@ int main()
                                                   ChunkManager::number_of_chunks_in_each_dimension / 2u);
 
             // If caps lock key is pressed, do not load the current chunk.
-            if (!(GetKeyState(VK_CAPITAL) & 0x0001) && !chunk_manager.m_chunk_vertex_buffers.contains(index))
+            if (!(GetKeyState(VK_CAPITAL) & 0x0001) && !chunk_manager.m_chunk_cubes.contains(index))
             {
                 chunk_manager.m_setup_chunk_indices.push(index);
             }
@@ -1009,15 +1053,18 @@ int main()
                                                                  (chunk_index_3d.z) * (i32)Chunk::chunk_length),
             };
 
-            const D3D12_VERTEX_BUFFER_VIEW chunk_vertex_buffer_view = {
-                .BufferLocation = chunk_manager.m_chunk_vertex_buffers[chunk_index].m_buffer->GetGPUVirtualAddress(),
-                .SizeInBytes = (u32)(sizeof(VertexData) * chunk_manager.m_chunk_vertices_counts[chunk_index]),
-                .StrideInBytes = sizeof(VertexData),
-            };
-
-            command_list->SetGraphicsRoot32BitConstants(1u, 16u, &chunk_constant_buffer_data.transform_buffer, 0u);
-            command_list->IASetVertexBuffers(0u, 1u, &chunk_vertex_buffer_view);
-            command_list->DrawInstanced(chunk_manager.m_chunk_vertices_counts[chunk_index], 1u, 0u, 0u);
+            if (chunk_manager.m_chunk_vertex_buffers[chunk_index].m_buffer)
+            {
+                const D3D12_VERTEX_BUFFER_VIEW chunk_vertex_buffer_view = {
+                    .BufferLocation =
+                        chunk_manager.m_chunk_vertex_buffers[chunk_index].m_buffer->GetGPUVirtualAddress(),
+                    .SizeInBytes = (u32)(sizeof(VertexData) * chunk_manager.m_chunk_vertices_counts[chunk_index]),
+                    .StrideInBytes = sizeof(VertexData),
+                };
+                command_list->SetGraphicsRoot32BitConstants(1u, 16u, &chunk_constant_buffer_data.transform_buffer, 0u);
+                command_list->IASetVertexBuffers(0u, 1u, &chunk_vertex_buffer_view);
+                command_list->DrawInstanced(chunk_manager.m_chunk_vertices_counts[chunk_index], 1u, 0u, 0u);
+            }
         }
 
         // Move a fixed number of chunks from the setup queue to loaded queue.

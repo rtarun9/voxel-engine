@@ -15,7 +15,7 @@ project("voxel-engine")
 	toolset ("clang")
 	language "C++"
 	cppdialect "C++20"
-	includedirs { "include" }
+	includedirs { "include", "external" }
 
 	pchheader "include/pch.hpp"
 	pchsource "src/pch.cpp"
