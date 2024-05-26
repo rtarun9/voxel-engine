@@ -404,7 +404,17 @@ int main()
         return chunk;
     };
 
+    // A function to remove chunk data entirely. This is done whenever a unloaded chunk is chunk_remove_distance away
+    // from the current player chunk.
+    const auto remove_chunk = [&](const u64 chunk_index) -> void {
+        chunk_manager.m_chunk_cubes.erase(chunk_index);
+        chunk_manager.m_chunk_vertex_datas.erase(chunk_index);
+        chunk_manager.m_chunk_vertex_buffers.erase(chunk_index);
+        chunk_manager.m_chunk_vertices_counts.erase(chunk_index);
+    };
+
     // Create a 'scene' constant buffer.
+
     struct alignas(256) SceneConstantBuffer
     {
         DirectX::XMMATRIX view_projection_matrix{};
@@ -975,20 +985,31 @@ int main()
                 (i32)_chunk_index_3d.y - (i32)(ChunkManager::number_of_chunks_in_each_dimension / 2u),
                 (i32)_chunk_index_3d.z - (i32)(ChunkManager::number_of_chunks_in_each_dimension / 2u),
             };
+
             if ((u64)fabs(chunk_index_3d.x - current_chunk_3d_index.x) <= ChunkManager::chunk_render_distance ||
                 (u64)fabs(chunk_index_3d.y - current_chunk_3d_index.y) <= ChunkManager::chunk_render_distance ||
                 (u64)fabs(chunk_index_3d.z - current_chunk_3d_index.z) <= ChunkManager::chunk_render_distance)
             {
                 chunk_manager.m_loaded_chunks.emplace_back(chunk_manager.m_unloaded_chunks[i]);
                 chunk_manager.m_unloaded_chunks.erase(chunk_manager.m_unloaded_chunks.begin() + i);
+                ++i;
             }
             else
             {
+                // If the unloaded chunk is chunk_remove_distance avway from current chunk, remove it.
+                if ((u64)fabs(chunk_index_3d.x - current_chunk_3d_index.x) >= ChunkManager::chunk_remove_distance ||
+                    (u64)fabs(chunk_index_3d.y - current_chunk_3d_index.y) >= ChunkManager::chunk_remove_distance ||
+                    (u64)fabs(chunk_index_3d.z - current_chunk_3d_index.z) >= ChunkManager::chunk_remove_distance)
+                {
+                    chunk_manager.m_unloaded_chunks.erase(chunk_manager.m_unloaded_chunks.begin() + i);
+                    remove_chunk(chunk_manager.m_unloaded_chunks[i].m_chunk_index);
+                }
+
                 ++i;
             }
         }
 
-        for (i64 offset_index = offsets_to_check_chunk_around_player.size() - 1u; offset_index >= 0; --offset_index)
+        for (i64 offset_index = 0u; offset_index < offsets_to_check_chunk_around_player.size() - 1u; ++offset_index)
         {
             const DirectX::XMINT3 offset = offsets_to_check_chunk_around_player[(u64)offset_index];
 
@@ -1003,6 +1024,11 @@ int main()
             {
                 chunk_manager.m_setup_chunk_indices.push(index);
             }
+        }
+
+        if (chunk_manager.m_setup_chunk_indices.size() >= ChunkManager::max_setup_chunks_size)
+        {
+            chunk_manager.m_setup_chunk_indices = {};
         }
 
         // Loop through loaded chunks, and whatever is too far, move to the unloaded vector.
@@ -1071,7 +1097,7 @@ int main()
         for (size_t i = 0;
              (i < ChunkManager::chunks_to_create_per_frame) && !chunk_manager.m_setup_chunk_indices.empty();)
         {
-            const u64 top = chunk_manager.m_setup_chunk_indices.top();
+            const u64 top = chunk_manager.m_setup_chunk_indices.front();
             chunk_manager.m_setup_chunk_indices.pop();
 
             if (const Chunk chunk = create_chunk(top); chunk.m_chunk_index != -1u)

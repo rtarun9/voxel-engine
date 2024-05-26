@@ -47,19 +47,30 @@ class ChunkManager
   public:
     // The number of chunks in each dimension the player can look at.
     // The chunk loading / unloaded logic heavily depends on this value.
-    static constexpr u64 chunk_render_distance = 27u;
+    static constexpr u64 chunk_render_distance = 9u;
+
+    // When a chunk is unloaded, it is not rendered, but still in memory.
+    // However, when a chunk is chunk_remove_distance away from the current chunk, it is removed fro memory.
+    static constexpr u64 chunk_remove_distance = chunk_render_distance * 2u;
+
+    // EXPERIMENTAL
+    // If there are too many chunks to setup, it means that lot of the chunks to setup are probably not even near the
+    // player anymore. Due to this, if the setup chunk indices queue reaches a particular size, clear the entire queue
+    // so that only those chunks near the player will be loaded.
+    static constexpr u64 max_setup_chunks_size =
+        chunk_render_distance * chunk_render_distance * chunk_remove_distance * chunk_render_distance;
 
     static constexpr u64 number_of_chunks_in_each_dimension = 32u;
     static constexpr u64 number_of_chunks =
         number_of_chunks_in_each_dimension * number_of_chunks_in_each_dimension * number_of_chunks_in_each_dimension;
 
     // Each frame, only a certain number of chunks are setup.
-    static constexpr u32 chunks_to_create_per_frame = 9u;
+    static constexpr u32 chunks_to_create_per_frame = 16u;
 
   public:
     std::vector<Chunk> m_loaded_chunks{};
     std::vector<Chunk> m_unloaded_chunks{};
-    std::stack<u64> m_setup_chunk_indices{};
+    std::queue<u64> m_setup_chunk_indices{};
 
     std::unordered_map<u64, Buffer> m_chunk_vertex_buffers{};
     std::unordered_map<u64, std::vector<VertexData>> m_chunk_vertex_datas{};
