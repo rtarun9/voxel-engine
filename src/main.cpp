@@ -857,9 +857,12 @@ int main()
         const float aspect_ratio = (float)window.m_width / (float)window.m_height;
         const float vertical_fov = DirectX::XMConvertToRadians(45.0f);
 
+        const float near_plane = 0.1f;
+        const float far_plane = 10'000.0f;
+
         const DirectX::XMMATRIX view_projection_matrix =
             camera.update_and_get_view_matrix(delta_time) *
-            DirectX::XMMatrixPerspectiveFovLH(vertical_fov, aspect_ratio, 0.1, 10'000.0f);
+            DirectX::XMMatrixPerspectiveFovLH(vertical_fov, aspect_ratio, near_plane, far_plane);
 
         // Update cbuffers.
         const SceneConstantBuffer buffer = {
@@ -1056,8 +1059,90 @@ int main()
             }
         }
 
-        // Loop through the loaded chunks and render.
-        // If a chunk is covered on ALL sides by other chunks, dont render said chunk.
+        // For frustrum culling: Frustum can be represented using 6 planes (near, far, right, left, top, bottom).
+        // Each plane can be represented using distance to origin (from point on the plane nearest to origin), and the
+        // normal vector.
+        struct Plane
+        {
+            DirectX::XMVECTOR normal{};
+            float closest_distance_to_origin{};
+        };
+
+        struct Frustum
+        {
+            Plane near_plane{};
+            Plane far_plane{};
+            Plane left_plane{};
+            Plane right_plane{};
+            Plane top_plane{};
+            Plane bottom_plane{};
+        };
+
+        // Get the vectors (from origin) to projection plane (when z = 1).
+        // These 4 points (top left, top right, bottom left, bottom right) can be used to compute all the normals of all
+        // 6 planes. note(rtarun9) : Find out if normals generated when z = 1 is same when z = near plane and z = far
+        // plane (should be, but just checking).
+
+        const float half_vertical_height = tanf(vertical_fov * 0.5f) * 1;
+        const float half_horizontal_width = half_vertical_height * aspect_ratio;
+
+        const DirectX::XMVECTOR top_left_viewport_vector =
+            DirectX::XMVectorSet(-half_horizontal_width, half_vertical_height, 1.0f, 1.0f) - camera.m_camera_position;
+
+        const DirectX::XMVECTOR top_right_viewport_vector =
+            DirectX::XMVectorSet(half_horizontal_width, half_vertical_height, 1.0f, 1.0f) - camera.m_camera_position;
+
+        const DirectX::XMVECTOR bottom_right_viewport_vector =
+            DirectX::XMVectorSet(half_horizontal_width, -half_vertical_height, 1.0f, 1.0f) - camera.m_camera_position;
+
+        const DirectX::XMVECTOR bottom_left_viewport_vector =
+            DirectX::XMVectorSet(-half_horizontal_width, -half_vertical_height, 1.0f, 1.0f) - camera.m_camera_position;
+
+        // Create the 'camera frustum'.
+        Frustum view_frustum = {
+
+            .near_plane =
+                {
+                    .normal = DirectX::XMVector3Normalize(-1.0f * camera.m_camera_front),
+                    .closest_distance_to_origin = near_plane,
+                },
+
+            .far_plane =
+                {
+                    .normal = DirectX::XMVector3Normalize(camera.m_camera_front),
+                    .closest_distance_to_origin = far_plane,
+                },
+
+            .left_plane =
+                {
+                    .normal = DirectX::XMVector3Normalize(
+                        DirectX::XMVector3Cross(bottom_left_viewport_vector, top_left_viewport_vector)),
+                    .closest_distance_to_origin = 0.0f,
+                },
+
+            .right_plane =
+                {
+                    .normal = DirectX::XMVector3Normalize(
+                        DirectX::XMVector3Cross(top_right_viewport_vector, bottom_right_viewport_vector)),
+                    .closest_distance_to_origin = 0.0f,
+                },
+
+            .top_plane =
+                {
+                    .normal = DirectX::XMVector3Normalize(
+                        DirectX::XMVector3Cross(top_left_viewport_vector, top_right_viewport_vector)),
+                    .closest_distance_to_origin = 0.0f,
+                },
+
+            .bottom_plane =
+                {
+                    .normal = DirectX::XMVector3Normalize(
+                        DirectX::XMVector3Cross(bottom_right_viewport_vector, bottom_left_viewport_vector)),
+                    .closest_distance_to_origin = 0.0f,
+                },
+        };
+        USE(view_frustum);
+
         for (auto &chunk : chunk_manager.m_loaded_chunks)
         {
             const u64 chunk_index = chunk.m_chunk_index;
