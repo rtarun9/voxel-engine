@@ -1143,6 +1143,7 @@ int main()
         };
         USE(view_frustum);
 
+        u64 chunks_rendered = 0u;
         for (auto &chunk : chunk_manager.m_loaded_chunks)
         {
             const u64 chunk_index = chunk.m_chunk_index;
@@ -1163,19 +1164,78 @@ int main()
                                                                  (chunk_index_3d.z) * (i32)Chunk::chunk_length),
             };
 
+            const DirectX::XMVECTOR translation_vector = DirectX::XMVectorSet(
+                chunk_index_3d.x * (i32)Chunk::chunk_length, chunk_index_3d.y * (i32)Chunk::chunk_length,
+                chunk_index_3d.z * (i32)Chunk::chunk_length, 1.0f);
+
             if (chunk_manager.m_chunk_vertex_buffers[chunk_index].m_buffer)
             {
-                const D3D12_VERTEX_BUFFER_VIEW chunk_vertex_buffer_view = {
-                    .BufferLocation =
-                        chunk_manager.m_chunk_vertex_buffers[chunk_index].m_buffer->GetGPUVirtualAddress(),
-                    .SizeInBytes = (u32)(sizeof(VertexData) * chunk_manager.m_chunk_vertices_counts[chunk_index]),
-                    .StrideInBytes = sizeof(VertexData),
+                // Now, the translation matrix can be used to construct a AABB for the chunk.
+                // Note that voxel (front left) is at (0, 0, 0). The edge length is Chunk::chunk_length.
+                // AABB Plane intersection resource :
+                // https://gdbooks.gitbooks.io/3dcollisions/content/Chapter2/static_aabb_plane.html
+
+                // Get 8 vertices from the AABB. If dot((plane_normal, distance), (AABB_vertex, 1)) > 0, the point lies
+                // on the front of plane, else it does not.
+
+                const std::array<DirectX::XMVECTOR, 8> aabb_vertices = {
+                    DirectX::XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f) + translation_vector,
+                    DirectX::XMVectorSet(0.0f, Chunk::chunk_length, 0.0f, 1.0f) + translation_vector,
+                    DirectX::XMVectorSet(Chunk::chunk_length, Chunk::chunk_length, 0.0f, 1.0f) + translation_vector,
+                    DirectX::XMVectorSet(Chunk::chunk_length, 0.0f, 0.0f, 1.0f) + translation_vector,
+                    DirectX::XMVectorSet(0.0f, 0.0f, Chunk::chunk_length, 1.0f) + translation_vector,
+                    DirectX::XMVectorSet(0.0f, Chunk::chunk_length, Chunk::chunk_length, 1.0f) + translation_vector,
+                    DirectX::XMVectorSet(Chunk::chunk_length, Chunk::chunk_length, Chunk::chunk_length, 1.0f) +
+                        translation_vector,
+                    DirectX::XMVectorSet(Chunk::chunk_length, 0.0f, Chunk::chunk_length, 1.0f) + translation_vector,
                 };
-                command_list->SetGraphicsRoot32BitConstants(1u, 16u, &chunk_constant_buffer_data.transform_buffer, 0u);
-                command_list->IASetVertexBuffers(0u, 1u, &chunk_vertex_buffer_view);
-                command_list->DrawInstanced(chunk_manager.m_chunk_vertices_counts[chunk_index], 1u, 0u, 0u);
+
+                // Now, iterate over each of these vertices and perform the dot product. Note that in this case for
+                // point to be *inside* the frustum, dot product must be <= 0.0f.
+
+                const auto is_point_on_or_front_of_plane = [&](const DirectX::XMVECTOR &point,
+                                                               const Plane &plane) -> bool {
+                    return DirectX::XMVectorGetX(DirectX::XMVector3Dot(plane.normal, point)) +
+                               plane.closest_distance_to_origin <=
+                           0;
+                };
+
+                bool passed_frustum_culling_test = false;
+                for (const auto &vertex : aabb_vertices)
+                {
+                    if (is_point_on_or_front_of_plane(vertex, view_frustum.bottom_plane) ||
+                        is_point_on_or_front_of_plane(vertex, view_frustum.top_plane) ||
+                        is_point_on_or_front_of_plane(vertex, view_frustum.left_plane) ||
+                        is_point_on_or_front_of_plane(vertex, view_frustum.right_plane) ||
+                        is_point_on_or_front_of_plane(vertex, view_frustum.near_plane) ||
+                        is_point_on_or_front_of_plane(vertex, view_frustum.far_plane))
+                    {
+                        passed_frustum_culling_test = true;
+                        break;
+                    }
+                };
+
+                if (passed_frustum_culling_test)
+                {
+
+                    const D3D12_VERTEX_BUFFER_VIEW chunk_vertex_buffer_view = {
+                        .BufferLocation =
+                            chunk_manager.m_chunk_vertex_buffers[chunk_index].m_buffer->GetGPUVirtualAddress(),
+                        .SizeInBytes = (u32)(sizeof(VertexData) * chunk_manager.m_chunk_vertices_counts[chunk_index]),
+                        .StrideInBytes = sizeof(VertexData),
+                    };
+                    command_list->SetGraphicsRoot32BitConstants(1u, 16u, &chunk_constant_buffer_data.transform_buffer,
+                                                                0u);
+                    command_list->IASetVertexBuffers(0u, 1u, &chunk_vertex_buffer_view);
+                    command_list->DrawInstanced(chunk_manager.m_chunk_vertices_counts[chunk_index], 1u, 0u, 0u);
+
+                    chunks_rendered++;
+                }
             }
         }
+
+        printf("Total loaded chunks :: %zu Rendered chunks :: %zu\n", chunk_manager.m_loaded_chunks.size(),
+               chunks_rendered);
 
         // Move a fixed number of chunks from the setup queue to loaded queue.
         for (size_t i = 0;
