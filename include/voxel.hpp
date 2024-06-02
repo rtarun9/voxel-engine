@@ -60,17 +60,20 @@ class ChunkManager
     static constexpr u64 max_setup_chunks_size =
         chunk_render_distance * chunk_render_distance * chunk_remove_distance * chunk_render_distance;
 
-    static constexpr u64 number_of_chunks_in_each_dimension = 32u;
+    static constexpr u64 number_of_chunks_in_each_dimension = 64u;
     static constexpr u64 number_of_chunks =
         number_of_chunks_in_each_dimension * number_of_chunks_in_each_dimension * number_of_chunks_in_each_dimension;
 
     // Each frame, only a certain number of chunks are setup.
-    static constexpr u32 chunks_to_create_per_frame = 16u;
+    static constexpr u32 chunks_to_create_per_frame = 2u;
 
   public:
     std::vector<Chunk> m_loaded_chunks{};
     std::vector<Chunk> m_unloaded_chunks{};
-    std::queue<u64> m_setup_chunk_indices{};
+
+    // Why is this a stack? If a player moves to a new area, the chunks near him AT THAT TIME need to be loaded first.
+    // For this, a stack (LIFO) is optimal.
+    std::stack<u64> m_setup_chunk_indices{};
 
     std::unordered_map<u64, Buffer> m_chunk_vertex_buffers{};
     std::unordered_map<u64, std::vector<VertexData>> m_chunk_vertex_datas{};

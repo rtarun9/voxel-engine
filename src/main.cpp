@@ -25,7 +25,7 @@ int main()
 
     // Rendering related constants.
     // The maximum 'height' in y dimension generated terrain can be.
-    static constexpr u32 max_terrain_height = 64u;
+    static constexpr u32 max_terrain_height = 128u;
 
     // Create the resources required for rendering.
 
@@ -157,9 +157,8 @@ int main()
                     (chunk_index_3d.z * (i32)Chunk::number_of_voxels_per_dimension) + (i32)z,
                 };
 
-                const i32 height = (noise.GetNoise((float)voxel_index_3d_in_grid.x, (float)voxel_index_3d_in_grid.z) *
-                                    (i32)max_terrain_height);
-                // max_terrain_height;
+                const float height = (noise.GetNoise((float)voxel_index_3d_in_grid.x, (float)voxel_index_3d_in_grid.z) *
+                                      (i32)max_terrain_height);
 
                 // Check to see if voxel in the 'grid' / 'world' with y = height lines inside this chunk or not.
                 if (height >= voxel_index_3d_in_grid.y)
@@ -1009,7 +1008,7 @@ int main()
             }
         }
 
-        for (i64 offset_index = 0u; offset_index < offsets_to_check_chunk_around_player.size() - 1u; ++offset_index)
+        for (i64 offset_index = offsets_to_check_chunk_around_player.size() - 1u; offset_index >= 0; --offset_index)
         {
             const DirectX::XMINT3 offset = offsets_to_check_chunk_around_player[(u64)offset_index];
 
@@ -1097,7 +1096,7 @@ int main()
         for (size_t i = 0;
              (i < ChunkManager::chunks_to_create_per_frame) && !chunk_manager.m_setup_chunk_indices.empty();)
         {
-            const u64 top = chunk_manager.m_setup_chunk_indices.front();
+            const u64 top = chunk_manager.m_setup_chunk_indices.top();
             chunk_manager.m_setup_chunk_indices.pop();
 
             if (const Chunk chunk = create_chunk(top); chunk.m_chunk_index != -1u)
