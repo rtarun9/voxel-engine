@@ -47,11 +47,11 @@ class ChunkManager
   public:
     // The number of chunks in each dimension the player can look at.
     // The chunk loading / unloaded logic heavily depends on this value.
-    static constexpr u64 chunk_render_distance = 4u;
+    static constexpr u64 chunk_render_distance = 27u;
 
     // When a chunk is unloaded, it is not rendered, but still in memory.
     // However, when a chunk is chunk_remove_distance away from the current chunk, it is removed fro memory.
-    static constexpr u64 chunk_remove_distance = chunk_render_distance * 2u;
+    static constexpr u64 chunk_remove_distance = chunk_render_distance * 3u;
 
     // EXPERIMENTAL
     // If there are too many chunks to setup, it means that lot of the chunks to setup are probably not even near the
@@ -65,7 +65,7 @@ class ChunkManager
         number_of_chunks_in_each_dimension * number_of_chunks_in_each_dimension * number_of_chunks_in_each_dimension;
 
     // Each frame, only a certain number of chunks are setup.
-    static constexpr u32 chunks_to_create_per_frame = 32u;
+    static constexpr u32 chunks_to_create_per_frame = 1u;
 
   public:
     std::vector<Chunk> m_loaded_chunks{};

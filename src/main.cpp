@@ -437,6 +437,7 @@ int main()
     struct alignas(256) ChunkConstantBuffer
     {
         DirectX::XMMATRIX transform_buffer{};
+        u32 is_chunk_culled{0};
     };
 
     Buffer chunk_constant_buffer{};
@@ -537,7 +538,7 @@ int main()
                 D3D12_ROOT_CONSTANTS{
                     .ShaderRegister = 1u,
                     .RegisterSpace = 0u,
-                    .Num32BitValues = 16u,
+                    .Num32BitValues = 24u,
                 },
             .ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX,
         },
@@ -857,12 +858,14 @@ int main()
         const float aspect_ratio = (float)window.m_width / (float)window.m_height;
         const float vertical_fov = DirectX::XMConvertToRadians(45.0f);
 
-        const float near_plane = 0.1f;
+        const float near_plane = 5.0f;
         const float far_plane = 10'000.0f;
 
-        const DirectX::XMMATRIX view_projection_matrix =
-            camera.update_and_get_view_matrix(delta_time) *
+        const DirectX::XMMATRIX view_matrix = camera.update_and_get_view_matrix(delta_time);
+        const DirectX::XMMATRIX projection_matrix =
             DirectX::XMMatrixPerspectiveFovLH(vertical_fov, aspect_ratio, near_plane, far_plane);
+
+        const DirectX::XMMATRIX view_projection_matrix = view_matrix * projection_matrix;
 
         // Update cbuffers.
         const SceneConstantBuffer buffer = {
@@ -946,7 +949,7 @@ int main()
 
                 command_list->SetGraphicsRoot32BitConstants(1u, 2u, &root_constants, 0u);
 
-                // command_list->DrawIndexedInstanced(24u, ChunkManager::number_of_chunks, 0u, 0u, 0u);
+                command_list->DrawIndexedInstanced(24u, ChunkManager::number_of_chunks, 0u, 0u, 0u);
             }
         }
 
@@ -1059,91 +1062,54 @@ int main()
             }
         }
 
-        // For frustrum culling: Frustum can be represented using 6 planes (near, far, right, left, top, bottom).
-        // Each plane can be represented using distance to origin (from point on the plane nearest to origin), and the
-        // normal vector.
-        struct Plane
-        {
-            DirectX::XMVECTOR normal{};
-            float closest_distance_to_origin{};
-        };
+        // For frustrum culling, this resource is used :
+        // https://fgiesen.wordpress.com/2012/08/31/frustum-planes-from-the-projection-matrix/
+        // clang-format off
+        // Brief explanation : Say we have clip space coordinates (xc, yc, zc, wc). For the coord to be NOT clipped, it has to satisfy the equation,
+        // -wc <= xc <= wc
+        // -wc <= yc <= wc
+        // 0 <= zc <= wc
+        // (Where, (xc, yc, wc, zc) = (view_space_coord) * projection_matrix.
+        // We get 6 equations from this, each of which map to a frustum plane.
+        // Now, (xc, yc, zc, wc) = (view_space_coord) * projection_matrix
+        // Moreoever, xc = v * (projection_matrix)column0
+        // yc = v * (projection_matrix)column1, zc = v * (projection_matrix)column2, wc = v * (projection_matrix)column3
+        // So, if you want to know if a point is NOT culled by left plane,
+        // xc + wc >= 0
+        // v * (projection_matrix)column0 + v * (projection_matrix)column3
+        // v * (projection_matrix column + projection_matrix column3).
+        // Using this equations, we can find if a point is to be culled or not.
+        // clang-format on
 
-        struct Frustum
-        {
-            Plane near_plane{};
-            Plane far_plane{};
-            Plane left_plane{};
-            Plane right_plane{};
-            Plane top_plane{};
-            Plane bottom_plane{};
-        };
+        // Get the 6 combination of projection matrix vectors that is used to test against view space aabb coordinates.
+        DirectX::XMFLOAT4X4 projection_matrix_4x4;
+        DirectX::XMStoreFloat4x4(&projection_matrix_4x4, projection_matrix);
 
-        // Get the vectors (from origin) to projection plane (when z = 1).
-        // These 4 points (top left, top right, bottom left, bottom right) can be used to compute all the normals of all
-        // 6 planes. note(rtarun9) : Find out if normals generated when z = 1 is same when z = near plane and z = far
-        // plane (should be, but just checking).
+        const auto projection_column_0 =
+            DirectX::XMVectorSet(projection_matrix_4x4.m[0][0], projection_matrix_4x4.m[1][0],
+                                 projection_matrix_4x4.m[2][0], projection_matrix_4x4.m[3][0]);
 
-        const float half_vertical_height = tanf(vertical_fov * 0.5f) * 1;
-        const float half_horizontal_width = half_vertical_height * aspect_ratio;
+        const auto projection_column_1 =
+            DirectX::XMVectorSet(projection_matrix_4x4.m[0][1], projection_matrix_4x4.m[1][1],
+                                 projection_matrix_4x4.m[2][1], projection_matrix_4x4.m[3][1]);
 
-        const DirectX::XMVECTOR top_left_viewport_vector =
-            DirectX::XMVectorSet(-half_horizontal_width, half_vertical_height, 1.0f, 1.0f) - camera.m_camera_position;
+        const auto projection_column_2 =
+            DirectX::XMVectorSet(projection_matrix_4x4.m[0][2], projection_matrix_4x4.m[1][2],
+                                 projection_matrix_4x4.m[2][2], projection_matrix_4x4.m[3][2]);
 
-        const DirectX::XMVECTOR top_right_viewport_vector =
-            DirectX::XMVectorSet(half_horizontal_width, half_vertical_height, 1.0f, 1.0f) - camera.m_camera_position;
+        const auto projection_column_3 =
+            DirectX::XMVectorSet(projection_matrix_4x4.m[0][3], projection_matrix_4x4.m[1][3],
+                                 projection_matrix_4x4.m[2][3], projection_matrix_4x4.m[3][3]);
 
-        const DirectX::XMVECTOR bottom_right_viewport_vector =
-            DirectX::XMVectorSet(half_horizontal_width, -half_vertical_height, 1.0f, 1.0f) - camera.m_camera_position;
-
-        const DirectX::XMVECTOR bottom_left_viewport_vector =
-            DirectX::XMVectorSet(-half_horizontal_width, -half_vertical_height, 1.0f, 1.0f) - camera.m_camera_position;
-
-        // Create the 'camera frustum'.
-        Frustum view_frustum = {
-
-            .near_plane =
-                {
-                    .normal = DirectX::XMVector3Normalize(-1.0f * camera.m_camera_front),
-                    .closest_distance_to_origin = near_plane,
-                },
-
-            .far_plane =
-                {
-                    .normal = DirectX::XMVector3Normalize(camera.m_camera_front),
-                    .closest_distance_to_origin = far_plane,
-                },
-
-            .left_plane =
-                {
-                    .normal = DirectX::XMVector3Normalize(
-                        DirectX::XMVector3Cross(bottom_left_viewport_vector, top_left_viewport_vector)),
-                    .closest_distance_to_origin = 0.0f,
-                },
-
-            .right_plane =
-                {
-                    .normal = DirectX::XMVector3Normalize(
-                        DirectX::XMVector3Cross(top_right_viewport_vector, bottom_right_viewport_vector)),
-                    .closest_distance_to_origin = 0.0f,
-                },
-
-            .top_plane =
-                {
-                    .normal = DirectX::XMVector3Normalize(
-                        DirectX::XMVector3Cross(top_left_viewport_vector, top_right_viewport_vector)),
-                    .closest_distance_to_origin = 0.0f,
-                },
-
-            .bottom_plane =
-                {
-                    .normal = DirectX::XMVector3Normalize(
-                        DirectX::XMVector3Cross(bottom_right_viewport_vector, bottom_left_viewport_vector)),
-                    .closest_distance_to_origin = 0.0f,
-                },
-        };
-        USE(view_frustum);
+        const auto left_plane_projection_vector = projection_column_0 + projection_column_3;
+        const auto right_plane_projection_vector = -projection_column_0 + projection_column_3;
+        const auto near_plane_projection_vector = projection_column_2;
+        const auto far_plane_projection_vector = projection_column_3 - projection_column_2;
+        const auto top_plane_projection_vector = projection_column_3 - projection_column_1;
+        const auto bottom_plane_projection_vector = projection_column_3 + projection_column_1;
 
         u64 chunks_rendered = 0u;
+        u64 chunks_culled = 0u;
         for (auto &chunk : chunk_manager.m_loaded_chunks)
         {
             const u64 chunk_index = chunk.m_chunk_index;
@@ -1162,53 +1128,68 @@ int main()
                 .transform_buffer = DirectX::XMMatrixTranslation((chunk_index_3d.x) * (i32)Chunk::chunk_length,
                                                                  (chunk_index_3d.y) * (i32)Chunk::chunk_length,
                                                                  (chunk_index_3d.z) * (i32)Chunk::chunk_length),
+                .is_chunk_culled = 0u,
             };
 
             const DirectX::XMVECTOR translation_vector = DirectX::XMVectorSet(
                 chunk_index_3d.x * (i32)Chunk::chunk_length, chunk_index_3d.y * (i32)Chunk::chunk_length,
-                chunk_index_3d.z * (i32)Chunk::chunk_length, 1.0f);
+                chunk_index_3d.z * (i32)Chunk::chunk_length, 0.0f);
 
             if (chunk_manager.m_chunk_vertex_buffers[chunk_index].m_buffer)
             {
-                // Now, the translation matrix can be used to construct a AABB for the chunk.
-                // Note that voxel (front left) is at (0, 0, 0). The edge length is Chunk::chunk_length.
-                // AABB Plane intersection resource :
-                // https://gdbooks.gitbooks.io/3dcollisions/content/Chapter2/static_aabb_plane.html
+                const std::array<DirectX::XMVECTOR, 8> view_space_aabb_vertices = {
+                    DirectX::XMVector4Transform(DirectX::XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f) + translation_vector,
+                                                view_matrix),
 
-                // Get 8 vertices from the AABB. If dot((plane_normal, distance), (AABB_vertex, 1)) > 0, the point lies
-                // on the front of plane, else it does not.
+                    DirectX::XMVector4Transform(
+                        DirectX::XMVectorSet(0.0f, Chunk::chunk_length, 0.0f, 1.0f) + translation_vector, view_matrix),
 
-                const std::array<DirectX::XMVECTOR, 8> aabb_vertices = {
-                    DirectX::XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f) + translation_vector,
-                    DirectX::XMVectorSet(0.0f, Chunk::chunk_length, 0.0f, 1.0f) + translation_vector,
-                    DirectX::XMVectorSet(Chunk::chunk_length, Chunk::chunk_length, 0.0f, 1.0f) + translation_vector,
-                    DirectX::XMVectorSet(Chunk::chunk_length, 0.0f, 0.0f, 1.0f) + translation_vector,
-                    DirectX::XMVectorSet(0.0f, 0.0f, Chunk::chunk_length, 1.0f) + translation_vector,
-                    DirectX::XMVectorSet(0.0f, Chunk::chunk_length, Chunk::chunk_length, 1.0f) + translation_vector,
-                    DirectX::XMVectorSet(Chunk::chunk_length, Chunk::chunk_length, Chunk::chunk_length, 1.0f) +
-                        translation_vector,
-                    DirectX::XMVectorSet(Chunk::chunk_length, 0.0f, Chunk::chunk_length, 1.0f) + translation_vector,
+                    DirectX::XMVector4Transform(
+                        DirectX::XMVectorSet(Chunk::chunk_length, Chunk::chunk_length, 0.0f, 1.0f) + translation_vector,
+                        view_matrix),
+
+                    DirectX::XMVector4Transform(
+                        DirectX::XMVectorSet(Chunk::chunk_length, 0.0f, 0.0f, 1.0f) + translation_vector, view_matrix),
+
+                    DirectX::XMVector4Transform(
+                        DirectX::XMVectorSet(0.0f, 0.0f, Chunk::chunk_length, 1.0f) + translation_vector, view_matrix),
+
+                    DirectX::XMVector4Transform(
+                        DirectX::XMVectorSet(0.0f, Chunk::chunk_length, Chunk::chunk_length, 1.0f) + translation_vector,
+                        view_matrix),
+
+                    DirectX::XMVector4Transform(
+                        DirectX::XMVectorSet(Chunk::chunk_length, Chunk::chunk_length, Chunk::chunk_length, 1.0f) +
+                            translation_vector,
+                        view_matrix),
+
+                    DirectX::XMVector4Transform(
+                        DirectX::XMVectorSet(Chunk::chunk_length, 0.0f, Chunk::chunk_length, 1.0f) + translation_vector,
+                        view_matrix),
                 };
 
-                // Now, iterate over each of these vertices and perform the dot product. Note that in this case for
-                // point to be *inside* the frustum, dot product must be <= 0.0f.
-
-                const auto is_point_on_or_front_of_plane = [&](const DirectX::XMVECTOR &point,
-                                                               const Plane &plane) -> bool {
-                    return DirectX::XMVectorGetX(DirectX::XMVector3Dot(plane.normal, point)) +
-                               plane.closest_distance_to_origin <=
-                           0;
-                };
+                // Now, iterate over each of these vertices and perform the test. If atleast 1 equation satisfies, the
+                // chunk is to NOT be culled.
 
                 bool passed_frustum_culling_test = false;
-                for (const auto &vertex : aabb_vertices)
+                for (const auto &vertex : view_space_aabb_vertices)
                 {
-                    if (is_point_on_or_front_of_plane(vertex, view_frustum.bottom_plane) ||
-                        is_point_on_or_front_of_plane(vertex, view_frustum.top_plane) ||
-                        is_point_on_or_front_of_plane(vertex, view_frustum.left_plane) ||
-                        is_point_on_or_front_of_plane(vertex, view_frustum.right_plane) ||
-                        is_point_on_or_front_of_plane(vertex, view_frustum.near_plane) ||
-                        is_point_on_or_front_of_plane(vertex, view_frustum.far_plane))
+                    const bool left_plane_test =
+                        DirectX::XMVectorGetX(DirectX::XMVector4Dot(vertex, left_plane_projection_vector)) > 0.0f;
+                    const bool right_plane_test =
+                        DirectX::XMVectorGetX(DirectX::XMVector4Dot(vertex, right_plane_projection_vector)) > 0.0f;
+                    const float top_plane_test =
+                        DirectX::XMVectorGetX(DirectX::XMVector4Dot(vertex, top_plane_projection_vector)) > 0.0f;
+                    const bool bottom_plane_test =
+                        DirectX::XMVectorGetX(DirectX::XMVector4Dot(vertex, bottom_plane_projection_vector)) > 0.0f;
+                    const bool near_plane_test =
+                        DirectX::XMVectorGetX(DirectX::XMVector4Dot(vertex, near_plane_projection_vector)) > 0.0f;
+                    const bool far_plane_test =
+                        DirectX::XMVectorGetX(DirectX::XMVector4Dot(vertex, far_plane_projection_vector)) > 0.0f;
+                    // note(rtarun9) : This seems to be mathematically correct, but gives wrong results?
+                    USE(far_plane_test);
+
+                    if (left_plane_test || right_plane_test || top_plane_test || bottom_plane_test || near_plane_test)
                     {
                         passed_frustum_culling_test = true;
                         break;
@@ -1217,25 +1198,27 @@ int main()
 
                 if (passed_frustum_culling_test)
                 {
-
-                    const D3D12_VERTEX_BUFFER_VIEW chunk_vertex_buffer_view = {
-                        .BufferLocation =
-                            chunk_manager.m_chunk_vertex_buffers[chunk_index].m_buffer->GetGPUVirtualAddress(),
-                        .SizeInBytes = (u32)(sizeof(VertexData) * chunk_manager.m_chunk_vertices_counts[chunk_index]),
-                        .StrideInBytes = sizeof(VertexData),
-                    };
-                    command_list->SetGraphicsRoot32BitConstants(1u, 16u, &chunk_constant_buffer_data.transform_buffer,
-                                                                0u);
-                    command_list->IASetVertexBuffers(0u, 1u, &chunk_vertex_buffer_view);
-                    command_list->DrawInstanced(chunk_manager.m_chunk_vertices_counts[chunk_index], 1u, 0u, 0u);
-
+                    chunk_constant_buffer_data.is_chunk_culled = 1u;
                     chunks_rendered++;
                 }
+                else
+                {
+                    chunk_constant_buffer_data.is_chunk_culled = 0u;
+                    chunks_culled++;
+                }
+
+                const D3D12_VERTEX_BUFFER_VIEW chunk_vertex_buffer_view = {
+                    .BufferLocation =
+                        chunk_manager.m_chunk_vertex_buffers[chunk_index].m_buffer->GetGPUVirtualAddress(),
+                    .SizeInBytes = (u32)(sizeof(VertexData) * chunk_manager.m_chunk_vertices_counts[chunk_index]),
+                    .StrideInBytes = sizeof(VertexData),
+                };
+                command_list->SetGraphicsRoot32BitConstants(1u, 24u, &chunk_constant_buffer_data, 0u);
+                command_list->IASetVertexBuffers(0u, 1u, &chunk_vertex_buffer_view);
+                command_list->DrawInstanced(chunk_manager.m_chunk_vertices_counts[chunk_index], 1u, 0u, 0u);
             }
         }
-
-        printf("Total loaded chunks :: %zu Rendered chunks :: %zu\n", chunk_manager.m_loaded_chunks.size(),
-               chunks_rendered);
+        printf("Culled chunks : %zu Rendered chunks : %zu\n", chunks_culled, chunks_rendered);
 
         // Move a fixed number of chunks from the setup queue to loaded queue.
         for (size_t i = 0;
