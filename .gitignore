@@ -1,14 +1,6 @@
-*.sln
-*.vcxproj
-*.vcxproj.filters
-*.vcxproj.user
-*.vs
-bin/
-obj/
 external/DirectXAgilitySDK
 external/DirectXShaderCompiler
 agility.zip
 dxc.zip
-`
-'
+build/
 
