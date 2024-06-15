@@ -20,11 +20,11 @@ jobs:
     - name: Add MSBuild to PATH
       uses: microsoft/setup-msbuild@v1.0.2
       
-    - name: Generate VS solution file
-      run: ./premake5.exe vs2022
+    - name: Cmake Configure
+      run: cmake -B ${{github.workspace}}/build
     
     - name: Build-Debug
-      run: msbuild voxel-engine.sln /p:Configuration=Debug
+      run: cmake --build ${{github.workspace}}/build --config debug
 
     - name: Build-Release
-      run: msbuild voxel-engine.sln /p:Configuration=Release
+      run: cmake --build ${{github.workspace}}/build --config release
