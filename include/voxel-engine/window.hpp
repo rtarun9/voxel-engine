@@ -18,6 +18,11 @@ class Window
         return m_height;
     }
 
+    inline HWND get_handle() const
+    {
+        return m_handle;
+    }
+
   private:
     static inline constexpr const char WINDOW_CLASS_NAME[] = "Base Window Class";
 

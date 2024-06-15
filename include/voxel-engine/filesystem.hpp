@@ -6,12 +6,24 @@
 class FileSystem
 {
   public:
-    explicit FileSystem();
+    static FileSystem &instance()
+    {
+        static FileSystem fs{};
+        return fs;
+    }
 
     inline std::string get_relative_path(const std::string_view path) const
     {
         return m_root_directory + std::string(path);
     }
+
+    inline std::string executable_path() const
+    {
+        return std::filesystem::current_path().string();
+    }
+
+  private:
+    explicit FileSystem();
 
   private:
     std::string m_root_directory{};
