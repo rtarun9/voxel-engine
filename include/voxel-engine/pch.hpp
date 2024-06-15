@@ -4,7 +4,7 @@
 constexpr bool VX_DEBUG_MODE = true;
 #else
 constexpr bool VX_DEBUG_MODE = false;
-#endif 
+#endif
 
 // Windows includes.
 #define WIN32_LEAN_AND_MEAN
@@ -29,11 +29,13 @@ constexpr bool VX_DEBUG_MODE = false;
 #include <stdlib.h>
 
 #include <array>
+#include <filesystem>
 #include <queue>
 #include <set>
 #include <source_location>
 #include <stack>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>

@@ -3,4 +3,4 @@ external/DirectXShaderCompiler
 agility.zip
 dxc.zip
 build/
-
+.vs/

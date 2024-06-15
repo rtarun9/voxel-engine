@@ -1,9 +1,11 @@
+#include "voxel-engine/filesystem.hpp"
 #include "voxel-engine/timer.hpp"
 #include "voxel-engine/window.hpp"
 
 int main()
 {
     const Window window{};
+    const FileSystem file_system{};
     Timer timer{};
 
     bool quit{false};
