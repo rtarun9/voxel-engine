@@ -4,6 +4,7 @@ set (SRC_FILES
     "timer.cpp"
     "filesystem.cpp"
     "renderer.cpp"
+    "shader_compiler.cpp"
 )
 
 set (HEADER_FILES
@@ -13,10 +14,11 @@ set (HEADER_FILES
     ${CMAKE_SOURCE_DIR}/include/voxel-engine/window.hpp
     ${CMAKE_SOURCE_DIR}/include/voxel-engine/renderer.hpp
     ${CMAKE_SOURCE_DIR}/include/voxel-engine/filesystem.hpp
+    ${CMAKE_SOURCE_DIR}/include/voxel-engine/shader_compiler.hpp
 )
 
 add_executable(voxel-engine ${SRC_FILES} ${HEADER_FILES})
-target_link_libraries(voxel-engine PUBLIC d3d12 dxgi dxguid)
+target_link_libraries(voxel-engine PUBLIC d3d12 dxgi dxguid dxcompiler)
 
 # Treat warnings as errors.
 target_compile_options(voxel-engine PRIVATE  

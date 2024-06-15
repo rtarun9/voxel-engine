@@ -70,7 +70,7 @@ struct Renderer
     // Static globals.
     static inline constexpr u8 NUMBER_OF_BACKBUFFERS = 2u;
 
-  private:
+  public:
     // Core D3D12 and DXGI objects.
     Microsoft::WRL::ComPtr<ID3D12Debug> m_debug_device{};
     Microsoft::WRL::ComPtr<IDXGIFactory6> m_dxgi_factory{};
@@ -81,7 +81,7 @@ struct Renderer
     Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_direct_command_queue{};
     Microsoft::WRL::ComPtr<IDXGISwapChain4> m_swapchain{};
 
-    std::array<Microsoft::WRL::ComPtr<ID3D12Resource>, NUMBER_OF_BACKBUFFERS> m_swapchain_backbuffer_resources{};
+    std::array<u64, NUMBER_OF_BACKBUFFERS> m_swapchain_backbuffer_resource_indices{};
     std::array<D3D12_CPU_DESCRIPTOR_HANDLE, NUMBER_OF_BACKBUFFERS> m_swapchain_backbuffer_cpu_descriptor_handles{};
 
     DescriptorHeap m_cbv_srv_uav_descriptor_heap{};

@@ -17,6 +17,11 @@ class FileSystem
         return m_root_directory + std::string(path);
     }
 
+    inline std::wstring get_relative_path_wstr(const std::wstring_view path) const
+    {
+        return std::filesystem::path(m_root_directory).wstring() + std::wstring(path);
+    }
+
     inline std::string executable_path() const
     {
         return std::filesystem::current_path().string();

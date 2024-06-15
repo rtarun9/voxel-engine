@@ -31,6 +31,8 @@ void DescriptorHeap::offset_current_descriptor_handles()
 {
     current_cpu_descriptor_handle.ptr += descriptor_handle_size;
     current_gpu_descriptor_handle.ptr += descriptor_handle_size;
+
+    current_descriptor_handle_index++;
 }
 
 void DescriptorHeap::create(ID3D12Device *const device, const u32 num_descriptors,
@@ -144,11 +146,15 @@ Renderer::Renderer(const HWND window_handle, const u16 window_width, const u16 w
     // Create the render target view for the swapchain back buffer.
     for (u8 i = 0; i < NUMBER_OF_BACKBUFFERS; i++)
     {
-        throw_if_failed(m_swapchain->GetBuffer(i, IID_PPV_ARGS(&(m_swapchain_backbuffer_resources[i]))));
+        Microsoft::WRL::ComPtr<ID3D12Resource> swapchain_resource{};
+        throw_if_failed(m_swapchain->GetBuffer(i, IID_PPV_ARGS(&swapchain_resource)));
         m_swapchain_backbuffer_cpu_descriptor_handles[i] = m_rtv_descriptor_heap.get_cpu_descriptor_handle_at_index(i);
 
-        m_device->CreateRenderTargetView(m_swapchain_backbuffer_resources[i].Get(), nullptr,
+        m_device->CreateRenderTargetView(swapchain_resource.Get(), nullptr,
                                          m_swapchain_backbuffer_cpu_descriptor_handles[i]);
+
+        m_resources.emplace_back(std::move(swapchain_resource));
+        m_swapchain_backbuffer_resource_indices[i] = m_resources.size() - 1u;
     }
 
     // Create the command allocator (the underlying allocation where gpu commands will be stored after being
@@ -167,7 +173,7 @@ Renderer::Renderer(const HWND window_handle, const u16 window_width, const u16 w
     // Create a fence for CPU GPU synchronization.
     throw_if_failed(m_device->CreateFence(0u, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence)));
 
-    m_swapchain_backbuffer_index = m_swapchain->GetCurrentBackBufferIndex();
+    m_swapchain_backbuffer_index = static_cast<u8>(m_swapchain->GetCurrentBackBufferIndex());
 }
 
 void Renderer::wait_for_fence_value_at_index(const u32 frame_fence_values_index)
@@ -250,7 +256,7 @@ Buffer Renderer::create_buffer(const void *data, const size_t buffer_size, const
         m_resources.emplace_back(std::move(buffer_resource));
 
         return Buffer{
-            .resource_index = m_resources.size(),
+            .resource_index = m_resources.size() - 1,
             .resource_ptr = resource_ptr,
         };
     }
@@ -276,9 +282,11 @@ Buffer Renderer::create_buffer(const void *data, const size_t buffer_size, const
         m_resources.emplace_back(std::move(buffer_resource));
 
         return Buffer{
-            .resource_index = m_resources.size(),
+            .resource_index = m_resources.size() - 1u,
         };
     }
+
+    return Buffer{};
 }
 
 D3D12_CPU_DESCRIPTOR_HANDLE Renderer::create_constant_buffer_view(const u64 buffer_resource_index, const size_t size)
