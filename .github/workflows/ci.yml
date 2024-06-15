@@ -1,4 +1,4 @@
-name: C++ MSBuild 
+name: C++ CMake
 
 on:
   push:
