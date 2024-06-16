@@ -11,38 +11,50 @@ int main()
     const Window window{};
     Renderer renderer(window.get_handle(), window.get_width(), window.get_height());
 
-    // Setup resources required for rendering.
-    // Create a empty root signature.
-    Microsoft::WRL::ComPtr<ID3DBlob> root_signature_blob{};
-    Microsoft::WRL::ComPtr<ID3D12RootSignature> root_signature{};
-    const D3D12_VERSIONED_ROOT_SIGNATURE_DESC root_signature_desc = {
-        .Version = D3D_ROOT_SIGNATURE_VERSION_1_1,
-        .Desc_1_1 =
-            {
-                .NumParameters = 0u,
-                .pParameters = nullptr,
-                .NumStaticSamplers = 0u,
-                .pStaticSamplers = nullptr,
-            },
-    };
+    const Microsoft::WRL::ComPtr<ID3D12RootSignature> bindless_root_signature = renderer.m_bindless_root_signature;
 
-    // Serialize root signature.
-    throw_if_failed(D3D12SerializeVersionedRootSignature(&root_signature_desc, &root_signature_blob, nullptr));
-    throw_if_failed(renderer.m_device->CreateRootSignature(0u, root_signature_blob->GetBufferPointer(),
-                                                           root_signature_blob->GetBufferSize(),
-                                                           IID_PPV_ARGS(&root_signature)));
+    // Setup resources required for rendering.
+
+    // Setup index, position, and color buffer.
+    IndexBuffer index_buffer{};
+    {
+        static constexpr std::array<u16, 3> data{0u, 1u, 2u};
+        index_buffer = renderer.create_index_buffer(data.data(), sizeof(u16), data.size());
+    }
+
+    StructuredBuffer position_buffer{};
+    {
+        static constexpr std::array<DirectX::XMFLOAT3, 3> data{
+            DirectX::XMFLOAT3{-0.5f, -0.5f, 0.0f},
+            DirectX::XMFLOAT3{0.0f, 0.5f, 0.0f},
+            DirectX::XMFLOAT3{0.5f, -0.5f, 0.0f},
+        };
+
+        position_buffer = renderer.create_structured_buffer(data.data(), sizeof(DirectX::XMFLOAT3), data.size());
+    }
+
+    StructuredBuffer color_buffer{};
+    {
+        static constexpr std::array<DirectX::XMFLOAT3, 3> data{
+            DirectX::XMFLOAT3{0.0f, 1.0f, 1.0f},
+            DirectX::XMFLOAT3{0.5f, 0.25f, 0.0f},
+            DirectX::XMFLOAT3{1.0f, 0.0f, 1.0f},
+        };
+
+        color_buffer = renderer.create_structured_buffer(data.data(), sizeof(DirectX::XMFLOAT3), data.size());
+    }
 
     // Compile the vertex and pixel shader.
     Microsoft::WRL::ComPtr<IDxcBlob> vertex_shader_blob = ShaderCompiler::compile(
-        FileSystem::instance().get_relative_path_wstr(L"shaders/triangle_shader.hlsl").c_str(), L"vs_main", L"vs_6_0");
+        FileSystem::instance().get_relative_path_wstr(L"shaders/triangle_shader.hlsl").c_str(), L"vs_main", L"vs_6_6");
 
     Microsoft::WRL::ComPtr<IDxcBlob> pixel_shader_blob = ShaderCompiler::compile(
-        FileSystem::instance().get_relative_path_wstr(L"shaders/triangle_shader.hlsl").c_str(), L"ps_main", L"ps_6_0");
+        FileSystem::instance().get_relative_path_wstr(L"shaders/triangle_shader.hlsl").c_str(), L"ps_main", L"ps_6_6");
 
-    // Create the root signature.
+    // Create the PSO.
     Microsoft::WRL::ComPtr<ID3D12PipelineState> pso{};
     const D3D12_GRAPHICS_PIPELINE_STATE_DESC graphics_pso_desc = {
-        .pRootSignature = root_signature.Get(),
+        .pRootSignature = bindless_root_signature.Get(),
         .VS =
             {
                 .pShaderBytecode = vertex_shader_blob->GetBufferPointer(),
@@ -174,12 +186,33 @@ int main()
         command_list->RSSetViewports(1u, &viewport);
         command_list->RSSetScissorRects(1u, &scissor_rect);
 
+        ID3D12DescriptorHeap *const *shader_visible_descriptor_heaps = {
+            renderer.m_cbv_srv_uav_descriptor_heap.descriptor_heap.GetAddressOf(),
+        };
+
+        command_list->SetDescriptorHeaps(1u, shader_visible_descriptor_heaps);
+
         // Set the index buffer, pso and all config settings for rendering.
-        command_list->SetGraphicsRootSignature(root_signature.Get());
+        command_list->SetGraphicsRootSignature(bindless_root_signature.Get());
         command_list->SetPipelineState(pso.Get());
 
         command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-        command_list->DrawInstanced(3u, 1u, 0u, 0u);
+
+        command_list->IASetIndexBuffer(&index_buffer.index_buffer_view);
+
+        struct RenderResources
+        {
+            u32 position_buffer_index;
+            u32 color_buffer_index;
+        };
+
+        RenderResources render_resources = {
+            .position_buffer_index = static_cast<u32>(position_buffer.srv_index),
+            .color_buffer_index = static_cast<u32>(color_buffer.srv_index),
+        };
+
+        command_list->SetGraphicsRoot32BitConstants(0u, 64u, &render_resources, 0u);
+        command_list->DrawIndexedInstanced(3u, 1u, 0u, 0u, 0u);
 
         // Now, transition back to presentation mode.
         const D3D12_RESOURCE_BARRIER render_target_to_presentation_barrier = {

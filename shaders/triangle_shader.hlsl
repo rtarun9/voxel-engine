@@ -4,17 +4,22 @@ struct VSOutput
     float4 color : VertexColor;
 };
 
-VSOutput vs_main(uint vertexId : SV_VertexID)
+struct RenderResources
 {
-    static const float3 vertex_positions[3] = {float3(-0.5f, -0.5f, 0.0f), float3(0.0f, 0.5f, 0.0f),
-                                               float3(0.5f, -0.5f, 0.0f)};
+    uint position_buffer_index;
+    uint color_buffer_index;
+};
 
-    static const float3 vertex_colors[3] = {float3(1.0f, 0.0f, 0.0f), float3(0.0f, 1.0f, 0.0f),
-                                            float3(0.0f, 0.0f, 1.0f)};
+ConstantBuffer<RenderResources> render_resources : register(b0);
+
+VSOutput vs_main(uint vertex_id : SV_VertexID)
+{
+    StructuredBuffer<float3> position_buffer = ResourceDescriptorHeap[render_resources.position_buffer_index];
+    StructuredBuffer<float3> color_buffer = ResourceDescriptorHeap[render_resources.color_buffer_index];
 
     VSOutput output;
-    output.position = float4(vertex_positions[vertexId], 1.0f);
-    output.color = float4(vertex_colors[vertexId], 1.0f);
+    output.position = float4(position_buffer[vertex_id], 1.0f);
+    output.color = float4(color_buffer[vertex_id], 1.0f);
 
     return output;
 }

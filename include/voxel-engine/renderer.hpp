@@ -1,60 +1,68 @@
 #pragma once
 
-enum class BufferTypes : u8
+// Note : For simplicity purposes, the renderer will have a vector of ID3D12Resources.
+// The user will only have a index into this vector to access the resource.
+struct StructuredBuffer
 {
-    StructuredBuffer,
-    ConstantBuffer,
+    size_t resource_index{};
+    size_t srv_index{};
 };
 
-// Note : For simplicity purposes, the renderer will have a vector of buffers.
-// The user will only have a index into this buffer.
-struct Buffer
+struct IndexBuffer
 {
-    u64 resource_index{};
-
-    u64 cbv_index{};
-    u64 srv_index{};
-    u64 uav_index{};
-    u64 rtv_index{};
-
-    u8 *resource_ptr{};
+    size_t resource_index{};
+    size_t indices_count{};
+    D3D12_INDEX_BUFFER_VIEW index_buffer_view{};
 };
 
-// A simple descriptor heap abstraction.
-// Provides simple methods to offset current descriptor to make creation of resources easier.
-struct DescriptorHeap
+struct ConstantBuffer
 {
-    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> descriptor_heap{};
+    size_t resource_index{};
+    size_t cbv_index{};
+    size_t size_in_bytes{};
 
-    D3D12_CPU_DESCRIPTOR_HANDLE current_cpu_descriptor_handle{};
-    D3D12_GPU_DESCRIPTOR_HANDLE current_gpu_descriptor_handle{};
-
-    u64 current_descriptor_handle_index{};
-
-    u64 descriptor_handle_size{};
-
-    D3D12_GPU_DESCRIPTOR_HANDLE get_gpu_descriptor_handle_at_index(const u64 index) const;
-    D3D12_CPU_DESCRIPTOR_HANDLE get_cpu_descriptor_handle_at_index(const u64 index) const;
-
-    void offset_current_descriptor_handles();
-
-    void create(ID3D12Device *const device, const u32 num_descriptors,
-                const D3D12_DESCRIPTOR_HEAP_TYPE descriptor_heap_type,
-                const D3D12_DESCRIPTOR_HEAP_FLAGS descriptor_heap_flags);
+    u8 *resource_mapped_ptr{};
 };
 
 // A simple & straight forward high level renderer abstraction.
 struct Renderer
 {
+    // Nested struct definitions.
+  private:
+    // A simple descriptor heap abstraction.
+    // Provides simple methods to offset current descriptor to make creation of resources easier.
+    struct DescriptorHeap
+    {
+        Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> descriptor_heap{};
+
+        D3D12_CPU_DESCRIPTOR_HANDLE current_cpu_descriptor_handle{};
+        D3D12_GPU_DESCRIPTOR_HANDLE current_gpu_descriptor_handle{};
+
+        size_t current_descriptor_handle_index{};
+
+        size_t descriptor_handle_size{};
+
+        D3D12_GPU_DESCRIPTOR_HANDLE get_gpu_descriptor_handle_at_index(const size_t index) const;
+        D3D12_CPU_DESCRIPTOR_HANDLE get_cpu_descriptor_handle_at_index(const size_t index) const;
+
+        void offset_current_descriptor_handles();
+
+        void create(ID3D12Device *const device, const size_t num_descriptors,
+                    const D3D12_DESCRIPTOR_HEAP_TYPE descriptor_heap_type,
+                    const D3D12_DESCRIPTOR_HEAP_FLAGS descriptor_heap_flags);
+    };
+
+  public:
     explicit Renderer(const HWND window_handle, const u16 window_width, const u16 window_height);
 
     // Resource creation functions.
-    Buffer create_buffer(const void *data, const size_t buffer_size, const BufferTypes buffer_type);
+    IndexBuffer create_index_buffer(const void *data, const size_t stride, const size_t indices_count);
+    StructuredBuffer create_structured_buffer(const void *data, const size_t stride, const size_t num_elements);
 
-    void execute_command_list();
+    void execute_command_list() const;
 
     // Sync functions.
-    void wait_for_fence_value_at_index(const u32 frame_fence_values_index);
+    void wait_for_fence_value_at_index(const size_t frame_fence_values_index);
 
     // Whenever fence is being signalled, increment the monotonical frame fence value.
     // and update frame fence value.
@@ -64,7 +72,9 @@ struct Renderer
 
   private:
     // This function automatically offset's the current descriptor handle of descriptor heap.
-    D3D12_CPU_DESCRIPTOR_HANDLE create_constant_buffer_view(const u64 buffer_resource_index, const size_t size);
+    size_t create_constant_buffer_view(const size_t buffer_resource_index, const size_t size);
+    size_t create_shader_resource_view(const size_t buffer_resource_index, const size_t stride,
+                                       const size_t num_elements);
 
   public:
     // Static globals.
@@ -100,4 +110,7 @@ struct Renderer
     // Resource vectors.
     std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> m_resources{};
     std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> m_intermediate_resources{};
+
+    // Bindless root signature, that is shared by all pipelines.
+    Microsoft::WRL::ComPtr<ID3D12RootSignature> m_bindless_root_signature{};
 };

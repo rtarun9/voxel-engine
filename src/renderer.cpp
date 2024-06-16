@@ -11,7 +11,7 @@ extern "C"
     __declspec(dllexport) extern const char *D3D12SDKPath = ".\\D3D12\\";
 }
 
-D3D12_GPU_DESCRIPTOR_HANDLE DescriptorHeap::get_gpu_descriptor_handle_at_index(const u64 index) const
+D3D12_GPU_DESCRIPTOR_HANDLE Renderer::DescriptorHeap::get_gpu_descriptor_handle_at_index(const size_t index) const
 {
     D3D12_GPU_DESCRIPTOR_HANDLE handle = descriptor_heap->GetGPUDescriptorHandleForHeapStart();
     handle.ptr += index * descriptor_handle_size;
@@ -19,7 +19,7 @@ D3D12_GPU_DESCRIPTOR_HANDLE DescriptorHeap::get_gpu_descriptor_handle_at_index(c
     return handle;
 }
 
-D3D12_CPU_DESCRIPTOR_HANDLE DescriptorHeap::get_cpu_descriptor_handle_at_index(const u64 index) const
+D3D12_CPU_DESCRIPTOR_HANDLE Renderer::DescriptorHeap::get_cpu_descriptor_handle_at_index(const size_t index) const
 {
     D3D12_CPU_DESCRIPTOR_HANDLE handle = descriptor_heap->GetCPUDescriptorHandleForHeapStart();
     handle.ptr += index * descriptor_handle_size;
@@ -27,7 +27,7 @@ D3D12_CPU_DESCRIPTOR_HANDLE DescriptorHeap::get_cpu_descriptor_handle_at_index(c
     return handle;
 }
 
-void DescriptorHeap::offset_current_descriptor_handles()
+void Renderer::DescriptorHeap::offset_current_descriptor_handles()
 {
     current_cpu_descriptor_handle.ptr += descriptor_handle_size;
     current_gpu_descriptor_handle.ptr += descriptor_handle_size;
@@ -35,16 +35,15 @@ void DescriptorHeap::offset_current_descriptor_handles()
     current_descriptor_handle_index++;
 }
 
-void DescriptorHeap::create(ID3D12Device *const device, const u32 num_descriptors,
-                            const D3D12_DESCRIPTOR_HEAP_TYPE descriptor_heap_type,
-                            const D3D12_DESCRIPTOR_HEAP_FLAGS descriptor_heap_flags)
+void Renderer::DescriptorHeap::create(ID3D12Device *const device, const size_t num_descriptors,
+                                      const D3D12_DESCRIPTOR_HEAP_TYPE descriptor_heap_type,
+                                      const D3D12_DESCRIPTOR_HEAP_FLAGS descriptor_heap_flags)
 {
     const D3D12_DESCRIPTOR_HEAP_DESC descriptor_heap_desc = {
         .Type = descriptor_heap_type,
-        .NumDescriptors = num_descriptors,
+        .NumDescriptors = static_cast<UINT>(num_descriptors),
         .Flags = descriptor_heap_flags,
         .NodeMask = 0u,
-
     };
 
     throw_if_failed(device->CreateDescriptorHeap(&descriptor_heap_desc, IID_PPV_ARGS(&descriptor_heap)));
@@ -174,9 +173,42 @@ Renderer::Renderer(const HWND window_handle, const u16 window_width, const u16 w
     throw_if_failed(m_device->CreateFence(0u, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence)));
 
     m_swapchain_backbuffer_index = static_cast<u8>(m_swapchain->GetCurrentBackBufferIndex());
+
+    // Create and setup the bindless root signature that is shared by all pipelines.
+
+    const D3D12_ROOT_PARAMETER1 shader_constant_root_parameter = {
+        .ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
+        .Constants =
+            {
+                .ShaderRegister = 0u,
+                .RegisterSpace = 0u,
+                .Num32BitValues = 64u,
+            },
+        .ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL,
+    };
+
+    Microsoft::WRL::ComPtr<ID3DBlob> bindless_root_signature_blob{};
+    const D3D12_VERSIONED_ROOT_SIGNATURE_DESC root_signature_desc = {
+        .Version = D3D_ROOT_SIGNATURE_VERSION_1_1,
+        .Desc_1_1 =
+            {
+                .NumParameters = 1u,
+                .pParameters = &shader_constant_root_parameter,
+                .NumStaticSamplers = 0u,
+                .pStaticSamplers = nullptr,
+                .Flags = D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED |
+                         D3D12_ROOT_SIGNATURE_FLAG_SAMPLER_HEAP_DIRECTLY_INDEXED,
+            },
+    };
+
+    // Serialize root signature.
+    throw_if_failed(D3D12SerializeVersionedRootSignature(&root_signature_desc, &bindless_root_signature_blob, nullptr));
+    throw_if_failed(m_device->CreateRootSignature(0u, bindless_root_signature_blob->GetBufferPointer(),
+                                                  bindless_root_signature_blob->GetBufferSize(),
+                                                  IID_PPV_ARGS(&m_bindless_root_signature)));
 }
 
-void Renderer::wait_for_fence_value_at_index(const u32 frame_fence_values_index)
+void Renderer::wait_for_fence_value_at_index(const size_t frame_fence_values_index)
 {
     if (m_fence->GetCompletedValue() >= m_frame_fence_values[frame_fence_values_index])
     {
@@ -207,15 +239,22 @@ void Renderer::flush_gpu()
     wait_for_fence_value_at_index(m_swapchain_backbuffer_index);
 }
 
-Buffer Renderer::create_buffer(const void *data, const size_t buffer_size, const BufferTypes buffer_type)
+IndexBuffer Renderer::create_index_buffer(const void *data, const size_t stride, const size_t indices_count)
 {
-    u8 *resource_ptr{};
+    // note(rtarun9) : Figure out how to handle these invalid cases.
+    if (data == nullptr)
+    {
+        return IndexBuffer{};
+    }
 
+    const size_t size_in_bytes = stride * indices_count;
+
+    u8 *resource_ptr{};
     Microsoft::WRL::ComPtr<ID3D12Resource> buffer_resource{};
     Microsoft::WRL::ComPtr<ID3D12Resource> intermediate_buffer_resource{};
 
     // First, create a upload buffer (that is placed in memory accesible by both GPU and CPU).
-    // If the buffer type is constant buffer, this IS the final buffer.
+    // Then create a GPU only buffer, and copy data from the previous buffer to GPU only one.
     const D3D12_HEAP_PROPERTIES upload_heap_properties = {
         .Type = D3D12_HEAP_TYPE_UPLOAD,
         .CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
@@ -226,7 +265,7 @@ Buffer Renderer::create_buffer(const void *data, const size_t buffer_size, const
 
     const D3D12_RESOURCE_DESC buffer_resource_desc = {
         .Dimension = D3D12_RESOURCE_DIMENSION_BUFFER,
-        .Width = buffer_size,
+        .Width = size_in_bytes,
         .Height = 1u,
         .DepthOrArraySize = 1u,
         .MipLevels = 1u,
@@ -245,51 +284,115 @@ Buffer Renderer::create_buffer(const void *data, const size_t buffer_size, const
 
     throw_if_failed(intermediate_buffer_resource->Map(0u, &read_range, (void **)&resource_ptr));
 
-    if (data != nullptr)
-    {
-        memcpy(resource_ptr, data, buffer_size);
-    }
+    memcpy(resource_ptr, data, size_in_bytes);
 
-    if (buffer_type == BufferTypes::ConstantBuffer)
-    {
-        buffer_resource = std::move(intermediate_buffer_resource);
-        m_resources.emplace_back(std::move(buffer_resource));
+    // Create the final resource and transfer the data from upload buffer to the final buffer.
+    // The heap type is : Default (no CPU access).
+    const D3D12_HEAP_PROPERTIES default_heap_properties = {
+        .Type = D3D12_HEAP_TYPE_DEFAULT,
+        .CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+        .MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN,
+        .CreationNodeMask = 0u,
+        .VisibleNodeMask = 0u,
+    };
 
-        return Buffer{
-            .resource_index = m_resources.size() - 1,
-            .resource_ptr = resource_ptr,
-        };
-    }
-    else if (buffer_type == BufferTypes::StructuredBuffer)
-    {
-        // Create the final resource and transfer the data from upload buffer to the final buffer.
-        // The heap type is : Default (no CPU access).
-        const D3D12_HEAP_PROPERTIES default_heap_properties = {
-            .Type = D3D12_HEAP_TYPE_DEFAULT,
-            .CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
-            .MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN,
-            .CreationNodeMask = 0u,
-            .VisibleNodeMask = 0u,
-        };
+    throw_if_failed(m_device->CreateCommittedResource(
+        &default_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES, &buffer_resource_desc,
+        D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&buffer_resource)));
 
-        throw_if_failed(m_device->CreateCommittedResource(
-            &default_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES, &buffer_resource_desc,
-            D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&buffer_resource)));
+    m_command_list->CopyResource(buffer_resource.Get(), intermediate_buffer_resource.Get());
 
-        m_command_list->CopyResource(buffer_resource.Get(), intermediate_buffer_resource.Get());
+    const D3D12_INDEX_BUFFER_VIEW index_buffer_view = {
+        .BufferLocation = buffer_resource->GetGPUVirtualAddress(),
+        .SizeInBytes = static_cast<UINT>(size_in_bytes),
+        .Format = DXGI_FORMAT_R16_UINT,
+    };
 
-        m_intermediate_resources.emplace_back(std::move(intermediate_buffer_resource));
-        m_resources.emplace_back(std::move(buffer_resource));
+    m_intermediate_resources.emplace_back(std::move(intermediate_buffer_resource));
+    m_resources.emplace_back(std::move(buffer_resource));
 
-        return Buffer{
-            .resource_index = m_resources.size() - 1u,
-        };
-    }
-
-    return Buffer{};
+    return IndexBuffer{
+        .resource_index = m_resources.size() - 1u,
+        .indices_count = indices_count,
+        .index_buffer_view = index_buffer_view,
+    };
 }
 
-D3D12_CPU_DESCRIPTOR_HANDLE Renderer::create_constant_buffer_view(const u64 buffer_resource_index, const size_t size)
+StructuredBuffer Renderer::create_structured_buffer(const void *data, const size_t stride, const size_t num_elements)
+{
+    // note(rtarun9) : Figure out how to handle these invalid cases.
+    if (data == nullptr)
+    {
+        return StructuredBuffer{};
+    }
+
+    const size_t size_in_bytes = stride * num_elements;
+
+    u8 *resource_ptr{};
+    Microsoft::WRL::ComPtr<ID3D12Resource> buffer_resource{};
+    Microsoft::WRL::ComPtr<ID3D12Resource> intermediate_buffer_resource{};
+
+    // First, create a upload buffer (that is placed in memory accesible by both GPU and CPU).
+    // Then create a GPU only buffer, and copy data from the previous buffer to GPU only one.
+    const D3D12_HEAP_PROPERTIES upload_heap_properties = {
+        .Type = D3D12_HEAP_TYPE_UPLOAD,
+        .CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+        .MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN,
+        .CreationNodeMask = 0u,
+        .VisibleNodeMask = 0u,
+    };
+
+    const D3D12_RESOURCE_DESC buffer_resource_desc = {
+        .Dimension = D3D12_RESOURCE_DIMENSION_BUFFER,
+        .Width = size_in_bytes,
+        .Height = 1u,
+        .DepthOrArraySize = 1u,
+        .MipLevels = 1u,
+        .Format = DXGI_FORMAT_UNKNOWN,
+        .SampleDesc = {1u, 0u},
+        .Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
+        .Flags = D3D12_RESOURCE_FLAG_NONE,
+    };
+
+    throw_if_failed(m_device->CreateCommittedResource(
+        &upload_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES, &buffer_resource_desc,
+        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, nullptr, IID_PPV_ARGS(&intermediate_buffer_resource)));
+
+    // Now that a resource is created, copy CPU data to this upload buffer.
+    const D3D12_RANGE read_range{.Begin = 0u, .End = 0u};
+
+    throw_if_failed(intermediate_buffer_resource->Map(0u, &read_range, (void **)&resource_ptr));
+
+    memcpy(resource_ptr, data, size_in_bytes);
+
+    // Create the final resource and transfer the data from upload buffer to the final buffer.
+    // The heap type is : Default (no CPU access).
+    const D3D12_HEAP_PROPERTIES default_heap_properties = {
+        .Type = D3D12_HEAP_TYPE_DEFAULT,
+        .CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+        .MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN,
+        .CreationNodeMask = 0u,
+        .VisibleNodeMask = 0u,
+    };
+
+    throw_if_failed(m_device->CreateCommittedResource(
+        &default_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES, &buffer_resource_desc,
+        D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&buffer_resource)));
+
+    m_command_list->CopyResource(buffer_resource.Get(), intermediate_buffer_resource.Get());
+
+    m_intermediate_resources.emplace_back(std::move(intermediate_buffer_resource));
+    m_resources.emplace_back(std::move(buffer_resource));
+
+    // Create structured buffer view.
+    size_t srv_index = create_shader_resource_view(m_resources.size() - 1u, stride, num_elements);
+
+    return StructuredBuffer{
+        .resource_index = m_resources.size() - 1u,
+        .srv_index = srv_index,
+    };
+}
+size_t Renderer::create_constant_buffer_view(const size_t buffer_resource_index, const size_t size)
 {
     const D3D12_CPU_DESCRIPTOR_HANDLE handle = m_cbv_srv_uav_descriptor_heap.current_cpu_descriptor_handle;
 
@@ -300,12 +403,39 @@ D3D12_CPU_DESCRIPTOR_HANDLE Renderer::create_constant_buffer_view(const u64 buff
 
     m_device->CreateConstantBufferView(&cbv_desc, handle);
 
+    const size_t cbv_index = m_cbv_srv_uav_descriptor_heap.current_descriptor_handle_index;
+
     m_cbv_srv_uav_descriptor_heap.offset_current_descriptor_handles();
 
-    return handle;
+    return cbv_index;
 }
 
-void Renderer::execute_command_list()
+size_t Renderer::create_shader_resource_view(const size_t buffer_resource_index, const size_t stride,
+                                             const size_t num_elements)
+{
+    const D3D12_CPU_DESCRIPTOR_HANDLE handle = m_cbv_srv_uav_descriptor_heap.current_cpu_descriptor_handle;
+
+    const D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {
+        .Format = DXGI_FORMAT_UNKNOWN,
+        .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
+        .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+        .Buffer{
+            .FirstElement = 0u,
+            .NumElements = static_cast<UINT>(num_elements),
+            .StructureByteStride = static_cast<UINT>(stride),
+        },
+    };
+
+    m_device->CreateShaderResourceView(m_resources[buffer_resource_index].Get(), &srv_desc, handle);
+
+    const size_t srv_index = m_cbv_srv_uav_descriptor_heap.current_descriptor_handle_index;
+
+    m_cbv_srv_uav_descriptor_heap.offset_current_descriptor_handles();
+
+    return srv_index;
+}
+
+void Renderer::execute_command_list() const
 {
     throw_if_failed(m_command_list->Close());
 
