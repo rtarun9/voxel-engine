@@ -115,7 +115,7 @@ Renderer::Renderer(const HWND window_handle, const u16 window_width, const u16 w
         const DXGI_SWAP_CHAIN_DESC1 swapchain_desc = {
             .Width = window_width,
             .Height = window_height,
-            .Format = DXGI_FORMAT_R10G10B10A2_UNORM,
+            .Format = DXGI_FORMAT_R8G8B8A8_UNORM,
             .Stereo = FALSE,
             .SampleDesc = {1, 0},
             .BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT,

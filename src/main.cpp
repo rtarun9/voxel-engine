@@ -4,6 +4,12 @@
 #include "voxel-engine/timer.hpp"
 #include "voxel-engine/window.hpp"
 
+#include "shaders/interop/render_resources.hlsli"
+
+#include "imgui.h"
+#include "imgui_impl_dx12.h"
+#include "imgui_impl_win32.h"
+
 int main()
 {
     printf("Executable path :: %s\n", FileSystem::instance().executable_path().c_str());
@@ -11,7 +17,30 @@ int main()
     const Window window{};
     Renderer renderer(window.get_handle(), window.get_width(), window.get_height());
 
-    const Microsoft::WRL::ComPtr<ID3D12RootSignature> bindless_root_signature = renderer.m_bindless_root_signature;
+    // Setup imgui.
+    {
+        IMGUI_CHECKVERSION();
+        ImGui::CreateContext();
+
+        ImGuiIO &io = ImGui::GetIO();
+        io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad; // Enable Gamepad Controls
+
+        ImGui::StyleColorsDark();
+
+        D3D12_CPU_DESCRIPTOR_HANDLE cpu_descriptor_handle =
+            renderer.m_cbv_srv_uav_descriptor_heap.current_cpu_descriptor_handle;
+
+        D3D12_GPU_DESCRIPTOR_HANDLE gpu_descriptor_handle =
+            renderer.m_cbv_srv_uav_descriptor_heap.current_gpu_descriptor_handle;
+
+        renderer.m_cbv_srv_uav_descriptor_heap.offset_current_descriptor_handles();
+
+        // Setup platform / renderer backend.
+        ImGui_ImplWin32_Init(window.get_handle());
+        ImGui_ImplDX12_Init(renderer.m_device.Get(), Renderer::NUMBER_OF_BACKBUFFERS, Renderer::BACKBUFFER_FORMAT,
+                            renderer.m_cbv_srv_uav_descriptor_heap.descriptor_heap.Get(), cpu_descriptor_handle,
+                            gpu_descriptor_handle);
+    }
 
     // Setup resources required for rendering.
 
@@ -54,7 +83,7 @@ int main()
     // Create the PSO.
     Microsoft::WRL::ComPtr<ID3D12PipelineState> pso{};
     const D3D12_GRAPHICS_PIPELINE_STATE_DESC graphics_pso_desc = {
-        .pRootSignature = bindless_root_signature.Get(),
+        .pRootSignature = renderer.m_bindless_root_signature.Get(),
         .VS =
             {
                 .pShaderBytecode = vertex_shader_blob->GetBufferPointer(),
@@ -95,7 +124,7 @@ int main()
         .NumRenderTargets = 1u,
         .RTVFormats =
             {
-                DXGI_FORMAT_R10G10B10A2_UNORM,
+                Renderer::BACKBUFFER_FORMAT,
             },
         .SampleDesc =
             {
@@ -186,6 +215,11 @@ int main()
         command_list->RSSetViewports(1u, &viewport);
         command_list->RSSetScissorRects(1u, &scissor_rect);
 
+        // Start the Dear ImGui frame
+        ImGui_ImplDX12_NewFrame();
+        ImGui_ImplWin32_NewFrame();
+        ImGui::NewFrame();
+
         ID3D12DescriptorHeap *const *shader_visible_descriptor_heaps = {
             renderer.m_cbv_srv_uav_descriptor_heap.descriptor_heap.GetAddressOf(),
         };
@@ -193,26 +227,26 @@ int main()
         command_list->SetDescriptorHeaps(1u, shader_visible_descriptor_heaps);
 
         // Set the index buffer, pso and all config settings for rendering.
-        command_list->SetGraphicsRootSignature(bindless_root_signature.Get());
+        command_list->SetGraphicsRootSignature(renderer.m_bindless_root_signature.Get());
         command_list->SetPipelineState(pso.Get());
 
         command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
         command_list->IASetIndexBuffer(&index_buffer.index_buffer_view);
 
-        struct RenderResources
-        {
-            u32 position_buffer_index;
-            u32 color_buffer_index;
-        };
-
-        RenderResources render_resources = {
+        const TriangleRenderResources render_resources = {
             .position_buffer_index = static_cast<u32>(position_buffer.srv_index),
             .color_buffer_index = static_cast<u32>(color_buffer.srv_index),
         };
 
         command_list->SetGraphicsRoot32BitConstants(0u, 64u, &render_resources, 0u);
         command_list->DrawIndexedInstanced(3u, 1u, 0u, 0u, 0u);
+
+        // Render UI.
+        ImGui::ShowDemoWindow();
+
+        ImGui::Render();
+        ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), command_list.Get());
 
         // Now, transition back to presentation mode.
         const D3D12_RESOURCE_BARRIER render_target_to_presentation_barrier = {
@@ -245,6 +279,13 @@ int main()
 
         timer.stop();
     }
+
+    // Cleanup
+    ImGui_ImplDX12_Shutdown();
+    ImGui_ImplWin32_Shutdown();
+    ImGui::DestroyContext();
+
+    renderer.flush_gpu();
 
     return 0;
 }

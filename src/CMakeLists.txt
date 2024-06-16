@@ -18,7 +18,7 @@ set (HEADER_FILES
 )
 
 add_executable(voxel-engine ${SRC_FILES} ${HEADER_FILES})
-target_link_libraries(voxel-engine PUBLIC d3d12 dxgi dxguid dxcompiler)
+target_link_libraries(voxel-engine PUBLIC d3d12 dxgi dxguid dxcompiler external)
 
 # Treat warnings as errors.
 target_compile_options(voxel-engine PRIVATE  
@@ -28,3 +28,4 @@ target_compile_options(voxel-engine PRIVATE
 target_precompile_headers(voxel-engine PUBLIC ${CMAKE_SOURCE_DIR}/include/voxel-engine/pch.hpp)
 
 target_include_directories(voxel-engine PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_include_directories(voxel-engine PRIVATE ${CMAKE_SOURCE_DIR}/)

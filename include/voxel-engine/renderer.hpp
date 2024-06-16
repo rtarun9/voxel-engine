@@ -79,6 +79,7 @@ struct Renderer
   public:
     // Static globals.
     static inline constexpr u8 NUMBER_OF_BACKBUFFERS = 2u;
+    static inline constexpr DXGI_FORMAT BACKBUFFER_FORMAT = DXGI_FORMAT_R8G8B8A8_UNORM;
 
   public:
     // Core D3D12 and DXGI objects.

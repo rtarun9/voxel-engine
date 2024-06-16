@@ -39,8 +39,9 @@ IDxcBlob *compile(const wchar_t *const file_path, const wchar_t *const entry_poi
 
     // Compile the shader.
     Microsoft::WRL::ComPtr<IDxcResult> results{};
-    throw_if_failed(g_compiler->Compile(&source_buffer, compiler_arguments.data(), compiler_arguments.size(),
-                                        g_include_handler.Get(), IID_PPV_ARGS(&results)));
+    throw_if_failed(g_compiler->Compile(&source_buffer, compiler_arguments.data(),
+                                        static_cast<u32>(compiler_arguments.size()), g_include_handler.Get(),
+                                        IID_PPV_ARGS(&results)));
 
     // Check for errors.
     Microsoft::WRL::ComPtr<IDxcBlobUtf8> error_blob{};
