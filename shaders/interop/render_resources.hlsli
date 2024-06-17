@@ -7,13 +7,34 @@
 #define float4 DirectX::XMFLOAT4
 #define float3 DirectX::XMFLOAT3
 #define uint u32
+#define ConstantBufferStruct struct alignas(256)
+
+#else
+
+#pragma pack_matrix(row_major)
+#define ConstantBufferStruct  struct
 
 #endif
+
+// clang-format off
 
 struct TriangleRenderResources
 {
     uint position_buffer_index;
     uint color_buffer_index;
+};
+
+ConstantBufferStruct
+SceneConstantBuffer
+{
+    float4x4 view_projection_matrix;
+};
+
+struct VoxelRenderResources
+{
+    uint position_buffer_index;
+    uint color_buffer_index;
+    uint scene_constant_buffer_index;
 };
 
 #endif

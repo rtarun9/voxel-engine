@@ -22,6 +22,11 @@ struct ConstantBuffer
     size_t size_in_bytes{};
 
     u8 *resource_mapped_ptr{};
+
+    void update(const void *data) const
+    {
+        memcpy(resource_mapped_ptr, data, size_in_bytes);
+    }
 };
 
 // A simple & straight forward high level renderer abstraction.
@@ -58,6 +63,7 @@ struct Renderer
     // Resource creation functions.
     IndexBuffer create_index_buffer(const void *data, const size_t stride, const size_t indices_count);
     StructuredBuffer create_structured_buffer(const void *data, const size_t stride, const size_t num_elements);
+    ConstantBuffer create_constant_buffer(const size_t size_in_bytes);
 
     void execute_command_list() const;
 

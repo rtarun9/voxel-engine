@@ -20,5 +20,5 @@ void Timer::stop()
 
 float Timer::get_delta_time() const
 {
-    return (m_start_time.QuadPart - m_end_time.QuadPart) * m_seconds_per_count;
+    return (m_end_time.QuadPart - m_start_time.QuadPart) * m_seconds_per_count;
 }

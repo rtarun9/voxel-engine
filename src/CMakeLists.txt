@@ -3,6 +3,7 @@ set (SRC_FILES
     "window.cpp"
     "timer.cpp"
     "filesystem.cpp"
+    "camera.cpp"
     "renderer.cpp"
     "shader_compiler.cpp"
 )
@@ -14,6 +15,7 @@ set (HEADER_FILES
     ${CMAKE_SOURCE_DIR}/include/voxel-engine/window.hpp
     ${CMAKE_SOURCE_DIR}/include/voxel-engine/renderer.hpp
     ${CMAKE_SOURCE_DIR}/include/voxel-engine/filesystem.hpp
+    ${CMAKE_SOURCE_DIR}/include/voxel-engine/camera.hpp
     ${CMAKE_SOURCE_DIR}/include/voxel-engine/shader_compiler.hpp
 )
 

@@ -1,3 +1,4 @@
+#include "voxel-engine/camera.hpp"
 #include "voxel-engine/filesystem.hpp"
 #include "voxel-engine/renderer.hpp"
 #include "voxel-engine/shader_compiler.hpp"
@@ -21,9 +22,6 @@ int main()
     {
         IMGUI_CHECKVERSION();
         ImGui::CreateContext();
-
-        ImGuiIO &io = ImGui::GetIO();
-        io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad; // Enable Gamepad Controls
 
         ImGui::StyleColorsDark();
 
@@ -73,12 +71,15 @@ int main()
         color_buffer = renderer.create_structured_buffer(data.data(), sizeof(DirectX::XMFLOAT3), data.size());
     }
 
+    SceneConstantBuffer scene_buffer_data{};
+    ConstantBuffer scene_buffer = renderer.create_constant_buffer(sizeof(SceneConstantBuffer));
+
     // Compile the vertex and pixel shader.
     Microsoft::WRL::ComPtr<IDxcBlob> vertex_shader_blob = ShaderCompiler::compile(
-        FileSystem::instance().get_relative_path_wstr(L"shaders/triangle_shader.hlsl").c_str(), L"vs_main", L"vs_6_6");
+        FileSystem::instance().get_relative_path_wstr(L"shaders/voxel_shader.hlsl").c_str(), L"vs_main", L"vs_6_6");
 
     Microsoft::WRL::ComPtr<IDxcBlob> pixel_shader_blob = ShaderCompiler::compile(
-        FileSystem::instance().get_relative_path_wstr(L"shaders/triangle_shader.hlsl").c_str(), L"ps_main", L"ps_6_6");
+        FileSystem::instance().get_relative_path_wstr(L"shaders/voxel_shader.hlsl").c_str(), L"ps_main", L"ps_6_6");
 
     // Create the PSO.
     Microsoft::WRL::ComPtr<ID3D12PipelineState> pso{};
@@ -157,7 +158,9 @@ int main()
     renderer.execute_command_list();
     renderer.flush_gpu();
 
+    Camera camera{};
     Timer timer{};
+    float delta_time = 0.0f;
 
     u64 frame_count = 0;
 
@@ -177,6 +180,15 @@ int main()
         {
             quit = true;
         }
+
+        const float window_aspect_ratio = static_cast<float>(window.get_width()) / window.get_height();
+
+        const DirectX::XMMATRIX view_projection_matrix =
+            camera.update_and_get_view_matrix(delta_time) *
+            DirectX::XMMatrixPerspectiveFovLH(DirectX::XMConvertToRadians(45.0f), window_aspect_ratio, 0.1f, 10.0f);
+        scene_buffer_data.view_projection_matrix = view_projection_matrix;
+
+        scene_buffer.update(&scene_buffer_data);
 
         const auto &allocator = renderer.m_direct_command_allocators[renderer.m_swapchain_backbuffer_index];
         const auto &command_list = renderer.m_command_list;
@@ -234,16 +246,20 @@ int main()
 
         command_list->IASetIndexBuffer(&index_buffer.index_buffer_view);
 
-        const TriangleRenderResources render_resources = {
+        const VoxelRenderResources render_resources = {
             .position_buffer_index = static_cast<u32>(position_buffer.srv_index),
             .color_buffer_index = static_cast<u32>(color_buffer.srv_index),
+            .scene_constant_buffer_index = static_cast<u32>(scene_buffer.cbv_index),
         };
 
         command_list->SetGraphicsRoot32BitConstants(0u, 64u, &render_resources, 0u);
         command_list->DrawIndexedInstanced(3u, 1u, 0u, 0u, 0u);
 
         // Render UI.
-        ImGui::ShowDemoWindow();
+        ImGui::Begin("Debug Controller");
+        ImGui::SliderFloat("movement_speed", &camera.m_movement_speed, 0.0f, 10.0f);
+        ImGui::SliderFloat("rotation_speed", &camera.m_rotation_speed, 0.0f, 10.0f);
+        ImGui::End();
 
         ImGui::Render();
         ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), command_list.Get());
@@ -278,6 +294,7 @@ int main()
         ++frame_count;
 
         timer.stop();
+        delta_time = timer.get_delta_time();
     }
 
     // Cleanup

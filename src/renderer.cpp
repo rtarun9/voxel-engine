@@ -392,6 +392,54 @@ StructuredBuffer Renderer::create_structured_buffer(const void *data, const size
         .srv_index = srv_index,
     };
 }
+
+ConstantBuffer Renderer::create_constant_buffer(const size_t size_in_bytes)
+{
+    u8 *resource_ptr{};
+    Microsoft::WRL::ComPtr<ID3D12Resource> buffer_resource{};
+
+    const D3D12_HEAP_PROPERTIES upload_heap_properties = {
+        .Type = D3D12_HEAP_TYPE_UPLOAD,
+        .CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+        .MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN,
+        .CreationNodeMask = 0u,
+        .VisibleNodeMask = 0u,
+    };
+
+    const D3D12_RESOURCE_DESC buffer_resource_desc = {
+        .Dimension = D3D12_RESOURCE_DIMENSION_BUFFER,
+        .Width = size_in_bytes,
+        .Height = 1u,
+        .DepthOrArraySize = 1u,
+        .MipLevels = 1u,
+        .Format = DXGI_FORMAT_UNKNOWN,
+        .SampleDesc = {1u, 0u},
+        .Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
+        .Flags = D3D12_RESOURCE_FLAG_NONE,
+    };
+
+    throw_if_failed(m_device->CreateCommittedResource(
+        &upload_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES, &buffer_resource_desc,
+        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, nullptr, IID_PPV_ARGS(&buffer_resource)));
+
+    // Now that a resource is created, copy CPU data to this upload buffer.
+    const D3D12_RANGE read_range{.Begin = 0u, .End = 0u};
+
+    throw_if_failed(buffer_resource->Map(0u, &read_range, (void **)&resource_ptr));
+
+    m_resources.emplace_back(std::move(buffer_resource));
+
+    // Create Constant buffer view.
+    size_t cbv_index = create_constant_buffer_view(m_resources.size() - 1u, size_in_bytes);
+
+    return ConstantBuffer{
+        .resource_index = m_resources.size() - 1u,
+        .cbv_index = cbv_index,
+        .size_in_bytes = size_in_bytes,
+        .resource_mapped_ptr = resource_ptr,
+    };
+}
+
 size_t Renderer::create_constant_buffer_view(const size_t buffer_resource_index, const size_t size)
 {
     const D3D12_CPU_DESCRIPTOR_HANDLE handle = m_cbv_srv_uav_descriptor_heap.current_cpu_descriptor_handle;
