@@ -45,16 +45,19 @@ int main()
     // Setup index, position, and color buffer.
     IndexBuffer index_buffer{};
     {
-        static constexpr std::array<u16, 3> data{0u, 1u, 2u};
+        static constexpr std::array<u16, 36> data = {0, 1, 2, 0, 2, 3, 4, 6, 5, 4, 7, 6, 4, 5, 1, 4, 1, 0,
+                                                     3, 2, 6, 3, 6, 7, 1, 5, 6, 1, 6, 2, 4, 0, 3, 4, 3, 7};
+
         index_buffer = renderer.create_index_buffer(data.data(), sizeof(u16), data.size());
     }
 
     StructuredBuffer position_buffer{};
     {
-        static constexpr std::array<DirectX::XMFLOAT3, 3> data{
-            DirectX::XMFLOAT3{-0.5f, -0.5f, 0.0f},
-            DirectX::XMFLOAT3{0.0f, 0.5f, 0.0f},
-            DirectX::XMFLOAT3{0.5f, -0.5f, 0.0f},
+        static constexpr std::array<DirectX::XMFLOAT3, 8> data{
+            DirectX::XMFLOAT3(0.0f, 0.0f, 0.0f), DirectX::XMFLOAT3(0.0f, 1.0f, 0.0f),
+            DirectX::XMFLOAT3(1.0f, 1.0f, 0.0f), DirectX::XMFLOAT3(1.0f, 0.0f, 0.0f),
+            DirectX::XMFLOAT3(0.0f, 0.0f, 1.0f), DirectX::XMFLOAT3(0.0f, 1.0f, 1.0f),
+            DirectX::XMFLOAT3(1.0f, 1.0f, 1.0f), DirectX::XMFLOAT3(1.0f, 0.0f, 1.0f),
         };
 
         position_buffer = renderer.create_structured_buffer(data.data(), sizeof(DirectX::XMFLOAT3), data.size());
@@ -62,10 +65,11 @@ int main()
 
     StructuredBuffer color_buffer{};
     {
-        static constexpr std::array<DirectX::XMFLOAT3, 3> data{
-            DirectX::XMFLOAT3{0.0f, 1.0f, 1.0f},
-            DirectX::XMFLOAT3{0.5f, 0.25f, 0.0f},
-            DirectX::XMFLOAT3{1.0f, 0.0f, 1.0f},
+        static constexpr std::array<DirectX::XMFLOAT3, 8> data{
+            DirectX::XMFLOAT3(0.0f, 0.0f, 0.0f), DirectX::XMFLOAT3(0.0f, 1.0f, 0.0f),
+            DirectX::XMFLOAT3(1.0f, 1.0f, 0.0f), DirectX::XMFLOAT3(1.0f, 0.0f, 0.0f),
+            DirectX::XMFLOAT3(0.0f, 0.0f, 1.0f), DirectX::XMFLOAT3(0.0f, 1.0f, 1.0f),
+            DirectX::XMFLOAT3(1.0f, 1.0f, 1.0f), DirectX::XMFLOAT3(1.0f, 0.0f, 1.0f),
         };
 
         color_buffer = renderer.create_structured_buffer(data.data(), sizeof(DirectX::XMFLOAT3), data.size());
@@ -80,6 +84,55 @@ int main()
 
     Microsoft::WRL::ComPtr<IDxcBlob> pixel_shader_blob = ShaderCompiler::compile(
         FileSystem::instance().get_relative_path_wstr(L"shaders/voxel_shader.hlsl").c_str(), L"ps_main", L"ps_6_6");
+
+    // Setup depth buffer.
+    Microsoft::WRL::ComPtr<ID3D12Resource> depth_buffer_resource{};
+    const D3D12_RESOURCE_DESC depth_buffer_resource_desc = {
+        .Dimension = D3D12_RESOURCE_DIMENSION::D3D12_RESOURCE_DIMENSION_TEXTURE2D,
+        .Width = window.get_width(),
+        .Height = window.get_height(),
+        .DepthOrArraySize = 1u,
+        .MipLevels = 1u,
+        .Format = DXGI_FORMAT_D32_FLOAT,
+        .SampleDesc = {1u, 0u},
+        .Layout = D3D12_TEXTURE_LAYOUT::D3D12_TEXTURE_LAYOUT_UNKNOWN,
+        .Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL,
+    };
+
+    const D3D12_HEAP_PROPERTIES depth_buffer_heap_properties = {
+        .Type = D3D12_HEAP_TYPE_DEFAULT,
+        .CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+        .MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN,
+        .CreationNodeMask = 0u,
+        .VisibleNodeMask = 0u,
+    };
+    const D3D12_CLEAR_VALUE depth_buffer_optimized_clear_value = {
+        .Format = DXGI_FORMAT_D32_FLOAT,
+        .DepthStencil = {.Depth = 1.0f, .Stencil = 1u},
+    };
+
+    throw_if_failed(renderer.m_device->CreateCommittedResource(
+        &depth_buffer_heap_properties, D3D12_HEAP_FLAG_NONE, &depth_buffer_resource_desc,
+        D3D12_RESOURCE_STATE_DEPTH_WRITE, &depth_buffer_optimized_clear_value, IID_PPV_ARGS(&depth_buffer_resource)));
+
+    // Create DSV.
+    D3D12_CPU_DESCRIPTOR_HANDLE dsv_handle = renderer.m_dsv_descriptor_heap.current_cpu_descriptor_handle;
+    {
+        const D3D12_DEPTH_STENCIL_VIEW_DESC dsv_desc = {
+            .Format = DXGI_FORMAT_D32_FLOAT,
+            .ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D,
+            .Flags = D3D12_DSV_FLAG_NONE,
+            .Texture2D =
+                {
+
+                    .MipSlice = 0u,
+                },
+        };
+
+        renderer.m_dsv_descriptor_heap.offset_current_descriptor_handles();
+
+        renderer.m_device->CreateDepthStencilView(depth_buffer_resource.Get(), &dsv_desc, dsv_handle);
+    }
 
     // Create the PSO.
     Microsoft::WRL::ComPtr<ID3D12PipelineState> pso{};
@@ -115,7 +168,10 @@ int main()
             },
         .DepthStencilState =
             {
-                .DepthEnable = FALSE,
+                .DepthEnable = TRUE,
+                .DepthWriteMask = D3D12_DEPTH_WRITE_MASK::D3D12_DEPTH_WRITE_MASK_ALL,
+                .DepthFunc = D3D12_COMPARISON_FUNC_LESS,
+                .StencilEnable = FALSE,
             },
         .InputLayout =
             {
@@ -127,6 +183,7 @@ int main()
             {
                 Renderer::BACKBUFFER_FORMAT,
             },
+        .DSVFormat = DXGI_FORMAT_D32_FLOAT,
         .SampleDesc =
             {
                 1u,
@@ -217,11 +274,13 @@ int main()
 
         command_list->ResourceBarrier(1u, &presentation_to_render_target_barrier);
 
-        // Now, clear the RTV.
+        // Now, clear the RTV and DSV.
         const float clear_color[4] = {cosf(frame_count / 100.0f), sinf(frame_count / 100.0f), 0.0f, 1.0f};
         command_list->ClearRenderTargetView(rtv_handle, clear_color, 0u, nullptr);
+        command_list->ClearDepthStencilView(dsv_handle, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 1u, 0u,
+                                            nullptr);
 
-        command_list->OMSetRenderTargets(1u, &rtv_handle, FALSE, nullptr);
+        command_list->OMSetRenderTargets(1u, &rtv_handle, FALSE, &dsv_handle);
 
         // Set viewport.
         command_list->RSSetViewports(1u, &viewport);
@@ -253,7 +312,7 @@ int main()
         };
 
         command_list->SetGraphicsRoot32BitConstants(0u, 64u, &render_resources, 0u);
-        command_list->DrawIndexedInstanced(3u, 1u, 0u, 0u, 0u);
+        command_list->DrawIndexedInstanced(index_buffer.indices_count, 1u, 0u, 0u, 0u);
 
         // Render UI.
         ImGui::Begin("Debug Controller");
