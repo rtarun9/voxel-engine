@@ -20,9 +20,10 @@ static inline size_t convert_to_1d(const DirectX::XMUINT3 index_3d, const size_t
 static inline DirectX::XMUINT3 convert_to_3d(const size_t index, const size_t N)
 {
     // For reference, index = x + y * N + z * N * N.
-    const u32 z = index / (N * N);
-    const u32 y = (index / N) % N;
-    const u32 x = index % N;
+    const u32 z = static_cast<u32>(index / (N * N));
+    const u32 index_2d = static_cast<u32>(index - z * N * N);
+    const u32 y = index_2d / N;
+    const u32 x = index_2d % N;
 
     return {x, y, z};
 }
@@ -32,7 +33,7 @@ static inline DirectX::XMUINT3 convert_to_3d(const size_t index, const size_t N)
 // position' and has a edge length as specified in the class below.
 struct Voxel
 {
-    static constexpr float EDGE_LENGTH{16.0f};
+    static constexpr float EDGE_LENGTH{0.1f};
     bool m_active{true};
 };
 
@@ -40,17 +41,16 @@ struct Chunk
 {
     explicit Chunk()
     {
-        m_voxels.reserve(NUMBER_OF_VOXELS);
+        m_voxels.resize(NUMBER_OF_VOXELS);
     }
 
-    static constexpr size_t NUMBER_OF_VOXELS_PER_DIMENSION = 16;
+    static constexpr size_t NUMBER_OF_VOXELS_PER_DIMENSION = 5u;
     static constexpr size_t NUMBER_OF_VOXELS =
         NUMBER_OF_VOXELS_PER_DIMENSION * NUMBER_OF_VOXELS_PER_DIMENSION * NUMBER_OF_VOXELS_PER_DIMENSION;
 
     // A flattened 3d array of Voxels.
     std::vector<Voxel> m_voxels{};
-
-    size_t m_position_buffer_index{};
+    size_t m_chunk_index{};
 };
 
 int main()
@@ -86,8 +86,8 @@ int main()
     // note(rtarun9) : Use some sort of chunk manager class in future.
     // Also for now rendering a chunk is doing in brute force kind of way.
 
-    std::vector<StructuredBuffer> global_chunk_position_buffers{};
-    std::vector<std::vector<DirectX::XMFLOAT3>> global_chunk_position_data{};
+    StructuredBuffer chunk_position_buffer{};
+    std::vector<DirectX::XMFLOAT3> chunk_position_data{};
 
     const auto create_chunk = [&](const size_t index) -> Chunk {
         Chunk chunk{};
@@ -115,19 +115,19 @@ int main()
             const DirectX::XMFLOAT3 offset = DirectX::XMFLOAT3(
                 index_3d.x * Voxel::EDGE_LENGTH, index_3d.y * Voxel::EDGE_LENGTH, index_3d.z * Voxel::EDGE_LENGTH);
 
-            for (const auto order : voxel_vertex_order)
+            for (const auto &index : voxel_vertex_order)
             {
-                const auto &vertex = voxel_vertices_data[order];
+                const auto vertex = voxel_vertices_data[index];
                 position_data.emplace_back(
                     DirectX::XMFLOAT3{vertex.x + offset.x, vertex.y + offset.y, vertex.z + offset.z});
             }
         }
 
-        global_chunk_position_data.emplace_back(position_data);
-        global_chunk_position_buffers.emplace_back(renderer.create_structured_buffer(
-            (void *)global_chunk_position_data.back().data(), sizeof(DirectX::XMFLOAT3), Chunk::NUMBER_OF_VOXELS));
+        chunk_position_data = position_data;
+        chunk_position_buffer = renderer.create_structured_buffer(
+            (void *)chunk_position_data.data(), sizeof(DirectX::XMFLOAT3), chunk_position_data.size());
 
-        chunk.m_position_buffer_index = global_chunk_position_buffers.size() - 1u;
+        chunk.m_chunk_index = index;
         return chunk;
     };
 
@@ -333,7 +333,7 @@ int main()
         command_list->ResourceBarrier(1u, &presentation_to_render_target_barrier);
 
         // Now, clear the RTV and DSV.
-        const float clear_color[4] = {cosf(frame_count / 100.0f), sinf(frame_count / 100.0f), 0.0f, 1.0f};
+        const float clear_color[4] = {0.0f, 0.0f, 0.0f, 1.0f};
         command_list->ClearRenderTargetView(rtv_handle, clear_color, 0u, nullptr);
         command_list->ClearDepthStencilView(dsv_handle, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 1u, 0u,
                                             nullptr);
@@ -361,16 +361,14 @@ int main()
 
         command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-        command_list->IASetIndexBuffer(&index_buffer.index_buffer_view);
-
         const VoxelRenderResources render_resources = {
-            .position_buffer_index = static_cast<u32>(position_buffer.srv_index),
-            .color_buffer_index = static_cast<u32>(color_buffer.srv_index),
+            .position_buffer_index = static_cast<u32>(chunk_position_buffer.srv_index),
+            .color_buffer_index = static_cast<u32>(chunk_position_buffer.srv_index),
             .scene_constant_buffer_index = static_cast<u32>(scene_buffer.cbv_index),
         };
 
         command_list->SetGraphicsRoot32BitConstants(0u, 64u, &render_resources, 0u);
-        command_list->DrawIndexedInstanced(index_buffer.indices_count, 1u, 0u, 0u, 0u);
+        command_list->DrawInstanced((u32)chunk_position_data.size(), 1u, 0u, 0u);
 
         // Render UI.
         ImGui::Begin("Debug Controller");
