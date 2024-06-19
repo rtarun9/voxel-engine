@@ -49,7 +49,7 @@ struct Chunk
         delete[] m_voxels;
     }
 
-    static constexpr u32 NUMBER_OF_VOXELS_PER_DIMENSION = 25u;
+    static constexpr u32 NUMBER_OF_VOXELS_PER_DIMENSION = 9u;
     static constexpr size_t NUMBER_OF_VOXELS =
         NUMBER_OF_VOXELS_PER_DIMENSION * NUMBER_OF_VOXELS_PER_DIMENSION * NUMBER_OF_VOXELS_PER_DIMENSION;
 
@@ -77,20 +77,138 @@ struct ChunkManager
             DirectX::XMFLOAT3(Voxel::EDGE_LENGTH, 0.0f, Voxel::EDGE_LENGTH),
         };
 
-        static constexpr std::array<u16, 36> voxel_vertex_order = {
-            0, 1, 2, 0, 2, 3, 4, 6, 5, 4, 7, 6, 4, 5, 1, 4, 1, 0, 3, 2, 6, 3, 6, 7, 1, 5, 6, 1, 6, 2, 4, 0, 3, 4, 3, 7};
+        const DirectX::XMUINT3 chunk_index_3d = convert_to_3d(index, ChunkManager::NUMBER_OF_CHUNKS);
+        const DirectX::XMFLOAT3 chunk_offset =
+            DirectX::XMFLOAT3(chunk_index_3d.x * Voxel::EDGE_LENGTH * Chunk::NUMBER_OF_VOXELS_PER_DIMENSION,
+                              chunk_index_3d.y * Voxel::EDGE_LENGTH * Chunk::NUMBER_OF_VOXELS_PER_DIMENSION,
+                              chunk_index_3d.z * Voxel::EDGE_LENGTH * Chunk::NUMBER_OF_VOXELS_PER_DIMENSION);
 
         for (size_t i = 0; i < Chunk::NUMBER_OF_VOXELS; i++)
         {
             const DirectX::XMUINT3 index_3d = convert_to_3d(i, Chunk::NUMBER_OF_VOXELS_PER_DIMENSION);
-            const DirectX::XMFLOAT3 offset = DirectX::XMFLOAT3(
-                index_3d.x * Voxel::EDGE_LENGTH, index_3d.y * Voxel::EDGE_LENGTH, index_3d.z * Voxel::EDGE_LENGTH);
+            const DirectX::XMFLOAT3 offset = DirectX::XMFLOAT3(index_3d.x * Voxel::EDGE_LENGTH + chunk_offset.x,
+                                                               index_3d.y * Voxel::EDGE_LENGTH + chunk_offset.y,
+                                                               index_3d.z * Voxel::EDGE_LENGTH + chunk_offset.y);
 
-            for (const auto &index : voxel_vertex_order)
+            // Check if there is a voxel that blocks the front face of current voxel.
             {
-                const auto &vertex = voxel_vertices_data[index];
-                position_data.emplace_back(
-                    DirectX::XMFLOAT3{vertex.x + offset.x, vertex.y + offset.y, vertex.z + offset.z});
+
+                const bool is_front_face_covered =
+                    (index_3d.z != 0 && m_chunks[index]
+                                            .m_voxels[convert_to_1d({index_3d.x, index_3d.y, index_3d.z - 1},
+                                                                    Chunk::NUMBER_OF_VOXELS_PER_DIMENSION)]
+                                            .m_active);
+
+                if (!is_front_face_covered)
+                {
+                    for (const auto &vertex_index : {0u, 1u, 2u, 0u, 2u, 3u})
+                    {
+                        const auto &vertex = voxel_vertices_data[vertex_index];
+                        position_data.emplace_back(
+                            DirectX::XMFLOAT3{vertex.x + offset.x, vertex.y + offset.y, vertex.z + offset.z});
+                    }
+                }
+            }
+
+            // Check if there is a voxel that blocks the back face of current voxel.
+            {
+
+                const bool is_back_face_covered = (index_3d.z != Chunk::NUMBER_OF_VOXELS_PER_DIMENSION - 1u &&
+                                                   m_chunks[index]
+                                                       .m_voxels[convert_to_1d({index_3d.x, index_3d.y, index_3d.z + 1},
+                                                                               Chunk::NUMBER_OF_VOXELS_PER_DIMENSION)]
+                                                       .m_active);
+
+                if (!is_back_face_covered)
+                {
+                    for (const auto &vertex_index : {4u, 6u, 5u, 4u, 7u, 6u})
+                    {
+                        const auto &vertex = voxel_vertices_data[vertex_index];
+                        position_data.emplace_back(
+                            DirectX::XMFLOAT3{vertex.x + offset.x, vertex.y + offset.y, vertex.z + offset.z});
+                    }
+                }
+            }
+
+            // Check if there is a voxel that blocks the left hand side face of current voxel.
+            {
+
+                const bool is_left_face_covered =
+                    (index_3d.x != 0u && m_chunks[index]
+                                             .m_voxels[convert_to_1d({index_3d.x - 1, index_3d.y, index_3d.z},
+                                                                     Chunk::NUMBER_OF_VOXELS_PER_DIMENSION)]
+                                             .m_active);
+
+                if (!is_left_face_covered)
+                {
+                    for (const auto &vertex_index : {4u, 5u, 1u, 4u, 1u, 0u})
+                    {
+                        const auto &vertex = voxel_vertices_data[vertex_index];
+                        position_data.emplace_back(
+                            DirectX::XMFLOAT3{vertex.x + offset.x, vertex.y + offset.y, vertex.z + offset.z});
+                    }
+                }
+            }
+
+            // Check if there is a voxel that blocks the right hand side face of current voxel.
+            {
+
+                const bool is_right_face_covered =
+                    (index_3d.x != Chunk::NUMBER_OF_VOXELS_PER_DIMENSION - 1u &&
+                     m_chunks[index]
+                         .m_voxels[convert_to_1d({index_3d.x + 1, index_3d.y, index_3d.z},
+                                                 Chunk::NUMBER_OF_VOXELS_PER_DIMENSION)]
+                         .m_active);
+
+                if (!is_right_face_covered)
+                {
+                    for (const auto &vertex_index : {3u, 2u, 6u, 3u, 6u, 7u})
+                    {
+                        const auto &vertex = voxel_vertices_data[vertex_index];
+                        position_data.emplace_back(
+                            DirectX::XMFLOAT3{vertex.x + offset.x, vertex.y + offset.y, vertex.z + offset.z});
+                    }
+                }
+            }
+
+            // Check if there is a voxel that blocks the top side face of current voxel.
+            {
+
+                const bool is_top_face_covered = (index_3d.y != Chunk::NUMBER_OF_VOXELS_PER_DIMENSION - 1 &&
+                                                  m_chunks[index]
+                                                      .m_voxels[convert_to_1d({index_3d.x, index_3d.y + 1, index_3d.z},
+                                                                              Chunk::NUMBER_OF_VOXELS_PER_DIMENSION)]
+                                                      .m_active);
+
+                if (!is_top_face_covered)
+                {
+                    for (const auto &vertex_index : {1u, 5u, 6u, 1u, 6u, 2u})
+                    {
+                        const auto &vertex = voxel_vertices_data[vertex_index];
+                        position_data.emplace_back(
+                            DirectX::XMFLOAT3{vertex.x + offset.x, vertex.y + offset.y, vertex.z + offset.z});
+                    }
+                }
+            }
+
+            // Check if there is a voxel that blocks the bottom side face of current voxel.
+            {
+
+                const bool is_bottom_face_covered =
+                    (index_3d.y != 0u && m_chunks[index]
+                                             .m_voxels[convert_to_1d({index_3d.x, index_3d.y - 1, index_3d.z},
+                                                                     Chunk::NUMBER_OF_VOXELS_PER_DIMENSION)]
+                                             .m_active);
+
+                if (!is_bottom_face_covered)
+                {
+                    for (const auto &vertex_index : {4u, 0u, 3u, 4u, 3u, 7u})
+                    {
+                        const auto &vertex = voxel_vertices_data[vertex_index];
+                        position_data.emplace_back(
+                            DirectX::XMFLOAT3{vertex.x + offset.x, vertex.y + offset.y, vertex.z + offset.z});
+                    }
+                }
             }
         }
 
@@ -101,16 +219,23 @@ struct ChunkManager
             rand() / (float)RAND_MAX,
         };
 
-        m_chunk_position_buffers[index] =
-            renderer.create_structured_buffer((void *)m_chunk_position_data[index].data(), sizeof(DirectX::XMFLOAT3),
-                                              m_chunk_position_data[index].size());
-        m_chunk_color_buffers[index] =
-            renderer.create_structured_buffer((void *)&m_chunk_color_data[index], sizeof(DirectX::XMFLOAT3), 1u);
+        if (!m_chunk_position_data[index].empty())
+        {
+            m_chunk_position_buffers[index] =
+                renderer.create_structured_buffer((void *)m_chunk_position_data[index].data(),
+                                                  sizeof(DirectX::XMFLOAT3), m_chunk_position_data[index].size());
+            m_chunk_color_buffers[index] =
+                renderer.create_structured_buffer((void *)&m_chunk_color_data[index], sizeof(DirectX::XMFLOAT3), 1u);
+        }
 
         m_chunk_number_of_vertices[index] = m_chunk_position_data[index].size();
 
         m_chunks[index].m_chunk_index = index;
     }
+
+    static constexpr u32 NUMBER_OF_CHUNKS_PER_DIMENSION = 25u;
+    static constexpr size_t NUMBER_OF_CHUNKS =
+        NUMBER_OF_CHUNKS_PER_DIMENSION * NUMBER_OF_CHUNKS_PER_DIMENSION * NUMBER_OF_CHUNKS_PER_DIMENSION;
 
     std::unordered_map<size_t, Chunk> m_chunks{};
 
@@ -154,8 +279,9 @@ int main()
     }
 
     ChunkManager chunk_manager{};
-    chunk_manager.create_chunk(renderer, 0);
-    chunk_manager.create_chunk(renderer, 1);
+    chunk_manager.create_chunk(renderer, 0u);
+    chunk_manager.create_chunk(renderer, 1u);
+    chunk_manager.create_chunk(renderer, 2u);
 
     SceneConstantBuffer scene_buffer_data{};
     ConstantBuffer scene_buffer = renderer.create_constant_buffer(sizeof(SceneConstantBuffer));
@@ -392,6 +518,7 @@ int main()
             const VoxelRenderResources render_resources = {
                 .position_buffer_index = static_cast<u32>(chunk_manager.m_chunk_position_buffers[i].srv_index),
                 .color_buffer_index = static_cast<u32>(chunk_manager.m_chunk_color_buffers[i].srv_index),
+                .chunk_index = static_cast<u32>(i),
                 .scene_constant_buffer_index = static_cast<u32>(scene_buffer.cbv_index),
             };
 
