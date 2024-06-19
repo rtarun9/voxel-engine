@@ -22,8 +22,8 @@ static inline DirectX::XMUINT3 convert_to_3d(const size_t index, const size_t N)
     // For reference, index = x + y * N + z * N * N.
     const u32 z = static_cast<u32>(index / (N * N));
     const u32 index_2d = static_cast<u32>(index - z * N * N);
-    const u32 y = index_2d / N;
-    const u32 x = index_2d % N;
+    const u32 y = static_cast<u32>(index_2d / N);
+    const u32 x = static_cast<u32>(index_2d % N);
 
     return {x, y, z};
 }
@@ -41,16 +41,87 @@ struct Chunk
 {
     explicit Chunk()
     {
-        m_voxels.resize(NUMBER_OF_VOXELS);
+        m_voxels = new Voxel[NUMBER_OF_VOXELS];
     }
 
-    static constexpr size_t NUMBER_OF_VOXELS_PER_DIMENSION = 5u;
+    ~Chunk()
+    {
+        delete[] m_voxels;
+    }
+
+    static constexpr u32 NUMBER_OF_VOXELS_PER_DIMENSION = 25u;
     static constexpr size_t NUMBER_OF_VOXELS =
         NUMBER_OF_VOXELS_PER_DIMENSION * NUMBER_OF_VOXELS_PER_DIMENSION * NUMBER_OF_VOXELS_PER_DIMENSION;
 
     // A flattened 3d array of Voxels.
-    std::vector<Voxel> m_voxels{};
+    Voxel *m_voxels{};
     size_t m_chunk_index{};
+};
+
+// A class that contains a collection of chunks with data for each stored in hash maps for quick access.
+struct ChunkManager
+{
+    void create_chunk(Renderer &renderer, const size_t index)
+    {
+        // Iterate over each voxel in chunk and setup the chunk common position buffer.
+        std::vector<DirectX::XMFLOAT3> position_data{};
+
+        static constexpr std::array<DirectX::XMFLOAT3, 8> voxel_vertices_data{
+            DirectX::XMFLOAT3(0.0f, 0.0f, 0.0f),
+            DirectX::XMFLOAT3(0.0f, Voxel::EDGE_LENGTH, 0.0f),
+            DirectX::XMFLOAT3(Voxel::EDGE_LENGTH, Voxel::EDGE_LENGTH, 0.0f),
+            DirectX::XMFLOAT3(Voxel::EDGE_LENGTH, 0.0f, 0.0f),
+            DirectX::XMFLOAT3(0.0f, 0.0f, Voxel::EDGE_LENGTH),
+            DirectX::XMFLOAT3(0.0f, Voxel::EDGE_LENGTH, Voxel::EDGE_LENGTH),
+            DirectX::XMFLOAT3(Voxel::EDGE_LENGTH, Voxel::EDGE_LENGTH, Voxel::EDGE_LENGTH),
+            DirectX::XMFLOAT3(Voxel::EDGE_LENGTH, 0.0f, Voxel::EDGE_LENGTH),
+        };
+
+        static constexpr std::array<u16, 36> voxel_vertex_order = {
+            0, 1, 2, 0, 2, 3, 4, 6, 5, 4, 7, 6, 4, 5, 1, 4, 1, 0, 3, 2, 6, 3, 6, 7, 1, 5, 6, 1, 6, 2, 4, 0, 3, 4, 3, 7};
+
+        for (size_t i = 0; i < Chunk::NUMBER_OF_VOXELS; i++)
+        {
+            const DirectX::XMUINT3 index_3d = convert_to_3d(i, Chunk::NUMBER_OF_VOXELS_PER_DIMENSION);
+            const DirectX::XMFLOAT3 offset = DirectX::XMFLOAT3(
+                index_3d.x * Voxel::EDGE_LENGTH, index_3d.y * Voxel::EDGE_LENGTH, index_3d.z * Voxel::EDGE_LENGTH);
+
+            for (const auto &index : voxel_vertex_order)
+            {
+                const auto &vertex = voxel_vertices_data[index];
+                position_data.emplace_back(
+                    DirectX::XMFLOAT3{vertex.x + offset.x, vertex.y + offset.y, vertex.z + offset.z});
+            }
+        }
+
+        m_chunk_position_data[index] = std::move(position_data);
+        m_chunk_color_data[index] = {
+            rand() / (float)RAND_MAX,
+            rand() / (float)RAND_MAX,
+            rand() / (float)RAND_MAX,
+        };
+
+        m_chunk_position_buffers[index] =
+            renderer.create_structured_buffer((void *)m_chunk_position_data[index].data(), sizeof(DirectX::XMFLOAT3),
+                                              m_chunk_position_data[index].size());
+        m_chunk_color_buffers[index] =
+            renderer.create_structured_buffer((void *)&m_chunk_color_data[index], sizeof(DirectX::XMFLOAT3), 1u);
+
+        m_chunk_number_of_vertices[index] = m_chunk_position_data[index].size();
+
+        m_chunks[index].m_chunk_index = index;
+    }
+
+    std::unordered_map<size_t, Chunk> m_chunks{};
+
+    std::unordered_map<size_t, StructuredBuffer> m_chunk_position_buffers{};
+    std::unordered_map<size_t, StructuredBuffer> m_chunk_color_buffers{};
+
+    // NOTE : This is to cleared once the chunk data is present on the GPU.
+    std::unordered_map<size_t, std::vector<DirectX::XMFLOAT3>> m_chunk_position_data{};
+    std::unordered_map<size_t, DirectX::XMFLOAT3> m_chunk_color_data{};
+
+    std::unordered_map<size_t, size_t> m_chunk_number_of_vertices{};
 };
 
 int main()
@@ -82,56 +153,9 @@ int main()
                             gpu_descriptor_handle);
     }
 
-    // Setup resources required for rendering.
-    // note(rtarun9) : Use some sort of chunk manager class in future.
-    // Also for now rendering a chunk is doing in brute force kind of way.
-
-    StructuredBuffer chunk_position_buffer{};
-    std::vector<DirectX::XMFLOAT3> chunk_position_data{};
-
-    const auto create_chunk = [&](const size_t index) -> Chunk {
-        Chunk chunk{};
-
-        // Iterate over each voxel in chunk and setup the chunk common position buffer.
-        std::vector<DirectX::XMFLOAT3> position_data{};
-
-        static constexpr std::array<DirectX::XMFLOAT3, 8> voxel_vertices_data{
-            DirectX::XMFLOAT3(0.0f, 0.0f, 0.0f),
-            DirectX::XMFLOAT3(0.0f, Voxel::EDGE_LENGTH, 0.0f),
-            DirectX::XMFLOAT3(Voxel::EDGE_LENGTH, Voxel::EDGE_LENGTH, 0.0f),
-            DirectX::XMFLOAT3(Voxel::EDGE_LENGTH, 0.0f, 0.0f),
-            DirectX::XMFLOAT3(0.0f, 0.0f, Voxel::EDGE_LENGTH),
-            DirectX::XMFLOAT3(0.0f, Voxel::EDGE_LENGTH, Voxel::EDGE_LENGTH),
-            DirectX::XMFLOAT3(Voxel::EDGE_LENGTH, Voxel::EDGE_LENGTH, Voxel::EDGE_LENGTH),
-            DirectX::XMFLOAT3(Voxel::EDGE_LENGTH, 0.0f, Voxel::EDGE_LENGTH),
-        };
-
-        static constexpr std::array<u16, 36> voxel_vertex_order = {
-            0, 1, 2, 0, 2, 3, 4, 6, 5, 4, 7, 6, 4, 5, 1, 4, 1, 0, 3, 2, 6, 3, 6, 7, 1, 5, 6, 1, 6, 2, 4, 0, 3, 4, 3, 7};
-
-        for (size_t i = 0; i < Chunk::NUMBER_OF_VOXELS; i++)
-        {
-            const DirectX::XMUINT3 index_3d = convert_to_3d(i, Chunk::NUMBER_OF_VOXELS_PER_DIMENSION);
-            const DirectX::XMFLOAT3 offset = DirectX::XMFLOAT3(
-                index_3d.x * Voxel::EDGE_LENGTH, index_3d.y * Voxel::EDGE_LENGTH, index_3d.z * Voxel::EDGE_LENGTH);
-
-            for (const auto &index : voxel_vertex_order)
-            {
-                const auto vertex = voxel_vertices_data[index];
-                position_data.emplace_back(
-                    DirectX::XMFLOAT3{vertex.x + offset.x, vertex.y + offset.y, vertex.z + offset.z});
-            }
-        }
-
-        chunk_position_data = position_data;
-        chunk_position_buffer = renderer.create_structured_buffer(
-            (void *)chunk_position_data.data(), sizeof(DirectX::XMFLOAT3), chunk_position_data.size());
-
-        chunk.m_chunk_index = index;
-        return chunk;
-    };
-
-    Chunk chunk = create_chunk(0u);
+    ChunkManager chunk_manager{};
+    chunk_manager.create_chunk(renderer, 0);
+    chunk_manager.create_chunk(renderer, 1);
 
     SceneConstantBuffer scene_buffer_data{};
     ConstantBuffer scene_buffer = renderer.create_constant_buffer(sizeof(SceneConstantBuffer));
@@ -220,7 +244,7 @@ int main()
         .SampleMask = 0xffff'ffff,
         .RasterizerState =
             {
-                .FillMode = D3D12_FILL_MODE_SOLID,
+                .FillMode = D3D12_FILL_MODE_WIREFRAME,
                 .CullMode = D3D12_CULL_MODE_BACK,
                 .FrontCounterClockwise = FALSE,
             },
@@ -361,14 +385,19 @@ int main()
 
         command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-        const VoxelRenderResources render_resources = {
-            .position_buffer_index = static_cast<u32>(chunk_position_buffer.srv_index),
-            .color_buffer_index = static_cast<u32>(chunk_position_buffer.srv_index),
-            .scene_constant_buffer_index = static_cast<u32>(scene_buffer.cbv_index),
-        };
+        for (size_t k = 0; k < chunk_manager.m_chunks.size(); k++)
+        {
+            const size_t i = chunk_manager.m_chunks[k].m_chunk_index;
 
-        command_list->SetGraphicsRoot32BitConstants(0u, 64u, &render_resources, 0u);
-        command_list->DrawInstanced((u32)chunk_position_data.size(), 1u, 0u, 0u);
+            const VoxelRenderResources render_resources = {
+                .position_buffer_index = static_cast<u32>(chunk_manager.m_chunk_position_buffers[i].srv_index),
+                .color_buffer_index = static_cast<u32>(chunk_manager.m_chunk_color_buffers[i].srv_index),
+                .scene_constant_buffer_index = static_cast<u32>(scene_buffer.cbv_index),
+            };
+
+            command_list->SetGraphicsRoot32BitConstants(0u, 64u, &render_resources, 0u);
+            command_list->DrawInstanced((u32)chunk_manager.m_chunk_number_of_vertices[i], 1u, 0u, 0u);
+        }
 
         // Render UI.
         ImGui::Begin("Debug Controller");

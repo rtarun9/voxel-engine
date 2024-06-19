@@ -18,7 +18,7 @@ VSOutput vs_main(uint vertex_id : SV_VertexID)
 
     VSOutput output;
     output.position = mul(float4(position_buffer[vertex_id], 1.0f), scene_buffer.view_projection_matrix);
-    output.color = float4(color_buffer[vertex_id], 1.0f);
+    output.color = float4(color_buffer[0], 1.0f);
 
     return output;
 }
