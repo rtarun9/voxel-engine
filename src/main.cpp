@@ -59,27 +59,9 @@ struct Chunk
 };
 
 // A class that contains a collection of chunks with data for each stored in hash maps for quick access.
-
-// Explanation for the asynchronous chunk loading system.
-// 2 queues are used, a direct and upload. The upload queue is required because to copy data from upload to GPU only
-// buffer, we need to submit a command list.
-// Also, during this process the CPU side data must be present. So, what is done is that we keep the CPU side buffer
-// data until the upload buffer has been submitted and the buffers have been created.
-
-// std::async is used to call the setup chunk function. This function will perform the meshing algoritihm. Once the
-// future is ready, we move the data into another vector (chunks_to_load), and once the upload queue has finished
-// execution, move those chunks into loaded chunks hashmap.
 struct ChunkManager
 {
-    struct ChunkMeshData
-    {
-        std::vector<DirectX::XMFLOAT3> position_buffer_data{};
-        DirectX::XMFLOAT3 chunk_color_data{};
-        size_t chunk_index{};
-    };
-
-  private:
-    static ChunkMeshData setup_chunk_mesh(const size_t index)
+    void create_chunk(Renderer &renderer, const size_t index)
     {
         // Iterate over each voxel in chunk and setup the chunk common position buffer.
         std::vector<DirectX::XMFLOAT3> position_data{};
@@ -230,40 +212,23 @@ struct ChunkManager
             }
         }
 
-        const DirectX::XMFLOAT3 chunk_color_data = {
+        m_chunk_position_data[index] = std::move(position_data);
+        m_chunk_color_data[index] = {
             rand() / (float)RAND_MAX,
             rand() / (float)RAND_MAX,
             rand() / (float)RAND_MAX,
         };
 
-        return ChunkMeshData{
-            .position_buffer_data = std::move(position_data),
-            .chunk_color_data = chunk_color_data,
-            .chunk_index = index,
-        };
-    }
-
-  public:
-    // When a future is ready, the GPU side buffers need to be allocated.
-    void setup_chunk(const Renderer &renderer, const size_t index)
-    {
-        m_setup_chunk_mesh_data.push(std::async(std::launch::async, &ChunkManager::_setup_chunk, index));
-    }
-
-    void create_chunk_from_mesh_data(Renderer &renderer, const ChunkMeshData &mesh_data)
-    {
-        const size_t index = mesh_data.chunk_index;
-
-        if (!mesh_data.position_buffer_data.empty())
+        if (!m_chunk_position_data[index].empty())
         {
             m_chunk_position_buffers[index] =
-                renderer.create_structured_buffer((void *)mesh_data.position_buffer_data.data(),
-                                                  sizeof(DirectX::XMFLOAT3), mesh_data.position_buffer_data.size());
+                renderer.create_structured_buffer((void *)m_chunk_position_data[index].data(),
+                                                  sizeof(DirectX::XMFLOAT3), m_chunk_position_data[index].size());
             m_chunk_color_buffers[index] =
-                renderer.create_structured_buffer((void *)&mesh_data.chunk_color_data, sizeof(DirectX::XMFLOAT3), 1u);
+                renderer.create_structured_buffer((void *)&m_chunk_color_data[index], sizeof(DirectX::XMFLOAT3), 1u);
         }
 
-        m_chunk_number_of_vertices[index] = mesh_data.position_buffer_data.size();
+        m_chunk_number_of_vertices[index] = m_chunk_position_data[index].size();
 
         m_chunks[index].m_chunk_index = index;
     }
@@ -272,15 +237,16 @@ struct ChunkManager
     static constexpr size_t NUMBER_OF_CHUNKS =
         NUMBER_OF_CHUNKS_PER_DIMENSION * NUMBER_OF_CHUNKS_PER_DIMENSION * NUMBER_OF_CHUNKS_PER_DIMENSION;
 
-    // Data for the 'loaded' chunks.
     std::unordered_map<size_t, Chunk> m_chunks{};
 
     std::unordered_map<size_t, StructuredBuffer> m_chunk_position_buffers{};
     std::unordered_map<size_t, StructuredBuffer> m_chunk_color_buffers{};
-    std::unordered_map<size_t, size_t> m_chunk_number_of_vertices{};
 
-    // Data for the 'to setup' chunks.
-    std::stack<std::future<ChunkMeshData>> m_setup_chunk_mesh_data{};
+    // NOTE : This is to cleared once the chunk data is present on the GPU.
+    std::unordered_map<size_t, std::vector<DirectX::XMFLOAT3>> m_chunk_position_data{};
+    std::unordered_map<size_t, DirectX::XMFLOAT3> m_chunk_color_data{};
+
+    std::unordered_map<size_t, size_t> m_chunk_number_of_vertices{};
 };
 
 int main()
@@ -317,8 +283,7 @@ int main()
     for (size_t i = 0; i < ChunkManager::NUMBER_OF_CHUNKS; i++)
     {
         // chunk_manager.create_chunk_from_mesh_data(renderer, i);
-        chunk_manager.m_chunk_mesh_data.push(
-            std::async(std::launch::async, &ChunkManager::get_chunk_mesh, chunk_manager, i));
+        chunk_manager.create_chunk(renderer, i);
     }
 
     SceneConstantBuffer scene_buffer_data{};
@@ -458,8 +423,11 @@ int main()
     };
 
     // Execute and flush gpu so resources required for rendering (before the first frame) are ready.
-    renderer.execute_command_list();
-    renderer.flush_gpu();
+    renderer.execute_command_list(QueueType::Direct);
+    renderer.flush_gpu(QueueType::Direct);
+
+    renderer.execute_command_list(QueueType::Copy);
+    renderer.flush_gpu(QueueType::Copy);
 
     Camera camera{};
     Timer timer{};
@@ -493,8 +461,8 @@ int main()
 
         scene_buffer.update(&scene_buffer_data);
 
-        const auto &allocator = renderer.m_direct_command_allocators[renderer.m_swapchain_backbuffer_index];
-        const auto &command_list = renderer.m_command_list;
+        const auto &allocator = renderer.m_direct_queue.m_command_allocators[renderer.m_swapchain_backbuffer_index];
+        const auto &command_list = renderer.m_direct_queue.m_command_list;
 
         const auto &swapchain_index = renderer.m_swapchain_backbuffer_index;
 
@@ -589,11 +557,11 @@ int main()
         command_list->ResourceBarrier(1u, &render_target_to_presentation_barrier);
 
         // Submit command list to queue for execution.
-        renderer.execute_command_list();
+        renderer.execute_command_list(QueueType::Direct);
 
         // Now, present the rendertarget and signal command queue.
         throw_if_failed(renderer.m_swapchain->Present(1u, 0u));
-        renderer.signal_fence();
+        renderer.signal_fence(QueueType::Direct);
 
         renderer.m_swapchain_backbuffer_index = static_cast<u8>(renderer.m_swapchain->GetCurrentBackBufferIndex());
 
@@ -611,7 +579,8 @@ int main()
     ImGui_ImplWin32_Shutdown();
     ImGui::DestroyContext();
 
-    renderer.flush_gpu();
+    renderer.flush_gpu(QueueType::Direct);
+    renderer.flush_gpu(QueueType::Copy);
 
     return 0;
 }

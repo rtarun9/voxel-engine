@@ -29,6 +29,12 @@ struct ConstantBuffer
     }
 };
 
+enum class QueueType
+{
+    Direct,
+    Copy
+};
+
 // A simple & straight forward high level renderer abstraction.
 struct Renderer
 {
@@ -65,16 +71,17 @@ struct Renderer
     StructuredBuffer create_structured_buffer(const void *data, const size_t stride, const size_t num_elements);
     ConstantBuffer create_constant_buffer(const size_t size_in_bytes);
 
-    void execute_command_list() const;
+    void execute_command_list(const QueueType queue_type) const;
 
     // Sync functions.
+    // NOTE : This is only used by direct queue.
     void wait_for_fence_value_at_index(const size_t frame_fence_values_index);
 
     // Whenever fence is being signalled, increment the monotonical frame fence value.
     // and update frame fence value.
-    void signal_fence();
+    void signal_fence(const QueueType queue_type);
 
-    void flush_gpu();
+    void flush_gpu(const QueueType queue_type);
 
   private:
     // This function automatically offset's the current descriptor handle of descriptor heap.
@@ -95,7 +102,6 @@ struct Renderer
 
     Microsoft::WRL::ComPtr<ID3D12Device2> m_device{};
 
-    Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_direct_command_queue{};
     Microsoft::WRL::ComPtr<IDXGISwapChain4> m_swapchain{};
 
     std::array<u64, NUMBER_OF_BACKBUFFERS> m_swapchain_backbuffer_resource_indices{};
@@ -105,12 +111,28 @@ struct Renderer
     DescriptorHeap m_rtv_descriptor_heap{};
     DescriptorHeap m_dsv_descriptor_heap{};
 
-    Microsoft::WRL::ComPtr<ID3D12CommandAllocator> m_direct_command_allocators[NUMBER_OF_BACKBUFFERS];
-    Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_command_list{};
+    struct DirectQueue
+    {
+        Microsoft::WRL::ComPtr<ID3D12CommandAllocator> m_command_allocators[NUMBER_OF_BACKBUFFERS];
+        Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_command_queue{};
+        Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_command_list{};
 
-    Microsoft::WRL::ComPtr<ID3D12Fence> m_fence{};
-    u64 m_monotonic_fence_value{};
-    std::array<u64, NUMBER_OF_BACKBUFFERS> m_frame_fence_values{};
+        Microsoft::WRL::ComPtr<ID3D12Fence> m_fence{};
+        u64 m_monotonic_fence_value{};
+        std::array<u64, NUMBER_OF_BACKBUFFERS> m_frame_fence_values{};
+    };
+    DirectQueue m_direct_queue{};
+
+    struct CopyQueue
+    {
+        Microsoft::WRL::ComPtr<ID3D12CommandAllocator> m_command_allocator{};
+        Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_command_queue{};
+        Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_command_list{};
+
+        Microsoft::WRL::ComPtr<ID3D12Fence> m_fence{};
+        u64 m_monotonic_fence_value{};
+    };
+    CopyQueue m_copy_queue{};
 
     u8 m_swapchain_backbuffer_index{};
 

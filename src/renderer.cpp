@@ -101,14 +101,56 @@ Renderer::Renderer(const HWND window_handle, const u16 window_width, const u16 w
         throw_if_failed(info_queue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_WARNING, TRUE));
     }
 
-    // Setup the direct command queue.
-    const D3D12_COMMAND_QUEUE_DESC direct_command_queue_desc = {
-        .Type = D3D12_COMMAND_LIST_TYPE_DIRECT,
-        .Priority = D3D12_COMMAND_QUEUE_PRIORITY_NORMAL,
-        .Flags = D3D12_COMMAND_QUEUE_FLAG_NONE,
-        .NodeMask = 0u,
-    };
-    throw_if_failed(m_device->CreateCommandQueue(&direct_command_queue_desc, IID_PPV_ARGS(&m_direct_command_queue)));
+    // Setup the copy queue & direct queue primitives.
+    {
+
+        const D3D12_COMMAND_QUEUE_DESC direct_command_queue_desc = {
+            .Type = D3D12_COMMAND_LIST_TYPE_DIRECT,
+            .Priority = D3D12_COMMAND_QUEUE_PRIORITY_NORMAL,
+            .Flags = D3D12_COMMAND_QUEUE_FLAG_NONE,
+            .NodeMask = 0u,
+        };
+        throw_if_failed(
+            m_device->CreateCommandQueue(&direct_command_queue_desc, IID_PPV_ARGS(&m_direct_queue.m_command_queue)));
+
+        // Create the command allocator (the underlying allocation where gpu commands will be stored after being
+        // recorded by command list). Each frame has its own command allocator.
+        for (u8 i = 0; i < NUMBER_OF_BACKBUFFERS; i++)
+        {
+            throw_if_failed(m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,
+                                                             IID_PPV_ARGS(&m_direct_queue.m_command_allocators[i])));
+        }
+
+        // Create the graphics command list.
+        throw_if_failed(m_device->CreateCommandList(0u, D3D12_COMMAND_LIST_TYPE_DIRECT,
+                                                    m_direct_queue.m_command_allocators[0].Get(), nullptr,
+                                                    IID_PPV_ARGS(&m_direct_queue.m_command_list)));
+
+        // Create a fence for CPU GPU synchronization.
+        throw_if_failed(m_device->CreateFence(0u, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_direct_queue.m_fence)));
+    }
+
+    {
+        // Create the copy queue primitives.
+        const D3D12_COMMAND_QUEUE_DESC copy_command_queue_desc = {
+            .Type = D3D12_COMMAND_LIST_TYPE_COPY,
+            .Priority = D3D12_COMMAND_QUEUE_PRIORITY_NORMAL,
+            .Flags = D3D12_COMMAND_QUEUE_FLAG_NONE,
+            .NodeMask = 0u,
+        };
+        throw_if_failed(
+            m_device->CreateCommandQueue(&copy_command_queue_desc, IID_PPV_ARGS(&m_copy_queue.m_command_queue)));
+
+        throw_if_failed(m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COPY,
+                                                         IID_PPV_ARGS(&m_copy_queue.m_command_allocator)));
+
+        throw_if_failed(m_device->CreateCommandList(0u, D3D12_COMMAND_LIST_TYPE_COPY,
+                                                    m_copy_queue.m_command_allocator.Get(), nullptr,
+                                                    IID_PPV_ARGS(&m_copy_queue.m_command_list)));
+
+        // Create a fence for CPU GPU synchronization.
+        throw_if_failed(m_device->CreateFence(0u, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_copy_queue.m_fence)));
+    }
 
     // Create the dxgi swapchain.
     {
@@ -126,7 +168,7 @@ Renderer::Renderer(const HWND window_handle, const u16 window_width, const u16 w
             .AlphaMode = DXGI_ALPHA_MODE_IGNORE,
             .Flags = 0u,
         };
-        throw_if_failed(m_dxgi_factory->CreateSwapChainForHwnd(m_direct_command_queue.Get(), window_handle,
+        throw_if_failed(m_dxgi_factory->CreateSwapChainForHwnd(m_direct_queue.m_command_queue.Get(), window_handle,
                                                                &swapchain_desc, nullptr, nullptr, &swapchain_1));
 
         throw_if_failed(swapchain_1.As(&m_swapchain));
@@ -157,22 +199,6 @@ Renderer::Renderer(const HWND window_handle, const u16 window_width, const u16 w
         m_resources.emplace_back(std::move(swapchain_resource));
         m_swapchain_backbuffer_resource_indices[i] = m_resources.size() - 1u;
     }
-
-    // Create the command allocator (the underlying allocation where gpu commands will be stored after being
-    // recorded by command list). Each frame has its own command allocator.
-    for (u8 i = 0; i < NUMBER_OF_BACKBUFFERS; i++)
-    {
-        throw_if_failed(m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,
-                                                         IID_PPV_ARGS(&m_direct_command_allocators[i])));
-    }
-
-    // Create the graphics command list.
-    throw_if_failed(m_device->CreateCommandList(0u, D3D12_COMMAND_LIST_TYPE_DIRECT,
-                                                m_direct_command_allocators[0].Get(), nullptr,
-                                                IID_PPV_ARGS(&m_command_list)));
-
-    // Create a fence for CPU GPU synchronization.
-    throw_if_failed(m_device->CreateFence(0u, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence)));
 
     m_swapchain_backbuffer_index = static_cast<u8>(m_swapchain->GetCurrentBackBufferIndex());
 
@@ -212,30 +238,45 @@ Renderer::Renderer(const HWND window_handle, const u16 window_width, const u16 w
 
 void Renderer::wait_for_fence_value_at_index(const size_t frame_fence_values_index)
 {
-    if (m_fence->GetCompletedValue() >= m_frame_fence_values[frame_fence_values_index])
+    if (m_direct_queue.m_fence->GetCompletedValue() >= m_direct_queue.m_frame_fence_values[frame_fence_values_index])
     {
         return;
     }
     else
     {
-        throw_if_failed(m_fence->SetEventOnCompletion(m_frame_fence_values[frame_fence_values_index], nullptr));
+        throw_if_failed(m_direct_queue.m_fence->SetEventOnCompletion(
+            m_direct_queue.m_frame_fence_values[frame_fence_values_index], nullptr));
     }
 }
 
 // Whenever fence is being signalled, increment the monotonical frame fence value.
-void Renderer::signal_fence()
+void Renderer::signal_fence(const QueueType queue_type)
 {
-    ++m_monotonic_fence_value;
-    throw_if_failed(m_direct_command_queue->Signal(m_fence.Get(), m_monotonic_fence_value));
-    m_frame_fence_values[m_swapchain_backbuffer_index] = m_monotonic_fence_value;
+    if (queue_type == QueueType::Direct)
+    {
+        ++m_direct_queue.m_monotonic_fence_value;
+        throw_if_failed(m_direct_queue.m_command_queue->Signal(m_direct_queue.m_fence.Get(),
+                                                               m_direct_queue.m_monotonic_fence_value));
+        m_direct_queue.m_frame_fence_values[m_swapchain_backbuffer_index] = m_direct_queue.m_monotonic_fence_value;
+    }
+    else if (queue_type == QueueType::Copy)
+    {
+        ++m_copy_queue.m_monotonic_fence_value;
+        throw_if_failed(
+            m_copy_queue.m_command_queue->Signal(m_copy_queue.m_fence.Get(), m_copy_queue.m_monotonic_fence_value));
+    }
 }
 
-void Renderer::flush_gpu()
+void Renderer::flush_gpu(const QueueType queue_type)
 {
-    signal_fence();
-    for (u32 i = 0; i < NUMBER_OF_BACKBUFFERS; i++)
+    signal_fence(queue_type);
+
+    if (queue_type == QueueType::Direct)
     {
-        m_frame_fence_values[i] = m_monotonic_fence_value;
+        for (u32 i = 0; i < NUMBER_OF_BACKBUFFERS; i++)
+        {
+            m_direct_queue.m_frame_fence_values[i] = m_direct_queue.m_monotonic_fence_value;
+        }
     }
 
     wait_for_fence_value_at_index(m_swapchain_backbuffer_index);
@@ -304,7 +345,7 @@ IndexBuffer Renderer::create_index_buffer(const void *data, const size_t stride,
         &default_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES, &buffer_resource_desc,
         D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&buffer_resource)));
 
-    m_command_list->CopyResource(buffer_resource.Get(), intermediate_buffer_resource.Get());
+    m_copy_queue.m_command_list->CopyResource(buffer_resource.Get(), intermediate_buffer_resource.Get());
 
     const D3D12_INDEX_BUFFER_VIEW index_buffer_view = {
         .BufferLocation = buffer_resource->GetGPUVirtualAddress(),
@@ -385,7 +426,7 @@ StructuredBuffer Renderer::create_structured_buffer(const void *data, const size
         &default_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES, &buffer_resource_desc,
         D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&buffer_resource)));
 
-    m_command_list->CopyResource(buffer_resource.Get(), intermediate_buffer_resource.Get());
+    m_copy_queue.m_command_list->CopyResource(buffer_resource.Get(), intermediate_buffer_resource.Get());
 
     m_intermediate_resources.emplace_back(std::move(intermediate_buffer_resource));
     m_resources.emplace_back(std::move(buffer_resource));
@@ -491,11 +532,22 @@ size_t Renderer::create_shader_resource_view(const size_t buffer_resource_index,
     return srv_index;
 }
 
-void Renderer::execute_command_list() const
+void Renderer::execute_command_list(const QueueType queue_type) const
 {
-    throw_if_failed(m_command_list->Close());
+    if (queue_type == QueueType::Direct)
+    {
+        throw_if_failed(m_direct_queue.m_command_list->Close());
 
-    ID3D12CommandList *const command_lists_to_execute[1] = {m_command_list.Get()};
+        ID3D12CommandList *const command_lists_to_execute[1] = {m_direct_queue.m_command_list.Get()};
 
-    m_direct_command_queue->ExecuteCommandLists(1u, command_lists_to_execute);
+        m_direct_queue.m_command_queue->ExecuteCommandLists(1u, command_lists_to_execute);
+    }
+    else if (queue_type == QueueType::Copy)
+    {
+        throw_if_failed(m_copy_queue.m_command_list->Close());
+
+        ID3D12CommandList *const command_lists_to_execute[1] = {m_copy_queue.m_command_list.Get()};
+
+        m_copy_queue.m_command_queue->ExecuteCommandLists(1u, command_lists_to_execute);
+    }
 }
