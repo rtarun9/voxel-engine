@@ -141,13 +141,6 @@ Renderer::Renderer(const HWND window_handle, const u16 window_width, const u16 w
         throw_if_failed(
             m_device->CreateCommandQueue(&copy_command_queue_desc, IID_PPV_ARGS(&m_copy_queue.m_command_queue)));
 
-        throw_if_failed(m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COPY,
-                                                         IID_PPV_ARGS(&m_copy_queue.m_command_allocator)));
-
-        throw_if_failed(m_device->CreateCommandList(0u, D3D12_COMMAND_LIST_TYPE_COPY,
-                                                    m_copy_queue.m_command_allocator.Get(), nullptr,
-                                                    IID_PPV_ARGS(&m_copy_queue.m_command_list)));
-
         // Create a fence for CPU GPU synchronization.
         throw_if_failed(m_device->CreateFence(0u, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_copy_queue.m_fence)));
     }
@@ -345,7 +338,14 @@ IndexBuffer Renderer::create_index_buffer(const void *data, const size_t stride,
         &default_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES, &buffer_resource_desc,
         D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&buffer_resource)));
 
-    m_copy_queue.m_command_list->CopyResource(buffer_resource.Get(), intermediate_buffer_resource.Get());
+    {
+
+        CopyQueue::CommandAllocatorListPair allocator_list_pair = m_copy_queue.get_allocator_list_pair(m_device.Get());
+
+        allocator_list_pair.m_command_list->CopyResource(buffer_resource.Get(), intermediate_buffer_resource.Get());
+
+        m_copy_queue.submit_and_signal(std::move(allocator_list_pair));
+    }
 
     const D3D12_INDEX_BUFFER_VIEW index_buffer_view = {
         .BufferLocation = buffer_resource->GetGPUVirtualAddress(),
@@ -426,10 +426,16 @@ StructuredBuffer Renderer::create_structured_buffer(const void *data, const size
         &default_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES, &buffer_resource_desc,
         D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&buffer_resource)));
 
-    m_copy_queue.m_command_list->CopyResource(buffer_resource.Get(), intermediate_buffer_resource.Get());
-
     m_intermediate_resources.emplace_back(std::move(intermediate_buffer_resource));
     m_resources.emplace_back(std::move(buffer_resource));
+
+    {
+        CopyQueue::CommandAllocatorListPair allocator_list_pair = m_copy_queue.get_allocator_list_pair(m_device.Get());
+        allocator_list_pair.m_command_list->CopyResource(m_resources.back().Get(),
+                                                         m_intermediate_resources.back().Get());
+
+        m_copy_queue.submit_and_signal(std::move(allocator_list_pair));
+    }
 
     // Create structured buffer view.
     size_t srv_index = create_shader_resource_view(m_resources.size() - 1u, stride, num_elements);
@@ -544,10 +550,46 @@ void Renderer::execute_command_list(const QueueType queue_type) const
     }
     else if (queue_type == QueueType::Copy)
     {
-        throw_if_failed(m_copy_queue.m_command_list->Close());
-
-        ID3D12CommandList *const command_lists_to_execute[1] = {m_copy_queue.m_command_list.Get()};
-
-        m_copy_queue.m_command_queue->ExecuteCommandLists(1u, command_lists_to_execute);
+        // note(rtarun9) : Needs to be discussed if all functions need to be renamed to have _direct / _copy at the end,
+        // or better put ALL these functions into the DirectCommandQueue struct directly.
     }
+}
+
+Renderer::CopyQueue::CommandAllocatorListPair Renderer::CopyQueue::get_allocator_list_pair(ID3D12Device *const device)
+{
+    CommandAllocatorListPair allocator_list_pair{};
+
+    if (m_command_allocator_list_pair.empty())
+    {
+        throw_if_failed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COPY,
+                                                       IID_PPV_ARGS(&allocator_list_pair.m_command_allocator)));
+
+        throw_if_failed(device->CreateCommandList(0u, D3D12_COMMAND_LIST_TYPE_COPY,
+                                                  allocator_list_pair.m_command_allocator.Get(), nullptr,
+                                                  IID_PPV_ARGS(&allocator_list_pair.m_command_list)));
+    }
+    else
+    {
+        allocator_list_pair = m_command_allocator_list_pair.front();
+
+        throw_if_failed(allocator_list_pair.m_command_allocator->Reset());
+        throw_if_failed(
+            allocator_list_pair.m_command_list->Reset(allocator_list_pair.m_command_allocator.Get(), nullptr));
+
+        m_command_allocator_list_pair.pop();
+    }
+
+    return allocator_list_pair;
+}
+
+void Renderer::CopyQueue::submit_and_signal(Renderer::CopyQueue::CommandAllocatorListPair &&command_allocator_list_pair)
+{
+    throw_if_failed(command_allocator_list_pair.m_command_list->Close());
+
+    ID3D12CommandList *const command_lists_to_execute[1] = {command_allocator_list_pair.m_command_list.Get()};
+
+    m_command_queue->ExecuteCommandLists(1u, command_lists_to_execute);
+    throw_if_failed(m_command_queue->Signal(m_fence.Get(), ++m_monotonic_fence_value));
+
+    m_command_allocator_list_pair.emplace(std::move(command_allocator_list_pair));
 }

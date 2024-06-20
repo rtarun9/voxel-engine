@@ -41,14 +41,14 @@ struct Chunk
 {
     explicit Chunk()
     {
-        printf("Constructor of chunk!");
+        // printf("Constructor of chunk!");
         m_voxels = new Voxel[NUMBER_OF_VOXELS];
     }
 
     Chunk(const Chunk &other) = delete;
     Chunk &operator=(Chunk &other) = delete;
 
-    Chunk(Chunk &&other) noexcept : m_voxels(std::move(other.m_voxels))
+    Chunk(Chunk &&other) noexcept : m_voxels(std::move(other.m_voxels)), m_chunk_index(other.m_chunk_index)
     {
         other.m_voxels = nullptr;
     }
@@ -56,6 +56,7 @@ struct Chunk
     Chunk &operator=(Chunk &&other) noexcept
     {
         this->m_voxels = std::move(other.m_voxels);
+        this->m_chunk_index = other.m_chunk_index;
         other.m_voxels = nullptr;
 
         return *this;
@@ -294,7 +295,11 @@ struct ChunkManager
 
         while (!m_setup_chunk_futures_stack.empty())
         {
-            auto &setup_chunk_data = m_setup_chunk_futures_stack.top();
+            auto &setup_chunk_data = m_setup_chunk_futures_stack.front();
+            if (!setup_chunk_data.second.valid())
+            {
+                return;
+            }
 
             switch (std::future_status status = setup_chunk_data.second.wait_for(0s); status)
             {
@@ -333,7 +338,7 @@ struct ChunkManager
         }
     }
 
-    static constexpr u32 NUMBER_OF_CHUNKS_PER_DIMENSION = 1u;
+    static constexpr u32 NUMBER_OF_CHUNKS_PER_DIMENSION = 10;
     static constexpr size_t NUMBER_OF_CHUNKS =
         NUMBER_OF_CHUNKS_PER_DIMENSION * NUMBER_OF_CHUNKS_PER_DIMENSION * NUMBER_OF_CHUNKS_PER_DIMENSION;
 
@@ -344,7 +349,7 @@ struct ChunkManager
     // (i) The result of async call (i.e the future) is ready,
     // (ii) The fence value is < the current copy queue fence value.
     // The stack consist of pairs of fence values , futures.
-    std::stack<std::pair<u64, std::future<SetupChunkData>>> m_setup_chunk_futures_stack{};
+    std::queue<std::pair<u64, std::future<SetupChunkData>>> m_setup_chunk_futures_stack{};
 
     std::unordered_map<size_t, StructuredBuffer> m_chunk_position_buffers{};
     std::unordered_map<size_t, StructuredBuffer> m_chunk_color_buffers{};
@@ -381,11 +386,6 @@ int main()
     }
 
     ChunkManager chunk_manager{};
-
-    for (size_t i = 0; i < ChunkManager::NUMBER_OF_CHUNKS; i++)
-    {
-        chunk_manager.create_chunk(renderer, i);
-    }
 
     SceneConstantBuffer scene_buffer_data{};
     ConstantBuffer scene_buffer = renderer.create_constant_buffer(sizeof(SceneConstantBuffer));
@@ -527,14 +527,17 @@ int main()
     renderer.execute_command_list(QueueType::Direct);
     renderer.flush_gpu(QueueType::Direct);
 
-    renderer.execute_command_list(QueueType::Copy);
-    renderer.flush_gpu(QueueType::Copy);
-
     Camera camera{};
     Timer timer{};
     float delta_time = 0.0f;
 
     u64 frame_count = 0;
+
+    // Test to check the async copy queue capabilities!
+    for (int i = 1; i < ChunkManager::NUMBER_OF_CHUNKS; i++)
+    {
+        chunk_manager.create_chunk(renderer, i);
+    }
 
     bool quit{false};
     while (!quit)
@@ -554,7 +557,7 @@ int main()
         }
 
         // See if any chunk has been setup, and is to be added to loaded chunks.
-        chunk_manager.move_to_loaded_chunks(renderer.m_copy_queue.m_monotonic_fence_value);
+        chunk_manager.move_to_loaded_chunks(renderer.m_copy_queue.m_fence->GetCompletedValue());
 
         const float window_aspect_ratio = static_cast<float>(window.get_width()) / window.get_height();
 
@@ -574,12 +577,8 @@ int main()
         throw_if_failed(allocator->Reset());
         throw_if_failed(command_list->Reset(allocator.Get(), nullptr));
 
-        throw_if_failed(renderer.m_copy_queue.m_command_allocator->Reset());
-        throw_if_failed(
-            renderer.m_copy_queue.m_command_list->Reset(renderer.m_copy_queue.m_command_allocator.Get(), nullptr));
-
         const auto &rtv_handle = renderer.m_swapchain_backbuffer_cpu_descriptor_handles[swapchain_index];
-        const Microsoft::WRL::ComPtr<ID3D12Resource> &swapchain_resource = renderer.m_resources[swapchain_index];
+        const Microsoft::WRL::ComPtr<ID3D12Resource> swapchain_resource = renderer.m_resources[swapchain_index];
 
         // Transition the backbuffer from presentation mode to render target mode.
         const D3D12_RESOURCE_BARRIER presentation_to_render_target_barrier = {
@@ -666,13 +665,10 @@ int main()
 
         // Submit command list to queue for execution.
         renderer.execute_command_list(QueueType::Direct);
-        renderer.execute_command_list(QueueType::Copy);
 
         // Now, present the rendertarget and signal command queue.
         throw_if_failed(renderer.m_swapchain->Present(1u, 0u));
         renderer.signal_fence(QueueType::Direct);
-
-        renderer.signal_fence(QueueType::Copy);
 
         renderer.m_swapchain_backbuffer_index = static_cast<u8>(renderer.m_swapchain->GetCurrentBackBufferIndex());
 
@@ -691,7 +687,6 @@ int main()
     ImGui::DestroyContext();
 
     renderer.flush_gpu(QueueType::Direct);
-    renderer.flush_gpu(QueueType::Copy);
 
     return 0;
 }

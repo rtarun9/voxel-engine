@@ -29,6 +29,10 @@ struct ConstantBuffer
     }
 };
 
+// note(rtarun9) : REALLY strange code is going on, because:
+// Copy command queue isn't really somthing the user has to manually control, its all handled automatically when buffers
+// are created. Direct queues have the exact opposite scenario, where the user has plenty of control on what to do.
+// The code will be cleaned up when async copy queue is fully implemented and working fine.
 enum class QueueType
 {
     Direct,
@@ -123,11 +127,22 @@ struct Renderer
     };
     DirectQueue m_direct_queue{};
 
+    // note(rtarun9) : See how the idea of a 'queue' of allocators and lists goes, and if its a bottleneck try doing
+    // something else instead (by some how making sure that before list is reset, no recording happens).
     struct CopyQueue
     {
-        Microsoft::WRL::ComPtr<ID3D12CommandAllocator> m_command_allocator{};
+        struct CommandAllocatorListPair
+        {
+            Microsoft::WRL::ComPtr<ID3D12CommandAllocator> m_command_allocator{};
+            Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_command_list{};
+        };
+
+        CommandAllocatorListPair get_allocator_list_pair(ID3D12Device *const device);
+        void submit_and_signal(CommandAllocatorListPair &&command_allocator_list_pair);
+
+        std::queue<CommandAllocatorListPair> m_command_allocator_list_pair{};
+
         Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_command_queue{};
-        Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_command_list{};
 
         Microsoft::WRL::ComPtr<ID3D12Fence> m_fence{};
         u64 m_monotonic_fence_value{};
