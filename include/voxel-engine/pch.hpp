@@ -30,6 +30,7 @@ constexpr bool VX_DEBUG_MODE = false;
 
 #include <array>
 #include <filesystem>
+#include <future>
 #include <queue>
 #include <random>
 #include <set>

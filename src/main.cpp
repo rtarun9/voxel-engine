@@ -59,9 +59,27 @@ struct Chunk
 };
 
 // A class that contains a collection of chunks with data for each stored in hash maps for quick access.
+
+// Explanation for the asynchronous chunk loading system.
+// 2 queues are used, a direct and upload. The upload queue is required because to copy data from upload to GPU only
+// buffer, we need to submit a command list.
+// Also, during this process the CPU side data must be present. So, what is done is that we keep the CPU side buffer
+// data until the upload buffer has been submitted and the buffers have been created.
+
+// std::async is used to call the setup chunk function. This function will perform the meshing algoritihm. Once the
+// future is ready, we move the data into another vector (chunks_to_load), and once the upload queue has finished
+// execution, move those chunks into loaded chunks hashmap.
 struct ChunkManager
 {
-    void create_chunk(Renderer &renderer, const size_t index)
+    struct ChunkMeshData
+    {
+        std::vector<DirectX::XMFLOAT3> position_buffer_data{};
+        DirectX::XMFLOAT3 chunk_color_data{};
+        size_t chunk_index{};
+    };
+
+  private:
+    static ChunkMeshData setup_chunk_mesh(const size_t index)
     {
         // Iterate over each voxel in chunk and setup the chunk common position buffer.
         std::vector<DirectX::XMFLOAT3> position_data{};
@@ -77,7 +95,7 @@ struct ChunkManager
             DirectX::XMFLOAT3(Voxel::EDGE_LENGTH, 0.0f, Voxel::EDGE_LENGTH),
         };
 
-        const DirectX::XMUINT3 chunk_index_3d = convert_to_3d(index, ChunkManager::NUMBER_OF_CHUNKS);
+        const DirectX::XMUINT3 chunk_index_3d = convert_to_3d(index, ChunkManager::NUMBER_OF_CHUNKS_PER_DIMENSION);
         const DirectX::XMFLOAT3 chunk_offset =
             DirectX::XMFLOAT3(chunk_index_3d.x * Voxel::EDGE_LENGTH * Chunk::NUMBER_OF_VOXELS_PER_DIMENSION,
                               chunk_index_3d.y * Voxel::EDGE_LENGTH * Chunk::NUMBER_OF_VOXELS_PER_DIMENSION,
@@ -88,7 +106,7 @@ struct ChunkManager
             const DirectX::XMUINT3 index_3d = convert_to_3d(i, Chunk::NUMBER_OF_VOXELS_PER_DIMENSION);
             const DirectX::XMFLOAT3 offset = DirectX::XMFLOAT3(index_3d.x * Voxel::EDGE_LENGTH + chunk_offset.x,
                                                                index_3d.y * Voxel::EDGE_LENGTH + chunk_offset.y,
-                                                               index_3d.z * Voxel::EDGE_LENGTH + chunk_offset.y);
+                                                               index_3d.z * Voxel::EDGE_LENGTH + chunk_offset.z);
 
             // Check if there is a voxel that blocks the front face of current voxel.
             {
@@ -212,41 +230,57 @@ struct ChunkManager
             }
         }
 
-        m_chunk_position_data[index] = std::move(position_data);
-        m_chunk_color_data[index] = {
+        const DirectX::XMFLOAT3 chunk_color_data = {
             rand() / (float)RAND_MAX,
             rand() / (float)RAND_MAX,
             rand() / (float)RAND_MAX,
         };
 
-        if (!m_chunk_position_data[index].empty())
+        return ChunkMeshData{
+            .position_buffer_data = std::move(position_data),
+            .chunk_color_data = chunk_color_data,
+            .chunk_index = index,
+        };
+    }
+
+  public:
+    // When a future is ready, the GPU side buffers need to be allocated.
+    void setup_chunk(const Renderer &renderer, const size_t index)
+    {
+        m_setup_chunk_mesh_data.push(std::async(std::launch::async, &ChunkManager::_setup_chunk, index));
+    }
+
+    void create_chunk_from_mesh_data(Renderer &renderer, const ChunkMeshData &mesh_data)
+    {
+        const size_t index = mesh_data.chunk_index;
+
+        if (!mesh_data.position_buffer_data.empty())
         {
             m_chunk_position_buffers[index] =
-                renderer.create_structured_buffer((void *)m_chunk_position_data[index].data(),
-                                                  sizeof(DirectX::XMFLOAT3), m_chunk_position_data[index].size());
+                renderer.create_structured_buffer((void *)mesh_data.position_buffer_data.data(),
+                                                  sizeof(DirectX::XMFLOAT3), mesh_data.position_buffer_data.size());
             m_chunk_color_buffers[index] =
-                renderer.create_structured_buffer((void *)&m_chunk_color_data[index], sizeof(DirectX::XMFLOAT3), 1u);
+                renderer.create_structured_buffer((void *)&mesh_data.chunk_color_data, sizeof(DirectX::XMFLOAT3), 1u);
         }
 
-        m_chunk_number_of_vertices[index] = m_chunk_position_data[index].size();
+        m_chunk_number_of_vertices[index] = mesh_data.position_buffer_data.size();
 
         m_chunks[index].m_chunk_index = index;
     }
 
-    static constexpr u32 NUMBER_OF_CHUNKS_PER_DIMENSION = 25u;
+    static constexpr u32 NUMBER_OF_CHUNKS_PER_DIMENSION = 5u;
     static constexpr size_t NUMBER_OF_CHUNKS =
         NUMBER_OF_CHUNKS_PER_DIMENSION * NUMBER_OF_CHUNKS_PER_DIMENSION * NUMBER_OF_CHUNKS_PER_DIMENSION;
 
+    // Data for the 'loaded' chunks.
     std::unordered_map<size_t, Chunk> m_chunks{};
 
     std::unordered_map<size_t, StructuredBuffer> m_chunk_position_buffers{};
     std::unordered_map<size_t, StructuredBuffer> m_chunk_color_buffers{};
-
-    // NOTE : This is to cleared once the chunk data is present on the GPU.
-    std::unordered_map<size_t, std::vector<DirectX::XMFLOAT3>> m_chunk_position_data{};
-    std::unordered_map<size_t, DirectX::XMFLOAT3> m_chunk_color_data{};
-
     std::unordered_map<size_t, size_t> m_chunk_number_of_vertices{};
+
+    // Data for the 'to setup' chunks.
+    std::stack<std::future<ChunkMeshData>> m_setup_chunk_mesh_data{};
 };
 
 int main()
@@ -279,9 +313,13 @@ int main()
     }
 
     ChunkManager chunk_manager{};
-    chunk_manager.create_chunk(renderer, 0u);
-    chunk_manager.create_chunk(renderer, 1u);
-    chunk_manager.create_chunk(renderer, 2u);
+
+    for (size_t i = 0; i < ChunkManager::NUMBER_OF_CHUNKS; i++)
+    {
+        // chunk_manager.create_chunk_from_mesh_data(renderer, i);
+        chunk_manager.m_chunk_mesh_data.push(
+            std::async(std::launch::async, &ChunkManager::get_chunk_mesh, chunk_manager, i));
+    }
 
     SceneConstantBuffer scene_buffer_data{};
     ConstantBuffer scene_buffer = renderer.create_constant_buffer(sizeof(SceneConstantBuffer));

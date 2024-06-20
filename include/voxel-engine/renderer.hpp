@@ -120,4 +120,7 @@ struct Renderer
 
     // Bindless root signature, that is shared by all pipelines.
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_bindless_root_signature{};
+
+    // Mutex used for resource creation.
+    std::mutex m_resource_mutex{};
 };

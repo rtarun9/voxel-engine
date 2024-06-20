@@ -22,9 +22,7 @@ set (HEADER_FILES
 add_executable(voxel-engine ${SRC_FILES} ${HEADER_FILES})
 target_link_libraries(voxel-engine PUBLIC d3d12 dxgi dxguid dxcompiler external)
 
-# Treat warnings as errors.
-target_compile_options(voxel-engine PRIVATE  
-    $<$<CXX_COMPILER_ID:MSVC>: /W4>)
+set_property(TARGET voxel-engine PROPERTY COMPILE_WARNING_AS_ERROR ON)
 
 # Setup PCH.
 target_precompile_headers(voxel-engine PUBLIC ${CMAKE_SOURCE_DIR}/include/voxel-engine/pch.hpp)

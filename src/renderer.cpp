@@ -6,6 +6,7 @@ extern "C"
 {
     __declspec(dllexport) extern const UINT D3D12SDKVersion = 711u;
 }
+
 extern "C"
 {
     __declspec(dllexport) extern const char *D3D12SDKPath = ".\\D3D12\\";
@@ -133,7 +134,8 @@ Renderer::Renderer(const HWND window_handle, const u16 window_width, const u16 w
 
     // Create descriptor heaps.
     m_cbv_srv_uav_descriptor_heap = DescriptorHeap{};
-    m_cbv_srv_uav_descriptor_heap.create(m_device.Get(), 10u, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
+    m_cbv_srv_uav_descriptor_heap.create(m_device.Get(), D3D12_MAX_SHADER_VISIBLE_DESCRIPTOR_HEAP_SIZE_TIER_1,
+                                         D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
                                          D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
 
     m_rtv_descriptor_heap = DescriptorHeap{};
@@ -241,6 +243,8 @@ void Renderer::flush_gpu()
 
 IndexBuffer Renderer::create_index_buffer(const void *data, const size_t stride, const size_t indices_count)
 {
+    std::lock_guard<std::mutex> lock_guard(m_resource_mutex);
+
     // note(rtarun9) : Figure out how to handle these invalid cases.
     if (data == nullptr)
     {
@@ -320,6 +324,8 @@ IndexBuffer Renderer::create_index_buffer(const void *data, const size_t stride,
 
 StructuredBuffer Renderer::create_structured_buffer(const void *data, const size_t stride, const size_t num_elements)
 {
+    std::lock_guard<std::mutex> lock_guard(m_resource_mutex);
+
     // note(rtarun9) : Figure out how to handle these invalid cases.
     if (data == nullptr)
     {
@@ -395,6 +401,8 @@ StructuredBuffer Renderer::create_structured_buffer(const void *data, const size
 
 ConstantBuffer Renderer::create_constant_buffer(const size_t size_in_bytes)
 {
+    std::lock_guard<std::mutex> lock_guard(m_resource_mutex);
+
     u8 *resource_ptr{};
     Microsoft::WRL::ComPtr<ID3D12Resource> buffer_resource{};
 
