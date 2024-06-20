@@ -41,12 +41,34 @@ struct Chunk
 {
     explicit Chunk()
     {
+        printf("Constructor of chunk!");
         m_voxels = new Voxel[NUMBER_OF_VOXELS];
+    }
+
+    Chunk(const Chunk &other) = delete;
+    Chunk &operator=(Chunk &other) = delete;
+
+    Chunk(Chunk &&other) noexcept : m_voxels(std::move(other.m_voxels))
+    {
+        other.m_voxels = nullptr;
+    }
+
+    Chunk &operator=(Chunk &&other) noexcept
+    {
+        this->m_voxels = std::move(other.m_voxels);
+        other.m_voxels = nullptr;
+
+        return *this;
     }
 
     ~Chunk()
     {
-        delete[] m_voxels;
+        if (m_voxels)
+        {
+
+            printf("Destructor of chunk!");
+            delete[] m_voxels;
+        }
     }
 
     static constexpr u32 NUMBER_OF_VOXELS_PER_DIMENSION = 9u;
@@ -59,10 +81,31 @@ struct Chunk
 };
 
 // A class that contains a collection of chunks with data for each stored in hash maps for quick access.
+// The states a chunk can be in:
+// (i) Loaded -> Ready to be rendered.
+// (ii) Setup -> Chunk mesh is ready, but associated buffers may or maynot be ready. Once the buffers are ready, these
+// chunks are moved into the loaded chunks list.
+// (iii) Unloaded -> Buffers are ready, but chunk is not rendered.
+
 struct ChunkManager
 {
-    void create_chunk(Renderer &renderer, const size_t index)
+    struct SetupChunkData
     {
+        Chunk m_chunk{};
+
+        StructuredBuffer m_chunk_position_buffer{};
+        StructuredBuffer m_chunk_color_buffer{};
+
+        // NOTE : This is to cleared once the chunk data is present on the GPU.
+        std::vector<DirectX::XMFLOAT3> m_chunk_position_data{};
+        DirectX::XMFLOAT3 m_chunk_color_data{};
+    };
+
+  public:
+    SetupChunkData _create_chunk(Renderer &renderer, const size_t index)
+    {
+        SetupChunkData setup_chunk_data{};
+
         // Iterate over each voxel in chunk and setup the chunk common position buffer.
         std::vector<DirectX::XMFLOAT3> position_data{};
 
@@ -94,7 +137,7 @@ struct ChunkManager
             {
 
                 const bool is_front_face_covered =
-                    (index_3d.z != 0 && m_chunks[index]
+                    (index_3d.z != 0 && setup_chunk_data.m_chunk
                                             .m_voxels[convert_to_1d({index_3d.x, index_3d.y, index_3d.z - 1},
                                                                     Chunk::NUMBER_OF_VOXELS_PER_DIMENSION)]
                                             .m_active);
@@ -114,7 +157,7 @@ struct ChunkManager
             {
 
                 const bool is_back_face_covered = (index_3d.z != Chunk::NUMBER_OF_VOXELS_PER_DIMENSION - 1u &&
-                                                   m_chunks[index]
+                                                   setup_chunk_data.m_chunk
                                                        .m_voxels[convert_to_1d({index_3d.x, index_3d.y, index_3d.z + 1},
                                                                                Chunk::NUMBER_OF_VOXELS_PER_DIMENSION)]
                                                        .m_active);
@@ -134,7 +177,7 @@ struct ChunkManager
             {
 
                 const bool is_left_face_covered =
-                    (index_3d.x != 0u && m_chunks[index]
+                    (index_3d.x != 0u && setup_chunk_data.m_chunk
                                              .m_voxels[convert_to_1d({index_3d.x - 1, index_3d.y, index_3d.z},
                                                                      Chunk::NUMBER_OF_VOXELS_PER_DIMENSION)]
                                              .m_active);
@@ -155,7 +198,7 @@ struct ChunkManager
 
                 const bool is_right_face_covered =
                     (index_3d.x != Chunk::NUMBER_OF_VOXELS_PER_DIMENSION - 1u &&
-                     m_chunks[index]
+                     setup_chunk_data.m_chunk
                          .m_voxels[convert_to_1d({index_3d.x + 1, index_3d.y, index_3d.z},
                                                  Chunk::NUMBER_OF_VOXELS_PER_DIMENSION)]
                          .m_active);
@@ -175,7 +218,7 @@ struct ChunkManager
             {
 
                 const bool is_top_face_covered = (index_3d.y != Chunk::NUMBER_OF_VOXELS_PER_DIMENSION - 1 &&
-                                                  m_chunks[index]
+                                                  setup_chunk_data.m_chunk
                                                       .m_voxels[convert_to_1d({index_3d.x, index_3d.y + 1, index_3d.z},
                                                                               Chunk::NUMBER_OF_VOXELS_PER_DIMENSION)]
                                                       .m_active);
@@ -195,7 +238,7 @@ struct ChunkManager
             {
 
                 const bool is_bottom_face_covered =
-                    (index_3d.y != 0u && m_chunks[index]
+                    (index_3d.y != 0u && setup_chunk_data.m_chunk
                                              .m_voxels[convert_to_1d({index_3d.x, index_3d.y - 1, index_3d.z},
                                                                      Chunk::NUMBER_OF_VOXELS_PER_DIMENSION)]
                                              .m_active);
@@ -212,40 +255,99 @@ struct ChunkManager
             }
         }
 
-        m_chunk_position_data[index] = std::move(position_data);
-        m_chunk_color_data[index] = {
+        setup_chunk_data.m_chunk_position_data = std::move(position_data);
+        setup_chunk_data.m_chunk_color_data = {
             rand() / (float)RAND_MAX,
             rand() / (float)RAND_MAX,
             rand() / (float)RAND_MAX,
         };
 
-        if (!m_chunk_position_data[index].empty())
+        if (!setup_chunk_data.m_chunk_position_data.empty())
         {
-            m_chunk_position_buffers[index] =
-                renderer.create_structured_buffer((void *)m_chunk_position_data[index].data(),
-                                                  sizeof(DirectX::XMFLOAT3), m_chunk_position_data[index].size());
-            m_chunk_color_buffers[index] =
-                renderer.create_structured_buffer((void *)&m_chunk_color_data[index], sizeof(DirectX::XMFLOAT3), 1u);
+            setup_chunk_data.m_chunk_position_buffer = renderer.create_structured_buffer(
+                (void *)setup_chunk_data.m_chunk_position_data.data(), sizeof(DirectX::XMFLOAT3),
+                setup_chunk_data.m_chunk_position_data.size());
+            setup_chunk_data.m_chunk_color_buffer = renderer.create_structured_buffer(
+                (void *)&setup_chunk_data.m_chunk_color_data, sizeof(DirectX::XMFLOAT3), 1u);
         }
 
-        m_chunk_number_of_vertices[index] = m_chunk_position_data[index].size();
-
-        m_chunks[index].m_chunk_index = index;
+        setup_chunk_data.m_chunk.m_chunk_index = index;
+        return setup_chunk_data;
     }
 
-    static constexpr u32 NUMBER_OF_CHUNKS_PER_DIMENSION = 5u;
+  public:
+    void create_chunk(Renderer &renderer, const size_t index)
+    {
+        if (m_loaded_chunks.contains(index) || m_unloaded_chunks.contains(index))
+        {
+            return;
+        }
+
+        m_setup_chunk_futures_stack.emplace(
+            std::pair{renderer.m_copy_queue.m_monotonic_fence_value + 1,
+                      std::async(std::launch::async, &ChunkManager::_create_chunk, this, std::ref(renderer), index)});
+    }
+
+    void move_to_loaded_chunks(const u64 current_copy_queue_fence_value)
+    {
+        using namespace std::chrono_literals;
+
+        while (!m_setup_chunk_futures_stack.empty())
+        {
+            auto &setup_chunk_data = m_setup_chunk_futures_stack.top();
+
+            switch (std::future_status status = setup_chunk_data.second.wait_for(0s); status)
+            {
+            case std::future_status::timeout: {
+
+                return;
+            }
+            break;
+
+            case std::future_status::ready: {
+                // If this condition is satisfied, the buffers are ready, so chunk is ready to be loaded :)
+                if (setup_chunk_data.first <= current_copy_queue_fence_value)
+                {
+                    SetupChunkData chunk_to_load = setup_chunk_data.second.get();
+
+                    const size_t num_vertices = chunk_to_load.m_chunk_position_data.size();
+                    const size_t chunk_index = chunk_to_load.m_chunk.m_chunk_index;
+
+                    m_loaded_chunks[chunk_index] = std::move(chunk_to_load.m_chunk);
+
+                    m_chunk_position_buffers[chunk_index] = std::move(chunk_to_load.m_chunk_position_buffer);
+
+                    m_chunk_color_buffers[chunk_index] = std::move(chunk_to_load.m_chunk_color_buffer);
+
+                    m_chunk_number_of_vertices[chunk_index] = num_vertices;
+
+                    m_setup_chunk_futures_stack.pop();
+                }
+                else
+                {
+                    return;
+                }
+            }
+            break;
+            }
+        }
+    }
+
+    static constexpr u32 NUMBER_OF_CHUNKS_PER_DIMENSION = 1u;
     static constexpr size_t NUMBER_OF_CHUNKS =
         NUMBER_OF_CHUNKS_PER_DIMENSION * NUMBER_OF_CHUNKS_PER_DIMENSION * NUMBER_OF_CHUNKS_PER_DIMENSION;
 
-    std::unordered_map<size_t, Chunk> m_chunks{};
+    std::unordered_map<size_t, Chunk> m_loaded_chunks{};
+    std::unordered_map<size_t, Chunk> m_unloaded_chunks{};
+
+    // NOTE : Chunks are considered to be setup when :
+    // (i) The result of async call (i.e the future) is ready,
+    // (ii) The fence value is < the current copy queue fence value.
+    // The stack consist of pairs of fence values , futures.
+    std::stack<std::pair<u64, std::future<SetupChunkData>>> m_setup_chunk_futures_stack{};
 
     std::unordered_map<size_t, StructuredBuffer> m_chunk_position_buffers{};
     std::unordered_map<size_t, StructuredBuffer> m_chunk_color_buffers{};
-
-    // NOTE : This is to cleared once the chunk data is present on the GPU.
-    std::unordered_map<size_t, std::vector<DirectX::XMFLOAT3>> m_chunk_position_data{};
-    std::unordered_map<size_t, DirectX::XMFLOAT3> m_chunk_color_data{};
-
     std::unordered_map<size_t, size_t> m_chunk_number_of_vertices{};
 };
 
@@ -282,7 +384,6 @@ int main()
 
     for (size_t i = 0; i < ChunkManager::NUMBER_OF_CHUNKS; i++)
     {
-        // chunk_manager.create_chunk_from_mesh_data(renderer, i);
         chunk_manager.create_chunk(renderer, i);
     }
 
@@ -452,6 +553,9 @@ int main()
             quit = true;
         }
 
+        // See if any chunk has been setup, and is to be added to loaded chunks.
+        chunk_manager.move_to_loaded_chunks(renderer.m_copy_queue.m_monotonic_fence_value);
+
         const float window_aspect_ratio = static_cast<float>(window.get_width()) / window.get_height();
 
         const DirectX::XMMATRIX view_projection_matrix =
@@ -469,6 +573,10 @@ int main()
         // Reset command allocator and command list.
         throw_if_failed(allocator->Reset());
         throw_if_failed(command_list->Reset(allocator.Get(), nullptr));
+
+        throw_if_failed(renderer.m_copy_queue.m_command_allocator->Reset());
+        throw_if_failed(
+            renderer.m_copy_queue.m_command_list->Reset(renderer.m_copy_queue.m_command_allocator.Get(), nullptr));
 
         const auto &rtv_handle = renderer.m_swapchain_backbuffer_cpu_descriptor_handles[swapchain_index];
         const Microsoft::WRL::ComPtr<ID3D12Resource> &swapchain_resource = renderer.m_resources[swapchain_index];
@@ -517,9 +625,9 @@ int main()
 
         command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-        for (size_t k = 0; k < chunk_manager.m_chunks.size(); k++)
+        for (size_t k = 0; k < chunk_manager.m_loaded_chunks.size(); k++)
         {
-            const size_t i = chunk_manager.m_chunks[k].m_chunk_index;
+            const size_t i = chunk_manager.m_loaded_chunks[k].m_chunk_index;
 
             const VoxelRenderResources render_resources = {
                 .position_buffer_index = static_cast<u32>(chunk_manager.m_chunk_position_buffers[i].srv_index),
@@ -558,10 +666,13 @@ int main()
 
         // Submit command list to queue for execution.
         renderer.execute_command_list(QueueType::Direct);
+        renderer.execute_command_list(QueueType::Copy);
 
         // Now, present the rendertarget and signal command queue.
         throw_if_failed(renderer.m_swapchain->Present(1u, 0u));
         renderer.signal_fence(QueueType::Direct);
+
+        renderer.signal_fence(QueueType::Copy);
 
         renderer.m_swapchain_backbuffer_index = static_cast<u8>(renderer.m_swapchain->GetCurrentBackBufferIndex());
 
