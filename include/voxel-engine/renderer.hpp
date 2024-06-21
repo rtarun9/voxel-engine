@@ -102,18 +102,23 @@ struct Renderer
     {
         void reset(const u8 index) const;
 
-        void execute_command_list(const u8 index) const;
+        void execute_command_list() const;
         void wait_for_fence_value_at_index(const u8 index);
         void signal_fence(const u8 index);
         void flush_queue();
 
         Microsoft::WRL::ComPtr<ID3D12CommandAllocator> m_command_allocators[NUMBER_OF_BACKBUFFERS];
         Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_command_queue{};
-        Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_command_lists[NUMBER_OF_BACKBUFFERS]{};
+        Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_command_list{};
 
         Microsoft::WRL::ComPtr<ID3D12Fence> m_fence{};
         u64 m_monotonic_fence_value{};
         std::array<u64, NUMBER_OF_BACKBUFFERS> m_frame_fence_values{};
+
+        // NOTE : The below mutex should at ANY time be lockable by either a worker thread or the main thread.
+        mutable std::mutex m_queue_lock{};
+        mutable std::condition_variable m_cv{};
+        mutable bool m_is_command_list_closed{false};
     };
 
     CommandQueue m_direct_queue{};
