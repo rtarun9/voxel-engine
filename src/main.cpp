@@ -130,7 +130,7 @@ int main()
         .SampleMask = 0xffff'ffff,
         .RasterizerState =
             {
-                .FillMode = D3D12_FILL_MODE_WIREFRAME,
+                .FillMode = D3D12_FILL_MODE_SOLID,
                 .CullMode = D3D12_CULL_MODE_BACK,
                 .FrontCounterClockwise = FALSE,
             },
@@ -187,34 +187,37 @@ int main()
     renderer.m_direct_queue.flush_queue();
 
     Camera camera{};
+    const u64 chunk_grid_middle = Chunk::CHUNK_LENGTH * ChunkManager::NUMBER_OF_CHUNKS_PER_DIMENSION / 2u;
+
+    camera.m_position = {chunk_grid_middle, chunk_grid_middle, chunk_grid_middle};
+
     Timer timer{};
     float delta_time = 0.0f;
 
-    u64 frame_count = 0;
+    bool setup_chunks{false};
 
-    u64 chunk_starting_index_to_setup = 0;
-    u64 number_of_chunks_to_setup_per_frame = 10;
+    u64 frame_count = 0;
 
     bool quit{false};
     while (!quit)
     {
-        static bool setup_chunks = false;
+        // Get the player's current chunk index.
 
-        renderer.m_copy_queue.reset(renderer.m_swapchain_backbuffer_index);
+        const DirectX::XMUINT3 current_chunk_3d_index = {
+            (u32)(floor((camera.m_position.x) / Chunk::CHUNK_LENGTH)),
+            (u32)(floor((camera.m_position.y) / Chunk::CHUNK_LENGTH)),
+            (u32)(floor((camera.m_position.z) / Chunk::CHUNK_LENGTH)),
+        };
 
-        // Test to check the async copy queue capabilities!
+        const u64 current_chunk_index =
+            convert_to_1d(current_chunk_3d_index, ChunkManager::NUMBER_OF_CHUNKS_PER_DIMENSION);
+
         if (setup_chunks)
         {
-            for (int i = chunk_starting_index_to_setup;
-                 i < chunk_starting_index_to_setup + number_of_chunks_to_setup_per_frame &&
-                 i < ChunkManager::NUMBER_OF_CHUNKS;
-                 i++)
-            {
-                chunk_manager.create_chunk(renderer, i);
-            }
-
-            chunk_starting_index_to_setup += number_of_chunks_to_setup_per_frame;
+            chunk_manager.create_chunk(renderer, current_chunk_index);
         }
+
+        renderer.m_copy_queue.reset(renderer.m_swapchain_backbuffer_index);
 
         timer.start();
 
@@ -231,13 +234,13 @@ int main()
         }
 
         // See if any chunk has been setup, and is to be added to loaded chunks.
-        chunk_manager.move_to_loaded_chunks(renderer.m_copy_queue.m_fence->GetCompletedValue());
+        chunk_manager.transfer_chunks_from_setup_to_move_state(renderer.m_copy_queue.m_fence->GetCompletedValue());
 
         const float window_aspect_ratio = static_cast<float>(window.get_width()) / window.get_height();
 
         const DirectX::XMMATRIX view_projection_matrix =
             camera.update_and_get_view_matrix(delta_time) *
-            DirectX::XMMatrixPerspectiveFovLH(DirectX::XMConvertToRadians(45.0f), window_aspect_ratio, 0.1f, 10.0f);
+            DirectX::XMMatrixPerspectiveFovLH(DirectX::XMConvertToRadians(45.0f), window_aspect_ratio, 0.1f, 1000.0f);
         scene_buffer_data.view_projection_matrix = view_projection_matrix;
 
         scene_buffer.update(&scene_buffer_data);
@@ -250,7 +253,8 @@ int main()
         const auto &command_list = renderer.m_direct_queue.m_command_list;
 
         const auto &rtv_handle = renderer.m_swapchain_backbuffer_cpu_descriptor_handles[swapchain_index];
-        const Microsoft::WRL::ComPtr<ID3D12Resource> swapchain_resource = renderer.m_resources[swapchain_index];
+        const Microsoft::WRL::ComPtr<ID3D12Resource> swapchain_resource =
+            renderer.m_swapchain_backbuffer_resources[swapchain_index];
 
         // Transition the backbuffer from presentation mode to render target mode.
         const D3D12_RESOURCE_BARRIER presentation_to_render_target_barrier = {
@@ -313,9 +317,11 @@ int main()
 
         // Render UI.
         ImGui::Begin("Debug Controller");
-        ImGui::SliderFloat("movement_speed", &camera.m_movement_speed, 0.0f, 10.0f);
+        ImGui::SliderFloat("movement_speed", &camera.m_movement_speed, 0.0f, 500.0f);
         ImGui::SliderFloat("rotation_speed", &camera.m_rotation_speed, 0.0f, 10.0f);
         ImGui::Checkbox("Start loading chunks", &setup_chunks);
+        ImGui::Text("Camera Position : %f %f %f", camera.m_position.x, camera.m_position.y, camera.m_position.z);
+        ImGui::Text("Current Index: %zu", current_chunk_index);
         ImGui::End();
 
         ImGui::Render();

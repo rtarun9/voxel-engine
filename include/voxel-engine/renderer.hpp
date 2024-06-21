@@ -8,13 +8,6 @@ struct StructuredBuffer
     size_t srv_index{};
 };
 
-struct IndexBuffer
-{
-    size_t resource_index{};
-    size_t indices_count{};
-    D3D12_INDEX_BUFFER_VIEW index_buffer_view{};
-};
-
 struct ConstantBuffer
 {
     size_t resource_index{};
@@ -23,7 +16,7 @@ struct ConstantBuffer
 
     u8 *resource_mapped_ptr{};
 
-    void update(const void *data) const
+    inline void update(const void *data) const
     {
         memcpy(resource_mapped_ptr, data, size_in_bytes);
     }
@@ -61,7 +54,6 @@ struct Renderer
     explicit Renderer(const HWND window_handle, const u16 window_width, const u16 window_height);
 
     // Resource creation functions.
-    IndexBuffer create_index_buffer(const void *data, const size_t stride, const size_t indices_count);
     StructuredBuffer create_structured_buffer(const void *data, const size_t stride, const size_t num_elements);
     ConstantBuffer create_constant_buffer(const size_t size_in_bytes);
 
@@ -86,8 +78,8 @@ struct Renderer
 
     Microsoft::WRL::ComPtr<IDXGISwapChain4> m_swapchain{};
 
-    std::array<u64, NUMBER_OF_BACKBUFFERS> m_swapchain_backbuffer_resource_indices{};
     std::array<D3D12_CPU_DESCRIPTOR_HANDLE, NUMBER_OF_BACKBUFFERS> m_swapchain_backbuffer_cpu_descriptor_handles{};
+    std::array<Microsoft::WRL::ComPtr<ID3D12Resource>, NUMBER_OF_BACKBUFFERS> m_swapchain_backbuffer_resources{};
 
     DescriptorHeap m_cbv_srv_uav_descriptor_heap{};
     DescriptorHeap m_rtv_descriptor_heap{};
@@ -96,10 +88,12 @@ struct Renderer
     // NOTE : The reason the copy queue also has a array of allocators is because of the following reason :
     // While a 'queue' of allocator / list can be used, execute command list is expensive and I would not prefer doing
     // so many of those calls. Instead, with this approach (despite copy queue having nothing to do with frames in
-    // flight), sync and management becomes much easier. Note that despite using multiple command allocators, there is
-    // no CPU side block!!
+    // flight), sync and management becomes much easier. Note that despite using multiple command allocators, there may
+    // or maynot be a CPU side block .
     struct CommandQueue
     {
+        void create(ID3D12Device *const device, const D3D12_COMMAND_LIST_TYPE commmand_type);
+
         void reset(const u8 index) const;
 
         void execute_command_list() const;
@@ -128,6 +122,8 @@ struct Renderer
 
     // Resource vectors.
     std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> m_resources{};
+
+    // note(rtarun9) : Try to figure out when is a good time to get rid of the intermediate resources.
     std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> m_intermediate_resources{};
 
     // Bindless root signature, that is shared by all pipelines.

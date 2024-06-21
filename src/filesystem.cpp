@@ -13,7 +13,6 @@ FileSystem::FileSystem()
         else
         {
             printf("Failed to find root directory voxel-engine.");
-            exit(EXIT_FAILURE);
         }
     }
 

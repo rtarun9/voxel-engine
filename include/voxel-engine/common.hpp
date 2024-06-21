@@ -18,7 +18,7 @@ inline void throw_if_failed(const HRESULT hr, const std::source_location src_loc
 // Helper functions to go from 1d to 3d and vice versa.
 static inline size_t convert_to_1d(const DirectX::XMUINT3 index_3d, const size_t N)
 {
-    return index_3d.x + N * (index_3d.y + index_3d.z * N);
+    return index_3d.x + N * (index_3d.y + (index_3d.z * N));
 }
 
 static inline DirectX::XMUINT3 convert_to_3d(const size_t index, const size_t N)

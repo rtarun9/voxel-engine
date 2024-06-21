@@ -102,60 +102,8 @@ Renderer::Renderer(const HWND window_handle, const u16 window_width, const u16 w
     }
 
     // Setup the copy queue & direct queue primitives.
-    {
-
-        const D3D12_COMMAND_QUEUE_DESC direct_command_queue_desc = {
-            .Type = D3D12_COMMAND_LIST_TYPE_DIRECT,
-            .Priority = D3D12_COMMAND_QUEUE_PRIORITY_NORMAL,
-            .Flags = D3D12_COMMAND_QUEUE_FLAG_NONE,
-            .NodeMask = 0u,
-        };
-        throw_if_failed(
-            m_device->CreateCommandQueue(&direct_command_queue_desc, IID_PPV_ARGS(&m_direct_queue.m_command_queue)));
-
-        // Create the command allocator (the underlying allocation where gpu commands will be stored after being
-        // recorded by command list). Each frame has its own command allocator.
-        for (u8 i = 0; i < NUMBER_OF_BACKBUFFERS; i++)
-        {
-            throw_if_failed(m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,
-                                                             IID_PPV_ARGS(&m_direct_queue.m_command_allocators[i])));
-        }
-
-        // Create the graphics command list.
-        throw_if_failed(m_device->CreateCommandList(0u, D3D12_COMMAND_LIST_TYPE_DIRECT,
-                                                    m_direct_queue.m_command_allocators[0].Get(), nullptr,
-                                                    IID_PPV_ARGS(&m_direct_queue.m_command_list)));
-
-        // Create a fence for CPU GPU synchronization.
-        throw_if_failed(m_device->CreateFence(0u, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_direct_queue.m_fence)));
-    }
-
-    {
-        // Create the copy queue primitives.
-        const D3D12_COMMAND_QUEUE_DESC copy_command_queue_desc = {
-            .Type = D3D12_COMMAND_LIST_TYPE_COPY,
-            .Priority = D3D12_COMMAND_QUEUE_PRIORITY_NORMAL,
-            .Flags = D3D12_COMMAND_QUEUE_FLAG_NONE,
-            .NodeMask = 0u,
-        };
-        throw_if_failed(
-            m_device->CreateCommandQueue(&copy_command_queue_desc, IID_PPV_ARGS(&m_copy_queue.m_command_queue)));
-
-        // Create the command allocator (the underlying allocation where gpu commands will be stored after being
-        // recorded by command list). Each frame has its own command allocator.
-        for (u8 i = 0; i < NUMBER_OF_BACKBUFFERS; i++)
-        {
-            throw_if_failed(m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COPY,
-                                                             IID_PPV_ARGS(&m_copy_queue.m_command_allocators[i])));
-        }
-
-        throw_if_failed(m_device->CreateCommandList(0u, D3D12_COMMAND_LIST_TYPE_COPY,
-                                                    m_copy_queue.m_command_allocators[0].Get(), nullptr,
-                                                    IID_PPV_ARGS(&m_copy_queue.m_command_list)));
-
-        // Create a fence for CPU GPU synchronization.
-        throw_if_failed(m_device->CreateFence(0u, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_copy_queue.m_fence)));
-    }
+    m_direct_queue.create(m_device.Get(), D3D12_COMMAND_LIST_TYPE_DIRECT);
+    m_copy_queue.create(m_device.Get(), D3D12_COMMAND_LIST_TYPE_COPY);
 
     // Create descriptor heaps.
     m_cbv_srv_uav_descriptor_heap = DescriptorHeap{};
@@ -201,8 +149,7 @@ Renderer::Renderer(const HWND window_handle, const u16 window_width, const u16 w
         m_device->CreateRenderTargetView(swapchain_resource.Get(), nullptr,
                                          m_swapchain_backbuffer_cpu_descriptor_handles[i]);
 
-        m_resources.emplace_back(std::move(swapchain_resource));
-        m_swapchain_backbuffer_resource_indices[i] = m_resources.size() - 1u;
+        m_swapchain_backbuffer_resources[i] = (std::move(swapchain_resource));
     }
 
     m_swapchain_backbuffer_index = static_cast<u8>(m_swapchain->GetCurrentBackBufferIndex());
@@ -239,90 +186,6 @@ Renderer::Renderer(const HWND window_handle, const u16 window_width, const u16 w
     throw_if_failed(m_device->CreateRootSignature(0u, bindless_root_signature_blob->GetBufferPointer(),
                                                   bindless_root_signature_blob->GetBufferSize(),
                                                   IID_PPV_ARGS(&m_bindless_root_signature)));
-}
-
-IndexBuffer Renderer::create_index_buffer(const void *data, const size_t stride, const size_t indices_count)
-{
-    // note(rtarun9) : Figure out how to handle these invalid cases.
-    if (data == nullptr)
-    {
-        return IndexBuffer{};
-    }
-
-    const size_t size_in_bytes = stride * indices_count;
-
-    u8 *resource_ptr{};
-    Microsoft::WRL::ComPtr<ID3D12Resource> buffer_resource{};
-    Microsoft::WRL::ComPtr<ID3D12Resource> intermediate_buffer_resource{};
-
-    // First, create a upload buffer (that is placed in memory accesible by both GPU and CPU).
-    // Then create a GPU only buffer, and copy data from the previous buffer to GPU only one.
-    const D3D12_HEAP_PROPERTIES upload_heap_properties = {
-        .Type = D3D12_HEAP_TYPE_UPLOAD,
-        .CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
-        .MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN,
-        .CreationNodeMask = 0u,
-        .VisibleNodeMask = 0u,
-    };
-
-    const D3D12_RESOURCE_DESC buffer_resource_desc = {
-        .Dimension = D3D12_RESOURCE_DIMENSION_BUFFER,
-        .Width = size_in_bytes,
-        .Height = 1u,
-        .DepthOrArraySize = 1u,
-        .MipLevels = 1u,
-        .Format = DXGI_FORMAT_UNKNOWN,
-        .SampleDesc = {1u, 0u},
-        .Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
-        .Flags = D3D12_RESOURCE_FLAG_NONE,
-    };
-
-    throw_if_failed(m_device->CreateCommittedResource(
-        &upload_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES, &buffer_resource_desc,
-        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, nullptr, IID_PPV_ARGS(&intermediate_buffer_resource)));
-
-    // Now that a resource is created, copy CPU data to this upload buffer.
-    const D3D12_RANGE read_range{.Begin = 0u, .End = 0u};
-
-    throw_if_failed(intermediate_buffer_resource->Map(0u, &read_range, (void **)&resource_ptr));
-
-    memcpy(resource_ptr, data, size_in_bytes);
-
-    // Create the final resource and transfer the data from upload buffer to the final buffer.
-    // The heap type is : Default (no CPU access).
-    const D3D12_HEAP_PROPERTIES default_heap_properties = {
-        .Type = D3D12_HEAP_TYPE_DEFAULT,
-        .CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
-        .MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN,
-        .CreationNodeMask = 0u,
-        .VisibleNodeMask = 0u,
-    };
-
-    throw_if_failed(m_device->CreateCommittedResource(
-        &default_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES, &buffer_resource_desc,
-        D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&buffer_resource)));
-
-    std::lock_guard<std::mutex> lock_guard(m_resource_mutex);
-
-    std::unique_lock<std::mutex> ul(m_copy_queue.m_queue_lock);
-    m_copy_queue.m_cv.wait(ul, [&] { return m_copy_queue.m_is_command_list_closed == true; });
-
-    m_copy_queue.m_command_list->CopyResource(buffer_resource.Get(), intermediate_buffer_resource.Get());
-
-    const D3D12_INDEX_BUFFER_VIEW index_buffer_view = {
-        .BufferLocation = buffer_resource->GetGPUVirtualAddress(),
-        .SizeInBytes = static_cast<UINT>(size_in_bytes),
-        .Format = DXGI_FORMAT_R16_UINT,
-    };
-
-    m_intermediate_resources.emplace_back(std::move(intermediate_buffer_resource));
-    m_resources.emplace_back(std::move(buffer_resource));
-
-    return IndexBuffer{
-        .resource_index = m_resources.size() - 1u,
-        .indices_count = indices_count,
-        .index_buffer_view = index_buffer_view,
-    };
 }
 
 StructuredBuffer Renderer::create_structured_buffer(const void *data, const size_t stride, const size_t num_elements)
@@ -496,6 +359,31 @@ size_t Renderer::create_shader_resource_view(const size_t buffer_resource_index,
     m_cbv_srv_uav_descriptor_heap.offset_current_descriptor_handles();
 
     return srv_index;
+}
+
+void Renderer::CommandQueue::create(ID3D12Device *const device, const D3D12_COMMAND_LIST_TYPE command_type)
+{
+    const D3D12_COMMAND_QUEUE_DESC command_queue_desc = {
+        .Type = command_type,
+        .Priority = D3D12_COMMAND_QUEUE_PRIORITY_NORMAL,
+        .Flags = D3D12_COMMAND_QUEUE_FLAG_NONE,
+        .NodeMask = 0u,
+    };
+    throw_if_failed(device->CreateCommandQueue(&command_queue_desc, IID_PPV_ARGS(&m_command_queue)));
+
+    // Create the command allocator (the underlying allocation where gpu commands will be stored after being
+    // recorded by command list). Each frame has its own command allocator.
+    for (u8 i = 0; i < NUMBER_OF_BACKBUFFERS; i++)
+    {
+        throw_if_failed(device->CreateCommandAllocator(command_type, IID_PPV_ARGS(&m_command_allocators[i])));
+    }
+
+    // Create the graphics command list.
+    throw_if_failed(device->CreateCommandList(0u, command_type, m_command_allocators[0].Get(), nullptr,
+                                              IID_PPV_ARGS(&m_command_list)));
+
+    // Create a fence for CPU GPU synchronization.
+    throw_if_failed(device->CreateFence(0u, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence)));
 }
 
 void Renderer::CommandQueue::reset(const u8 index) const

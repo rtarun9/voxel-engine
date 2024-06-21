@@ -7,7 +7,7 @@
 // position' and has a edge length as specified in the class below.
 struct Voxel
 {
-    static constexpr float EDGE_LENGTH{0.01f};
+    static constexpr float EDGE_LENGTH{1.0f};
     bool m_active{true};
 };
 
@@ -23,9 +23,11 @@ struct Chunk
 
     ~Chunk();
 
-    static constexpr u32 NUMBER_OF_VOXELS_PER_DIMENSION = 8u;
+    static constexpr u32 NUMBER_OF_VOXELS_PER_DIMENSION = 32u;
     static constexpr size_t NUMBER_OF_VOXELS =
         NUMBER_OF_VOXELS_PER_DIMENSION * NUMBER_OF_VOXELS_PER_DIMENSION * NUMBER_OF_VOXELS_PER_DIMENSION;
+
+    static constexpr float CHUNK_LENGTH = Voxel::EDGE_LENGTH * Chunk::NUMBER_OF_VOXELS_PER_DIMENSION;
 
     // A flattened 3d array of Voxels.
     Voxel *m_voxels{};
@@ -59,9 +61,9 @@ struct ChunkManager
   public:
     void create_chunk(Renderer &renderer, const size_t index);
 
-    void move_to_loaded_chunks(const u64 current_copy_queue_fence_value);
+    void transfer_chunks_from_setup_to_move_state(const u64 current_copy_queue_fence_value);
 
-    static constexpr u32 NUMBER_OF_CHUNKS_PER_DIMENSION = 256;
+    static constexpr u32 NUMBER_OF_CHUNKS_PER_DIMENSION = 32u;
     static constexpr size_t NUMBER_OF_CHUNKS =
         NUMBER_OF_CHUNKS_PER_DIMENSION * NUMBER_OF_CHUNKS_PER_DIMENSION * NUMBER_OF_CHUNKS_PER_DIMENSION;
 
@@ -71,8 +73,8 @@ struct ChunkManager
     // NOTE : Chunks are considered to be setup when :
     // (i) The result of async call (i.e the future) is ready,
     // (ii) The fence value is < the current copy queue fence value.
-    // The stack consist of pairs of fence values , futures.
-    std::queue<std::pair<u64, std::future<SetupChunkData>>> m_setup_chunk_futures_stack{};
+    // The setup chunks future queue consist of pairs of fence values , futures.
+    std::queue<std::pair<u64, std::future<SetupChunkData>>> m_setup_chunk_futures_queue{};
 
     std::unordered_map<size_t, StructuredBuffer> m_chunk_position_buffers{};
     std::unordered_map<size_t, StructuredBuffer> m_chunk_color_buffers{};

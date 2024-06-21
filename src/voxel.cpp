@@ -14,6 +14,7 @@ Chunk &Chunk::operator=(Chunk &&other) noexcept
 {
     this->m_voxels = std::move(other.m_voxels);
     this->m_chunk_index = other.m_chunk_index;
+
     other.m_voxels = nullptr;
 
     return *this;
@@ -23,8 +24,6 @@ Chunk::~Chunk()
 {
     if (m_voxels)
     {
-
-        printf("Destructor of chunk!");
         delete[] m_voxels;
     }
 }
@@ -48,6 +47,7 @@ ChunkManager::SetupChunkData ChunkManager::internal_mt_setup_chunk(Renderer &ren
     };
 
     const DirectX::XMUINT3 chunk_index_3d = convert_to_3d(index, ChunkManager::NUMBER_OF_CHUNKS_PER_DIMENSION);
+
     const DirectX::XMFLOAT3 chunk_offset =
         DirectX::XMFLOAT3(chunk_index_3d.x * Voxel::EDGE_LENGTH * Chunk::NUMBER_OF_VOXELS_PER_DIMENSION,
                           chunk_index_3d.y * Voxel::EDGE_LENGTH * Chunk::NUMBER_OF_VOXELS_PER_DIMENSION,
@@ -207,18 +207,18 @@ void ChunkManager::create_chunk(Renderer &renderer, const size_t index)
         return;
     }
 
-    m_setup_chunk_futures_stack.emplace(std::pair{
+    m_setup_chunk_futures_queue.emplace(std::pair{
         renderer.m_copy_queue.m_monotonic_fence_value + 1,
         std::async(std::launch::async, &ChunkManager::internal_mt_setup_chunk, this, std::ref(renderer), index)});
 }
 
-void ChunkManager::move_to_loaded_chunks(const u64 current_copy_queue_fence_value)
+void ChunkManager::transfer_chunks_from_setup_to_move_state(const u64 current_copy_queue_fence_value)
 {
     using namespace std::chrono_literals;
 
-    while (!m_setup_chunk_futures_stack.empty())
+    while (!m_setup_chunk_futures_queue.empty())
     {
-        auto &setup_chunk_data = m_setup_chunk_futures_stack.front();
+        auto &setup_chunk_data = m_setup_chunk_futures_queue.front();
         if (!setup_chunk_data.second.valid())
         {
             return;
@@ -249,7 +249,7 @@ void ChunkManager::move_to_loaded_chunks(const u64 current_copy_queue_fence_valu
 
                 m_chunk_number_of_vertices[chunk_index] = num_vertices;
 
-                m_setup_chunk_futures_stack.pop();
+                m_setup_chunk_futures_queue.pop();
             }
             else
             {
