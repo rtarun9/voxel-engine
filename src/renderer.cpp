@@ -141,9 +141,34 @@ Renderer::Renderer(const HWND window_handle, const u16 window_width, const u16 w
         throw_if_failed(
             m_device->CreateCommandQueue(&copy_command_queue_desc, IID_PPV_ARGS(&m_copy_queue.m_command_queue)));
 
+        // Create the command allocator (the underlying allocation where gpu commands will be stored after being
+        // recorded by command list). Each frame has its own command allocator.
+        for (u8 i = 0; i < NUMBER_OF_BACKBUFFERS; i++)
+        {
+            throw_if_failed(m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COPY,
+                                                             IID_PPV_ARGS(&m_copy_queue.m_command_allocators[i])));
+        }
+
+        // Create the graphics command list.
+        throw_if_failed(m_device->CreateCommandList(0u, D3D12_COMMAND_LIST_TYPE_COPY,
+                                                    m_copy_queue.m_command_allocators[0].Get(), nullptr,
+                                                    IID_PPV_ARGS(&m_copy_queue.m_command_list)));
+
         // Create a fence for CPU GPU synchronization.
         throw_if_failed(m_device->CreateFence(0u, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_copy_queue.m_fence)));
     }
+
+    // Create descriptor heaps.
+    m_cbv_srv_uav_descriptor_heap = DescriptorHeap{};
+    m_cbv_srv_uav_descriptor_heap.create(m_device.Get(), D3D12_MAX_SHADER_VISIBLE_DESCRIPTOR_HEAP_SIZE_TIER_1,
+                                         D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
+                                         D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
+
+    m_rtv_descriptor_heap = DescriptorHeap{};
+    m_rtv_descriptor_heap.create(m_device.Get(), 10u, D3D12_DESCRIPTOR_HEAP_TYPE_RTV, D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
+
+    m_dsv_descriptor_heap = DescriptorHeap{};
+    m_dsv_descriptor_heap.create(m_device.Get(), 1u, D3D12_DESCRIPTOR_HEAP_TYPE_DSV, D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
 
     // Create the dxgi swapchain.
     {
@@ -151,7 +176,7 @@ Renderer::Renderer(const HWND window_handle, const u16 window_width, const u16 w
         const DXGI_SWAP_CHAIN_DESC1 swapchain_desc = {
             .Width = window_width,
             .Height = window_height,
-            .Format = DXGI_FORMAT_R8G8B8A8_UNORM,
+            .Format = DXGI_FORMAT_R10G10B10A2_UNORM,
             .Stereo = FALSE,
             .SampleDesc = {1, 0},
             .BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT,
@@ -166,18 +191,6 @@ Renderer::Renderer(const HWND window_handle, const u16 window_width, const u16 w
 
         throw_if_failed(swapchain_1.As(&m_swapchain));
     }
-
-    // Create descriptor heaps.
-    m_cbv_srv_uav_descriptor_heap = DescriptorHeap{};
-    m_cbv_srv_uav_descriptor_heap.create(m_device.Get(), D3D12_MAX_SHADER_VISIBLE_DESCRIPTOR_HEAP_SIZE_TIER_1,
-                                         D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
-                                         D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
-
-    m_rtv_descriptor_heap = DescriptorHeap{};
-    m_rtv_descriptor_heap.create(m_device.Get(), 10u, D3D12_DESCRIPTOR_HEAP_TYPE_RTV, D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
-
-    m_dsv_descriptor_heap = DescriptorHeap{};
-    m_dsv_descriptor_heap.create(m_device.Get(), 1u, D3D12_DESCRIPTOR_HEAP_TYPE_DSV, D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
 
     // Create the render target view for the swapchain back buffer.
     for (u8 i = 0; i < NUMBER_OF_BACKBUFFERS; i++)
@@ -229,55 +242,8 @@ Renderer::Renderer(const HWND window_handle, const u16 window_width, const u16 w
                                                   IID_PPV_ARGS(&m_bindless_root_signature)));
 }
 
-void Renderer::wait_for_fence_value_at_index(const size_t frame_fence_values_index)
-{
-    if (m_direct_queue.m_fence->GetCompletedValue() >= m_direct_queue.m_frame_fence_values[frame_fence_values_index])
-    {
-        return;
-    }
-    else
-    {
-        throw_if_failed(m_direct_queue.m_fence->SetEventOnCompletion(
-            m_direct_queue.m_frame_fence_values[frame_fence_values_index], nullptr));
-    }
-}
-
-// Whenever fence is being signalled, increment the monotonical frame fence value.
-void Renderer::signal_fence(const QueueType queue_type)
-{
-    if (queue_type == QueueType::Direct)
-    {
-        ++m_direct_queue.m_monotonic_fence_value;
-        throw_if_failed(m_direct_queue.m_command_queue->Signal(m_direct_queue.m_fence.Get(),
-                                                               m_direct_queue.m_monotonic_fence_value));
-        m_direct_queue.m_frame_fence_values[m_swapchain_backbuffer_index] = m_direct_queue.m_monotonic_fence_value;
-    }
-    else if (queue_type == QueueType::Copy)
-    {
-        ++m_copy_queue.m_monotonic_fence_value;
-        throw_if_failed(
-            m_copy_queue.m_command_queue->Signal(m_copy_queue.m_fence.Get(), m_copy_queue.m_monotonic_fence_value));
-    }
-}
-
-void Renderer::flush_gpu(const QueueType queue_type)
-{
-    signal_fence(queue_type);
-
-    if (queue_type == QueueType::Direct)
-    {
-        for (u32 i = 0; i < NUMBER_OF_BACKBUFFERS; i++)
-        {
-            m_direct_queue.m_frame_fence_values[i] = m_direct_queue.m_monotonic_fence_value;
-        }
-    }
-
-    wait_for_fence_value_at_index(m_swapchain_backbuffer_index);
-}
-
 IndexBuffer Renderer::create_index_buffer(const void *data, const size_t stride, const size_t indices_count)
 {
-    std::lock_guard<std::mutex> lock_guard(m_resource_mutex);
 
     // note(rtarun9) : Figure out how to handle these invalid cases.
     if (data == nullptr)
@@ -338,14 +304,8 @@ IndexBuffer Renderer::create_index_buffer(const void *data, const size_t stride,
         &default_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES, &buffer_resource_desc,
         D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&buffer_resource)));
 
-    {
-
-        CopyQueue::CommandAllocatorListPair allocator_list_pair = m_copy_queue.get_allocator_list_pair(m_device.Get());
-
-        allocator_list_pair.m_command_list->CopyResource(buffer_resource.Get(), intermediate_buffer_resource.Get());
-
-        m_copy_queue.submit_and_signal(std::move(allocator_list_pair));
-    }
+    std::lock_guard<std::mutex> lock_guard(m_resource_mutex);
+    m_copy_queue.m_command_list->CopyResource(buffer_resource.Get(), intermediate_buffer_resource.Get());
 
     const D3D12_INDEX_BUFFER_VIEW index_buffer_view = {
         .BufferLocation = buffer_resource->GetGPUVirtualAddress(),
@@ -365,8 +325,6 @@ IndexBuffer Renderer::create_index_buffer(const void *data, const size_t stride,
 
 StructuredBuffer Renderer::create_structured_buffer(const void *data, const size_t stride, const size_t num_elements)
 {
-    std::lock_guard<std::mutex> lock_guard(m_resource_mutex);
-
     // note(rtarun9) : Figure out how to handle these invalid cases.
     if (data == nullptr)
     {
@@ -429,13 +387,9 @@ StructuredBuffer Renderer::create_structured_buffer(const void *data, const size
     m_intermediate_resources.emplace_back(std::move(intermediate_buffer_resource));
     m_resources.emplace_back(std::move(buffer_resource));
 
-    {
-        CopyQueue::CommandAllocatorListPair allocator_list_pair = m_copy_queue.get_allocator_list_pair(m_device.Get());
-        allocator_list_pair.m_command_list->CopyResource(m_resources.back().Get(),
-                                                         m_intermediate_resources.back().Get());
+    std::lock_guard<std::mutex> lock_guard(m_resource_mutex);
 
-        m_copy_queue.submit_and_signal(std::move(allocator_list_pair));
-    }
+    m_copy_queue.m_command_list->CopyResource(m_resources.back().Get(), m_intermediate_resources.back().Get());
 
     // Create structured buffer view.
     size_t srv_index = create_shader_resource_view(m_resources.size() - 1u, stride, num_elements);
@@ -448,7 +402,6 @@ StructuredBuffer Renderer::create_structured_buffer(const void *data, const size
 
 ConstantBuffer Renderer::create_constant_buffer(const size_t size_in_bytes)
 {
-    std::lock_guard<std::mutex> lock_guard(m_resource_mutex);
 
     u8 *resource_ptr{};
     Microsoft::WRL::ComPtr<ID3D12Resource> buffer_resource{};
@@ -481,6 +434,8 @@ ConstantBuffer Renderer::create_constant_buffer(const size_t size_in_bytes)
     const D3D12_RANGE read_range{.Begin = 0u, .End = 0u};
 
     throw_if_failed(buffer_resource->Map(0u, &read_range, (void **)&resource_ptr));
+
+    std::lock_guard<std::mutex> lock_guard(m_resource_mutex);
 
     m_resources.emplace_back(std::move(buffer_resource));
 
@@ -538,58 +493,52 @@ size_t Renderer::create_shader_resource_view(const size_t buffer_resource_index,
     return srv_index;
 }
 
-void Renderer::execute_command_list(const QueueType queue_type) const
+void Renderer::CommandQueue::reset(const u8 index) const
 {
-    if (queue_type == QueueType::Direct)
-    {
-        throw_if_failed(m_direct_queue.m_command_list->Close());
+    const auto &allocator = m_command_allocators[index];
+    const auto &command_list = m_command_list;
 
-        ID3D12CommandList *const command_lists_to_execute[1] = {m_direct_queue.m_command_list.Get()};
-
-        m_direct_queue.m_command_queue->ExecuteCommandLists(1u, command_lists_to_execute);
-    }
-    else if (queue_type == QueueType::Copy)
-    {
-        // note(rtarun9) : Needs to be discussed if all functions need to be renamed to have _direct / _copy at the end,
-        // or better put ALL these functions into the DirectCommandQueue struct directly.
-    }
+    // Reset command allocator and command list.
+    throw_if_failed(allocator->Reset());
+    throw_if_failed(command_list->Reset(allocator.Get(), nullptr));
 }
 
-Renderer::CopyQueue::CommandAllocatorListPair Renderer::CopyQueue::get_allocator_list_pair(ID3D12Device *const device)
+void Renderer::CommandQueue::execute_command_list() const
 {
-    CommandAllocatorListPair allocator_list_pair{};
+    throw_if_failed(m_command_list->Close());
 
-    if (m_command_allocator_list_pair.empty())
+    ID3D12CommandList *const command_lists_to_execute[1] = {m_command_list.Get()};
+
+    m_command_queue->ExecuteCommandLists(1u, command_lists_to_execute);
+}
+
+void Renderer::CommandQueue::wait_for_fence_value_at_index(const u8 frame_fence_values_index)
+{
+    if (m_fence->GetCompletedValue() >= m_frame_fence_values[frame_fence_values_index])
     {
-        throw_if_failed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COPY,
-                                                       IID_PPV_ARGS(&allocator_list_pair.m_command_allocator)));
-
-        throw_if_failed(device->CreateCommandList(0u, D3D12_COMMAND_LIST_TYPE_COPY,
-                                                  allocator_list_pair.m_command_allocator.Get(), nullptr,
-                                                  IID_PPV_ARGS(&allocator_list_pair.m_command_list)));
+        return;
     }
     else
     {
-        allocator_list_pair = m_command_allocator_list_pair.front();
-
-        throw_if_failed(allocator_list_pair.m_command_allocator->Reset());
-        throw_if_failed(
-            allocator_list_pair.m_command_list->Reset(allocator_list_pair.m_command_allocator.Get(), nullptr));
-
-        m_command_allocator_list_pair.pop();
+        throw_if_failed(m_fence->SetEventOnCompletion(m_frame_fence_values[frame_fence_values_index], nullptr));
     }
-
-    return allocator_list_pair;
 }
 
-void Renderer::CopyQueue::submit_and_signal(Renderer::CopyQueue::CommandAllocatorListPair &&command_allocator_list_pair)
+// Whenever fence is being signalled, increment the monotonical frame fence value.
+void Renderer::CommandQueue::signal_fence(const u8 index)
 {
-    throw_if_failed(command_allocator_list_pair.m_command_list->Close());
-
-    ID3D12CommandList *const command_lists_to_execute[1] = {command_allocator_list_pair.m_command_list.Get()};
-
-    m_command_queue->ExecuteCommandLists(1u, command_lists_to_execute);
     throw_if_failed(m_command_queue->Signal(m_fence.Get(), ++m_monotonic_fence_value));
+    m_frame_fence_values[index] = m_monotonic_fence_value;
+}
 
-    m_command_allocator_list_pair.emplace(std::move(command_allocator_list_pair));
+void Renderer::CommandQueue::flush_queue()
+{
+    signal_fence(0);
+
+    for (u32 i = 0; i < NUMBER_OF_BACKBUFFERS; i++)
+    {
+        m_frame_fence_values[i] = m_monotonic_fence_value;
+    }
+
+    wait_for_fence_value_at_index(0);
 }

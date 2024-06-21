@@ -6,6 +6,7 @@ set (SRC_FILES
     "camera.cpp"
     "renderer.cpp"
     "shader_compiler.cpp"
+    "voxel.cpp"
 )
 
 set (HEADER_FILES
@@ -17,6 +18,7 @@ set (HEADER_FILES
     ${CMAKE_SOURCE_DIR}/include/voxel-engine/filesystem.hpp
     ${CMAKE_SOURCE_DIR}/include/voxel-engine/camera.hpp
     ${CMAKE_SOURCE_DIR}/include/voxel-engine/shader_compiler.hpp
+    ${CMAKE_SOURCE_DIR}/include/voxel-engine/voxel.hpp
 )
 
 add_executable(voxel-engine ${SRC_FILES} ${HEADER_FILES})

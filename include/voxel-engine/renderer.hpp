@@ -29,16 +29,6 @@ struct ConstantBuffer
     }
 };
 
-// note(rtarun9) : REALLY strange code is going on, because:
-// Copy command queue isn't really somthing the user has to manually control, its all handled automatically when buffers
-// are created. Direct queues have the exact opposite scenario, where the user has plenty of control on what to do.
-// The code will be cleaned up when async copy queue is fully implemented and working fine.
-enum class QueueType
-{
-    Direct,
-    Copy
-};
-
 // A simple & straight forward high level renderer abstraction.
 struct Renderer
 {
@@ -75,18 +65,6 @@ struct Renderer
     StructuredBuffer create_structured_buffer(const void *data, const size_t stride, const size_t num_elements);
     ConstantBuffer create_constant_buffer(const size_t size_in_bytes);
 
-    void execute_command_list(const QueueType queue_type) const;
-
-    // Sync functions.
-    // NOTE : This is only used by direct queue.
-    void wait_for_fence_value_at_index(const size_t frame_fence_values_index);
-
-    // Whenever fence is being signalled, increment the monotonical frame fence value.
-    // and update frame fence value.
-    void signal_fence(const QueueType queue_type);
-
-    void flush_gpu(const QueueType queue_type);
-
   private:
     // This function automatically offset's the current descriptor handle of descriptor heap.
     size_t create_constant_buffer_view(const size_t buffer_resource_index, const size_t size);
@@ -115,8 +93,20 @@ struct Renderer
     DescriptorHeap m_rtv_descriptor_heap{};
     DescriptorHeap m_dsv_descriptor_heap{};
 
-    struct DirectQueue
+    // NOTE : The reason the copy queue also has a array of allocators is because of the following reason :
+    // While a 'queue' of allocator / list can be used, execute command list is expensive and I would not prefer doing
+    // so many of those calls. Instead, with this approach (despite copy queue having nothing to do with frames in
+    // flight), sync and management becomes much easier. Note that despite using multiple command allocators, there is
+    // no CPU side block!!
+    struct CommandQueue
     {
+        void reset(const u8 index) const;
+
+        void execute_command_list() const;
+        void wait_for_fence_value_at_index(const u8 index);
+        void signal_fence(const u8 index);
+        void flush_queue();
+
         Microsoft::WRL::ComPtr<ID3D12CommandAllocator> m_command_allocators[NUMBER_OF_BACKBUFFERS];
         Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_command_queue{};
         Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_command_list{};
@@ -125,29 +115,9 @@ struct Renderer
         u64 m_monotonic_fence_value{};
         std::array<u64, NUMBER_OF_BACKBUFFERS> m_frame_fence_values{};
     };
-    DirectQueue m_direct_queue{};
 
-    // note(rtarun9) : See how the idea of a 'queue' of allocators and lists goes, and if its a bottleneck try doing
-    // something else instead (by some how making sure that before list is reset, no recording happens).
-    struct CopyQueue
-    {
-        struct CommandAllocatorListPair
-        {
-            Microsoft::WRL::ComPtr<ID3D12CommandAllocator> m_command_allocator{};
-            Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_command_list{};
-        };
-
-        CommandAllocatorListPair get_allocator_list_pair(ID3D12Device *const device);
-        void submit_and_signal(CommandAllocatorListPair &&command_allocator_list_pair);
-
-        std::queue<CommandAllocatorListPair> m_command_allocator_list_pair{};
-
-        Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_command_queue{};
-
-        Microsoft::WRL::ComPtr<ID3D12Fence> m_fence{};
-        u64 m_monotonic_fence_value{};
-    };
-    CopyQueue m_copy_queue{};
+    CommandQueue m_direct_queue{};
+    CommandQueue m_copy_queue{};
 
     u8 m_swapchain_backbuffer_index{};
 
