@@ -180,8 +180,8 @@ int main()
     };
 
     // Execute and flush gpu so resources required for rendering (before the first frame) are ready.
-    renderer.m_direct_queue.execute_command_list();
-    renderer.m_direct_queue.flush_queue();
+    renderer.m_copy_queue.execute_command_list(renderer.m_swapchain_backbuffer_index);
+    renderer.m_copy_queue.flush_queue();
 
     Camera camera{};
     Timer timer{};
@@ -192,10 +192,12 @@ int main()
     bool quit{false};
     while (!quit)
     {
+        renderer.m_copy_queue.reset(renderer.m_swapchain_backbuffer_index);
+
         if (frame_count == 0u)
         {
             // Test to check the async copy queue capabilities!
-            for (int i = 1; i < ChunkManager::NUMBER_OF_CHUNKS; i++)
+            for (int i = 0; i < 50; i++)
             {
                 chunk_manager.create_chunk(renderer, i);
             }
@@ -230,10 +232,9 @@ int main()
         const auto &swapchain_index = renderer.m_swapchain_backbuffer_index;
 
         // Reset command allocator and command list.
-        renderer.m_copy_queue.reset(swapchain_index);
         renderer.m_direct_queue.reset(swapchain_index);
 
-        const auto &command_list = renderer.m_direct_queue.m_command_list;
+        const auto &command_list = renderer.m_direct_queue.m_command_lists[swapchain_index];
 
         const auto &rtv_handle = renderer.m_swapchain_backbuffer_cpu_descriptor_handles[swapchain_index];
         const Microsoft::WRL::ComPtr<ID3D12Resource> swapchain_resource = renderer.m_resources[swapchain_index];
@@ -322,9 +323,9 @@ int main()
         command_list->ResourceBarrier(1u, &render_target_to_presentation_barrier);
 
         // Submit command list to queue for execution.
-        renderer.m_direct_queue.execute_command_list();
+        renderer.m_direct_queue.execute_command_list(swapchain_index);
 
-        renderer.m_copy_queue.execute_command_list();
+        renderer.m_copy_queue.execute_command_list(swapchain_index);
 
         // Now, present the rendertarget and signal command queue.
         throw_if_failed(renderer.m_swapchain->Present(1u, 0u));
@@ -336,6 +337,7 @@ int main()
         // Wait for the previous frame (that is presenting to swpachain_backbuffer_index) to complete execution.
         // NOTE : Do NOT do this for the copy queue if you want async copy.
         renderer.m_direct_queue.wait_for_fence_value_at_index(renderer.m_swapchain_backbuffer_index);
+        renderer.m_copy_queue.wait_for_fence_value_at_index(renderer.m_swapchain_backbuffer_index);
 
         ++frame_count;
 

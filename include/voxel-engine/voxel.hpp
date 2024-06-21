@@ -61,7 +61,7 @@ struct ChunkManager
 
     void move_to_loaded_chunks(const u64 current_copy_queue_fence_value);
 
-    static constexpr u32 NUMBER_OF_CHUNKS_PER_DIMENSION = 1;
+    static constexpr u32 NUMBER_OF_CHUNKS_PER_DIMENSION = 100;
     static constexpr size_t NUMBER_OF_CHUNKS =
         NUMBER_OF_CHUNKS_PER_DIMENSION * NUMBER_OF_CHUNKS_PER_DIMENSION * NUMBER_OF_CHUNKS_PER_DIMENSION;
 

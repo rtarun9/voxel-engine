@@ -102,14 +102,14 @@ struct Renderer
     {
         void reset(const u8 index) const;
 
-        void execute_command_list() const;
+        void execute_command_list(const u8 index) const;
         void wait_for_fence_value_at_index(const u8 index);
         void signal_fence(const u8 index);
         void flush_queue();
 
         Microsoft::WRL::ComPtr<ID3D12CommandAllocator> m_command_allocators[NUMBER_OF_BACKBUFFERS];
         Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_command_queue{};
-        Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_command_list{};
+        Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_command_lists[NUMBER_OF_BACKBUFFERS]{};
 
         Microsoft::WRL::ComPtr<ID3D12Fence> m_fence{};
         u64 m_monotonic_fence_value{};

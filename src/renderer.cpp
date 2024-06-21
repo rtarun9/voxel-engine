@@ -119,12 +119,11 @@ Renderer::Renderer(const HWND window_handle, const u16 window_width, const u16 w
         {
             throw_if_failed(m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,
                                                              IID_PPV_ARGS(&m_direct_queue.m_command_allocators[i])));
+            // Create the graphics command list.
+            throw_if_failed(m_device->CreateCommandList(0u, D3D12_COMMAND_LIST_TYPE_DIRECT,
+                                                        m_direct_queue.m_command_allocators[i].Get(), nullptr,
+                                                        IID_PPV_ARGS(&m_direct_queue.m_command_lists[i])));
         }
-
-        // Create the graphics command list.
-        throw_if_failed(m_device->CreateCommandList(0u, D3D12_COMMAND_LIST_TYPE_DIRECT,
-                                                    m_direct_queue.m_command_allocators[0].Get(), nullptr,
-                                                    IID_PPV_ARGS(&m_direct_queue.m_command_list)));
 
         // Create a fence for CPU GPU synchronization.
         throw_if_failed(m_device->CreateFence(0u, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_direct_queue.m_fence)));
@@ -147,12 +146,11 @@ Renderer::Renderer(const HWND window_handle, const u16 window_width, const u16 w
         {
             throw_if_failed(m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COPY,
                                                              IID_PPV_ARGS(&m_copy_queue.m_command_allocators[i])));
-        }
 
-        // Create the graphics command list.
-        throw_if_failed(m_device->CreateCommandList(0u, D3D12_COMMAND_LIST_TYPE_COPY,
-                                                    m_copy_queue.m_command_allocators[0].Get(), nullptr,
-                                                    IID_PPV_ARGS(&m_copy_queue.m_command_list)));
+            throw_if_failed(m_device->CreateCommandList(0u, D3D12_COMMAND_LIST_TYPE_COPY,
+                                                        m_copy_queue.m_command_allocators[i].Get(), nullptr,
+                                                        IID_PPV_ARGS(&m_copy_queue.m_command_lists[i])));
+        }
 
         // Create a fence for CPU GPU synchronization.
         throw_if_failed(m_device->CreateFence(0u, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_copy_queue.m_fence)));
@@ -176,7 +174,7 @@ Renderer::Renderer(const HWND window_handle, const u16 window_width, const u16 w
         const DXGI_SWAP_CHAIN_DESC1 swapchain_desc = {
             .Width = window_width,
             .Height = window_height,
-            .Format = DXGI_FORMAT_R10G10B10A2_UNORM,
+            .Format = BACKBUFFER_FORMAT,
             .Stereo = FALSE,
             .SampleDesc = {1, 0},
             .BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT,
@@ -305,7 +303,9 @@ IndexBuffer Renderer::create_index_buffer(const void *data, const size_t stride,
         D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&buffer_resource)));
 
     std::lock_guard<std::mutex> lock_guard(m_resource_mutex);
-    m_copy_queue.m_command_list->CopyResource(buffer_resource.Get(), intermediate_buffer_resource.Get());
+
+    m_copy_queue.m_command_lists[m_swapchain_backbuffer_index]->CopyResource(buffer_resource.Get(),
+                                                                             intermediate_buffer_resource.Get());
 
     const D3D12_INDEX_BUFFER_VIEW index_buffer_view = {
         .BufferLocation = buffer_resource->GetGPUVirtualAddress(),
@@ -325,6 +325,8 @@ IndexBuffer Renderer::create_index_buffer(const void *data, const size_t stride,
 
 StructuredBuffer Renderer::create_structured_buffer(const void *data, const size_t stride, const size_t num_elements)
 {
+    std::lock_guard<std::mutex> lock_guard(m_resource_mutex);
+
     // note(rtarun9) : Figure out how to handle these invalid cases.
     if (data == nullptr)
     {
@@ -387,9 +389,8 @@ StructuredBuffer Renderer::create_structured_buffer(const void *data, const size
     m_intermediate_resources.emplace_back(std::move(intermediate_buffer_resource));
     m_resources.emplace_back(std::move(buffer_resource));
 
-    std::lock_guard<std::mutex> lock_guard(m_resource_mutex);
-
-    m_copy_queue.m_command_list->CopyResource(m_resources.back().Get(), m_intermediate_resources.back().Get());
+    m_copy_queue.m_command_lists[m_swapchain_backbuffer_index]->CopyResource(m_resources.back().Get(),
+                                                                             m_intermediate_resources.back().Get());
 
     // Create structured buffer view.
     size_t srv_index = create_shader_resource_view(m_resources.size() - 1u, stride, num_elements);
@@ -496,18 +497,18 @@ size_t Renderer::create_shader_resource_view(const size_t buffer_resource_index,
 void Renderer::CommandQueue::reset(const u8 index) const
 {
     const auto &allocator = m_command_allocators[index];
-    const auto &command_list = m_command_list;
+    const auto &command_list = m_command_lists[index];
 
     // Reset command allocator and command list.
     throw_if_failed(allocator->Reset());
     throw_if_failed(command_list->Reset(allocator.Get(), nullptr));
 }
 
-void Renderer::CommandQueue::execute_command_list() const
+void Renderer::CommandQueue::execute_command_list(const u8 index) const
 {
-    throw_if_failed(m_command_list->Close());
+    throw_if_failed(m_command_lists[index]->Close());
 
-    ID3D12CommandList *const command_lists_to_execute[1] = {m_command_list.Get()};
+    ID3D12CommandList *const command_lists_to_execute[1] = {m_command_lists[index].Get()};
 
     m_command_queue->ExecuteCommandLists(1u, command_lists_to_execute);
 }
