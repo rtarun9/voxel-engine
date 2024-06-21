@@ -243,7 +243,6 @@ Renderer::Renderer(const HWND window_handle, const u16 window_width, const u16 w
 
 IndexBuffer Renderer::create_index_buffer(const void *data, const size_t stride, const size_t indices_count)
 {
-
     // note(rtarun9) : Figure out how to handle these invalid cases.
     if (data == nullptr)
     {
@@ -306,7 +305,7 @@ IndexBuffer Renderer::create_index_buffer(const void *data, const size_t stride,
     std::lock_guard<std::mutex> lock_guard(m_resource_mutex);
 
     std::unique_lock<std::mutex> ul(m_copy_queue.m_queue_lock);
-    m_copy_queue.m_cv.wait(ul, [&] { return m_copy_queue.m_is_command_list_closed; });
+    m_copy_queue.m_cv.wait(ul, [&] { return m_copy_queue.m_is_command_list_closed == true; });
 
     m_copy_queue.m_command_list->CopyResource(buffer_resource.Get(), intermediate_buffer_resource.Get());
 
@@ -328,8 +327,6 @@ IndexBuffer Renderer::create_index_buffer(const void *data, const size_t stride,
 
 StructuredBuffer Renderer::create_structured_buffer(const void *data, const size_t stride, const size_t num_elements)
 {
-    std::lock_guard<std::mutex> lock_guard(m_resource_mutex);
-
     // note(rtarun9) : Figure out how to handle these invalid cases.
     if (data == nullptr)
     {
@@ -389,8 +386,10 @@ StructuredBuffer Renderer::create_structured_buffer(const void *data, const size
         &default_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES, &buffer_resource_desc,
         D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&buffer_resource)));
 
+    std::lock_guard<std::mutex> lock_guard(m_resource_mutex);
+
     std::unique_lock<std::mutex> ul(m_copy_queue.m_queue_lock);
-    m_copy_queue.m_cv.wait(ul, [&] { return m_copy_queue.m_is_command_list_closed; });
+    m_copy_queue.m_cv.wait(ul, [&] { return m_copy_queue.m_is_command_list_closed == false; });
 
     m_intermediate_resources.emplace_back(std::move(intermediate_buffer_resource));
     m_resources.emplace_back(std::move(buffer_resource));
@@ -502,8 +501,6 @@ size_t Renderer::create_shader_resource_view(const size_t buffer_resource_index,
 void Renderer::CommandQueue::reset(const u8 index) const
 {
     std::unique_lock<std::mutex> ul(m_queue_lock);
-    m_is_command_list_closed = false;
-    m_cv.notify_one();
 
     const auto &allocator = m_command_allocators[index];
     const auto &command_list = m_command_list;
@@ -511,6 +508,9 @@ void Renderer::CommandQueue::reset(const u8 index) const
     // Reset command allocator and command list.
     throw_if_failed(allocator->Reset());
     throw_if_failed(command_list->Reset(allocator.Get(), nullptr));
+
+    m_is_command_list_closed = false;
+    m_cv.notify_one();
 }
 
 void Renderer::CommandQueue::execute_command_list() const

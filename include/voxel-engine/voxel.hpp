@@ -23,7 +23,7 @@ struct Chunk
 
     ~Chunk();
 
-    static constexpr u32 NUMBER_OF_VOXELS_PER_DIMENSION = 9u;
+    static constexpr u32 NUMBER_OF_VOXELS_PER_DIMENSION = 8u;
     static constexpr size_t NUMBER_OF_VOXELS =
         NUMBER_OF_VOXELS_PER_DIMENSION * NUMBER_OF_VOXELS_PER_DIMENSION * NUMBER_OF_VOXELS_PER_DIMENSION;
 
@@ -61,7 +61,7 @@ struct ChunkManager
 
     void move_to_loaded_chunks(const u64 current_copy_queue_fence_value);
 
-    static constexpr u32 NUMBER_OF_CHUNKS_PER_DIMENSION = 100;
+    static constexpr u32 NUMBER_OF_CHUNKS_PER_DIMENSION = 256;
     static constexpr size_t NUMBER_OF_CHUNKS =
         NUMBER_OF_CHUNKS_PER_DIMENSION * NUMBER_OF_CHUNKS_PER_DIMENSION * NUMBER_OF_CHUNKS_PER_DIMENSION;
 

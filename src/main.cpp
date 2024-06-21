@@ -183,24 +183,37 @@ int main()
     renderer.m_copy_queue.execute_command_list();
     renderer.m_copy_queue.flush_queue();
 
+    renderer.m_direct_queue.execute_command_list();
+    renderer.m_direct_queue.flush_queue();
+
     Camera camera{};
     Timer timer{};
     float delta_time = 0.0f;
 
     u64 frame_count = 0;
 
+    u64 chunk_starting_index_to_setup = 0;
+    u64 number_of_chunks_to_setup_per_frame = 10;
+
     bool quit{false};
     while (!quit)
     {
+        static bool setup_chunks = false;
+
         renderer.m_copy_queue.reset(renderer.m_swapchain_backbuffer_index);
 
-        if (frame_count == 0u)
+        // Test to check the async copy queue capabilities!
+        if (setup_chunks)
         {
-            // Test to check the async copy queue capabilities!
-            for (int i = 0; i < 50; i++)
+            for (int i = chunk_starting_index_to_setup;
+                 i < chunk_starting_index_to_setup + number_of_chunks_to_setup_per_frame &&
+                 i < ChunkManager::NUMBER_OF_CHUNKS;
+                 i++)
             {
                 chunk_manager.create_chunk(renderer, i);
             }
+
+            chunk_starting_index_to_setup += number_of_chunks_to_setup_per_frame;
         }
 
         timer.start();
@@ -302,6 +315,7 @@ int main()
         ImGui::Begin("Debug Controller");
         ImGui::SliderFloat("movement_speed", &camera.m_movement_speed, 0.0f, 10.0f);
         ImGui::SliderFloat("rotation_speed", &camera.m_rotation_speed, 0.0f, 10.0f);
+        ImGui::Checkbox("Start loading chunks", &setup_chunks);
         ImGui::End();
 
         ImGui::Render();
@@ -337,7 +351,6 @@ int main()
         // Wait for the previous frame (that is presenting to swpachain_backbuffer_index) to complete execution.
         // NOTE : Do NOT do this for the copy queue if you want async copy.
         renderer.m_direct_queue.wait_for_fence_value_at_index(renderer.m_swapchain_backbuffer_index);
-        renderer.m_copy_queue.wait_for_fence_value_at_index(renderer.m_swapchain_backbuffer_index);
 
         ++frame_count;
 
