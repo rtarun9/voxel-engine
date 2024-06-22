@@ -65,7 +65,7 @@ struct Renderer
 
   public:
     // Static globals.
-    static inline constexpr u8 NUMBER_OF_BACKBUFFERS = 2u;
+    static inline constexpr u8 NUMBER_OF_BACKBUFFERS = 3u;
     static inline constexpr DXGI_FORMAT BACKBUFFER_FORMAT = DXGI_FORMAT_R8G8B8A8_UNORM;
 
   public:
@@ -109,7 +109,7 @@ struct Renderer
         u64 m_monotonic_fence_value{};
         std::array<u64, NUMBER_OF_BACKBUFFERS> m_frame_fence_values{};
 
-        // NOTE : The below mutex should at ANY time be lockable by either a worker thread or the main thread.
+        // NOTE : The below mutex should at ANY time be lockable by either a single worker thread or the main thread.
         mutable std::mutex m_queue_lock{};
         mutable std::condition_variable m_cv{};
         mutable bool m_is_command_list_closed{false};

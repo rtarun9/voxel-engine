@@ -249,7 +249,7 @@ StructuredBuffer Renderer::create_structured_buffer(const void *data, const size
         &default_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES, &buffer_resource_desc,
         D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&buffer_resource)));
 
-    std::lock_guard<std::mutex> lock_guard(m_resource_mutex);
+    std::scoped_lock<std::mutex> scoped_lock(m_resource_mutex);
 
     std::unique_lock<std::mutex> ul(m_copy_queue.m_queue_lock);
     m_copy_queue.m_cv.wait(ul, [&] { return m_copy_queue.m_is_command_list_closed == false; });
@@ -303,7 +303,7 @@ ConstantBuffer Renderer::create_constant_buffer(const size_t size_in_bytes)
 
     throw_if_failed(buffer_resource->Map(0u, &read_range, (void **)&resource_ptr));
 
-    std::lock_guard<std::mutex> lock_guard(m_resource_mutex);
+    std::scoped_lock<std::mutex> scoped_lock(m_resource_mutex);
 
     m_resources.emplace_back(std::move(buffer_resource));
 

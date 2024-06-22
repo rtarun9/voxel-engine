@@ -61,7 +61,7 @@ struct ChunkManager
   public:
     void create_chunk(Renderer &renderer, const size_t index);
 
-    void transfer_chunks_from_setup_to_move_state(const u64 current_copy_queue_fence_value);
+    void transfer_chunks_from_setup_to_loaded_state(const u64 current_copy_queue_fence_value);
 
     static constexpr u32 NUMBER_OF_CHUNKS_PER_DIMENSION = 32u;
     static constexpr size_t NUMBER_OF_CHUNKS =
@@ -75,6 +75,11 @@ struct ChunkManager
     // (ii) The fence value is < the current copy queue fence value.
     // The setup chunks future queue consist of pairs of fence values , futures.
     std::queue<std::pair<u64, std::future<SetupChunkData>>> m_setup_chunk_futures_queue{};
+
+    // A hashmap to keep track of chunks that are currently in process of being setup.
+    // This is required in case create_chunk is called for a chunk that is being setup but not loaded. We do not want to
+    // load this chunk again.
+    std::unordered_map<size_t, size_t> m_chunk_indices_that_are_being_setup{};
 
     std::unordered_map<size_t, StructuredBuffer> m_chunk_position_buffers{};
     std::unordered_map<size_t, StructuredBuffer> m_chunk_color_buffers{};

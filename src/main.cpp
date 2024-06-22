@@ -201,6 +201,8 @@ int main()
     bool quit{false};
     while (!quit)
     {
+        renderer.m_copy_queue.reset(renderer.m_swapchain_backbuffer_index);
+
         // Get the player's current chunk index.
 
         const DirectX::XMUINT3 current_chunk_3d_index = {
@@ -217,8 +219,6 @@ int main()
             chunk_manager.create_chunk(renderer, current_chunk_index);
         }
 
-        renderer.m_copy_queue.reset(renderer.m_swapchain_backbuffer_index);
-
         timer.start();
 
         MSG message = {};
@@ -233,8 +233,7 @@ int main()
             quit = true;
         }
 
-        // See if any chunk has been setup, and is to be added to loaded chunks.
-        chunk_manager.transfer_chunks_from_setup_to_move_state(renderer.m_copy_queue.m_fence->GetCompletedValue());
+        chunk_manager.transfer_chunks_from_setup_to_loaded_state(renderer.m_copy_queue.m_fence->GetCompletedValue());
 
         const float window_aspect_ratio = static_cast<float>(window.get_width()) / window.get_height();
 
@@ -300,10 +299,8 @@ int main()
 
         command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-        for (size_t k = 0; k < chunk_manager.m_loaded_chunks.size(); k++)
+        for (const auto &[i, chunk] : chunk_manager.m_loaded_chunks)
         {
-            const size_t i = chunk_manager.m_loaded_chunks[k].m_chunk_index;
-
             const VoxelRenderResources render_resources = {
                 .position_buffer_index = static_cast<u32>(chunk_manager.m_chunk_position_buffers[i].srv_index),
                 .color_buffer_index = static_cast<u32>(chunk_manager.m_chunk_color_buffers[i].srv_index),
@@ -322,6 +319,7 @@ int main()
         ImGui::Checkbox("Start loading chunks", &setup_chunks);
         ImGui::Text("Camera Position : %f %f %f", camera.m_position.x, camera.m_position.y, camera.m_position.z);
         ImGui::Text("Current Index: %zu", current_chunk_index);
+        ImGui::ShowMetricsWindow();
         ImGui::End();
 
         ImGui::Render();

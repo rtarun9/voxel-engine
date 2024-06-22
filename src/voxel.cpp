@@ -202,17 +202,20 @@ ChunkManager::SetupChunkData ChunkManager::internal_mt_setup_chunk(Renderer &ren
 }
 void ChunkManager::create_chunk(Renderer &renderer, const size_t index)
 {
-    if (m_loaded_chunks.contains(index) || m_unloaded_chunks.contains(index))
+    if (m_loaded_chunks.contains(index) || m_unloaded_chunks.contains(index) ||
+        m_chunk_indices_that_are_being_setup.contains(index))
     {
         return;
     }
+
+    m_chunk_indices_that_are_being_setup[index] = index;
 
     m_setup_chunk_futures_queue.emplace(std::pair{
         renderer.m_copy_queue.m_monotonic_fence_value + 1,
         std::async(std::launch::async, &ChunkManager::internal_mt_setup_chunk, this, std::ref(renderer), index)});
 }
 
-void ChunkManager::transfer_chunks_from_setup_to_move_state(const u64 current_copy_queue_fence_value)
+void ChunkManager::transfer_chunks_from_setup_to_loaded_state(const u64 current_copy_queue_fence_value)
 {
     using namespace std::chrono_literals;
 
