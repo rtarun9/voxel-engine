@@ -23,7 +23,7 @@ struct Chunk
 
     ~Chunk();
 
-    static constexpr u32 NUMBER_OF_VOXELS_PER_DIMENSION = 32u;
+    static constexpr u32 NUMBER_OF_VOXELS_PER_DIMENSION = 16u;
     static constexpr size_t NUMBER_OF_VOXELS =
         NUMBER_OF_VOXELS_PER_DIMENSION * NUMBER_OF_VOXELS_PER_DIMENSION * NUMBER_OF_VOXELS_PER_DIMENSION;
 
@@ -63,12 +63,14 @@ struct ChunkManager
 
     void transfer_chunks_from_setup_to_loaded_state(const u64 current_copy_queue_fence_value);
 
-    static constexpr u32 NUMBER_OF_CHUNKS_PER_DIMENSION = 256u;
+    static constexpr u32 NUMBER_OF_CHUNKS_PER_DIMENSION = 1024u;
     static constexpr size_t NUMBER_OF_CHUNKS =
         NUMBER_OF_CHUNKS_PER_DIMENSION * NUMBER_OF_CHUNKS_PER_DIMENSION * NUMBER_OF_CHUNKS_PER_DIMENSION;
 
     // Determines how many chunks are loaded around the player.
-    static constexpr u32 CHUNK_RENDER_DISTANCE = 3u;
+    static constexpr u32 CHUNK_RENDER_DISTANCE = 8u;
+
+    static constexpr u32 NUMBER_OF_CHUNKS_TO_LOAD_PER_FRAME = 4u;
 
     std::unordered_map<size_t, Chunk> m_loaded_chunks{};
     std::unordered_map<size_t, Chunk> m_unloaded_chunks{};

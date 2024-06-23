@@ -102,107 +102,54 @@ struct Renderer
     std::mutex m_resource_mutex{};
 
     // Command queue abstraction that holds the queue, allocators, command list and sync primitives.
-    // The template parameter is used to determine how many allocators are created.
-    template <size_t T> struct CommandQueue
+    // Each queue type has its own struct since they operate in different ways (copy queue is async and requires thread
+    // sync primitives, while the direct queue is not for now).
+    struct DirectCommandQueue
     {
-        std::array<Microsoft::WRL::ComPtr<ID3D12CommandAllocator>, T> m_command_allocators{};
+        std::array<Microsoft::WRL::ComPtr<ID3D12CommandAllocator>, NUMBER_OF_BACKBUFFERS> m_command_allocators{};
         Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_command_queue{};
         Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_command_list{};
 
         Microsoft::WRL::ComPtr<ID3D12Fence> m_fence{};
         u64 m_monotonic_fence_value{};
-        std::array<u64, T> m_frame_fence_values{};
+        std::array<u64, NUMBER_OF_BACKBUFFERS> m_frame_fence_values{};
 
-        // NOTE : The below mutex should at ANY time be lockable by either a single worker thread or the main thread.
-        mutable std::mutex m_queue_lock{};
-        mutable std::condition_variable m_cv{};
-        mutable bool m_is_command_list_closed{false};
-        void create(ID3D12Device *const device, const D3D12_COMMAND_LIST_TYPE command_type)
-        {
+        void create(ID3D12Device *const device);
 
-            const D3D12_COMMAND_QUEUE_DESC command_queue_desc = {
-                .Type = command_type,
-                .Priority = D3D12_COMMAND_QUEUE_PRIORITY_NORMAL,
-                .Flags = D3D12_COMMAND_QUEUE_FLAG_NONE,
-                .NodeMask = 0u,
-            };
-            throw_if_failed(device->CreateCommandQueue(&command_queue_desc, IID_PPV_ARGS(&m_command_queue)));
+        void reset(const u8 index) const;
+        void execute_command_list() const;
+        void wait_for_fence_value_at_index(const u8 index);
+        void signal_fence(const u8 index);
 
-            // Create the command allocator (the underlying allocation where gpu commands will be stored after being
-            // recorded by command list). Each frame has its own command allocator.
-            for (u8 i = 0; i < T; i++)
-            {
-                throw_if_failed(device->CreateCommandAllocator(command_type, IID_PPV_ARGS(&m_command_allocators[i])));
-            }
-
-            // Create the graphics command list.
-            throw_if_failed(device->CreateCommandList(0u, command_type, m_command_allocators[0].Get(), nullptr,
-                                                      IID_PPV_ARGS(&m_command_list)));
-
-            // Create a fence for CPU GPU synchronization.
-            throw_if_failed(device->CreateFence(0u, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence)));
-        }
-
-        void reset(const u8 index) const
-        {
-
-            std::unique_lock<std::mutex> ul(m_queue_lock);
-
-            const auto &allocator = m_command_allocators[index];
-            const auto &command_list = m_command_list;
-
-            // Reset command allocator and command list.
-            throw_if_failed(allocator->Reset());
-            throw_if_failed(command_list->Reset(allocator.Get(), nullptr));
-
-            m_is_command_list_closed = false;
-            m_cv.notify_one();
-        }
-
-        void execute_command_list() const
-        {
-            std::unique_lock<std::mutex> ul(m_queue_lock);
-            m_is_command_list_closed = true;
-
-            throw_if_failed(m_command_list->Close());
-
-            ID3D12CommandList *const command_lists_to_execute[1] = {m_command_list.Get()};
-
-            m_command_queue->ExecuteCommandLists(1u, command_lists_to_execute);
-        }
-
-        void wait_for_fence_value_at_index(const u8 index)
-        {
-            if (m_fence->GetCompletedValue() >= m_frame_fence_values[index])
-            {
-                return;
-            }
-            else
-            {
-                throw_if_failed(m_fence->SetEventOnCompletion(m_frame_fence_values[index], nullptr));
-            }
-        }
-
-        void signal_fence(const u8 index)
-        {
-            throw_if_failed(m_command_queue->Signal(m_fence.Get(), ++m_monotonic_fence_value));
-            m_frame_fence_values[index] = m_monotonic_fence_value;
-        }
-
-        void flush_queue()
-        {
-
-            signal_fence(0);
-
-            for (u32 i = 0; i < T; i++)
-            {
-                m_frame_fence_values[i] = m_monotonic_fence_value;
-            }
-
-            wait_for_fence_value_at_index(0);
-        }
+        void flush_queue();
     };
 
-    CommandQueue<NUMBER_OF_BACKBUFFERS> m_direct_queue{};
-    CommandQueue<COPY_QUEUE_RING_BUFFER_SIZE> m_copy_queue{};
+    struct CopyCommandQueue
+    {
+        struct CommandAllocatorListPair
+        {
+            Microsoft::WRL::ComPtr<ID3D12CommandAllocator> m_command_allocator{};
+            Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_command_list{};
+            u64 m_fence_value{};
+        };
+
+        std::queue<CommandAllocatorListPair> m_command_allocator_list_queue{};
+        Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_command_queue{};
+
+        Microsoft::WRL::ComPtr<ID3D12Fence> m_fence{};
+        u64 m_monotonic_fence_value{};
+
+        void create(ID3D12Device *const device);
+
+        // If there is a allocator / list pair that has completed execution, return it. Else, create a new one.
+        CommandAllocatorListPair get_command_allocator_list_pair(ID3D12Device *const device);
+
+        // Execute command list and move the allocator list pair back to the queue.
+        void execute_command_list(CommandAllocatorListPair &&alloc_list_pair);
+
+        void flush_queue();
+    };
+
+    DirectCommandQueue m_direct_queue{};
+    CopyCommandQueue m_copy_queue{};
 };

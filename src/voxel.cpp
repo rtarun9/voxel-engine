@@ -210,16 +210,17 @@ void ChunkManager::create_chunk(Renderer &renderer, const size_t index)
 
     m_chunk_indices_that_are_being_setup[index] = index;
 
-    m_setup_chunk_futures_queue.emplace(std::pair{
-        renderer.m_copy_queue.m_monotonic_fence_value + 1,
-        std::async(std::launch::async, &ChunkManager::internal_mt_setup_chunk, this, std::ref(renderer), index)});
+    m_setup_chunk_futures_queue.emplace(
+        std::pair{renderer.m_copy_queue.m_monotonic_fence_value + 1,
+                  std::async(&ChunkManager::internal_mt_setup_chunk, this, std::ref(renderer), index)});
 }
 
 void ChunkManager::transfer_chunks_from_setup_to_loaded_state(const u64 current_copy_queue_fence_value)
 {
     using namespace std::chrono_literals;
 
-    while (!m_setup_chunk_futures_queue.empty())
+    u64 chunks_loaded = 0u;
+    while (!m_setup_chunk_futures_queue.empty() && chunks_loaded < ChunkManager::NUMBER_OF_CHUNKS_TO_LOAD_PER_FRAME)
     {
         auto &setup_chunk_data = m_setup_chunk_futures_queue.front();
         if (!setup_chunk_data.second.valid())
@@ -261,5 +262,7 @@ void ChunkManager::transfer_chunks_from_setup_to_loaded_state(const u64 current_
         }
         break;
         }
+
+        ++chunks_loaded;
     }
 }

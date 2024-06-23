@@ -130,7 +130,7 @@ int main()
         .SampleMask = 0xffff'ffff,
         .RasterizerState =
             {
-                .FillMode = D3D12_FILL_MODE_SOLID,
+                .FillMode = D3D12_FILL_MODE_WIREFRAME,
                 .CullMode = D3D12_CULL_MODE_BACK,
                 .FrontCounterClockwise = FALSE,
             },
@@ -180,7 +180,6 @@ int main()
     };
 
     // Execute and flush gpu so resources required for rendering (before the first frame) are ready.
-    renderer.m_copy_queue.execute_command_list();
     renderer.m_copy_queue.flush_queue();
 
     renderer.m_direct_queue.execute_command_list();
@@ -221,14 +220,6 @@ int main()
     bool quit{false};
     while (!quit)
     {
-        const u8 copy_queue_frame_index = frame_count % Renderer::COPY_QUEUE_RING_BUFFER_SIZE;
-        if (copy_queue_frame_index == Renderer::COPY_QUEUE_RING_BUFFER_SIZE - 1)
-        {
-            renderer.m_copy_queue.wait_for_fence_value_at_index(copy_queue_frame_index);
-        }
-
-        renderer.m_copy_queue.reset(copy_queue_frame_index);
-
         // Get the player's current chunk index.
 
         const DirectX::XMUINT3 current_chunk_3d_index = {
@@ -240,12 +231,10 @@ int main()
         const u64 current_chunk_index =
             convert_to_1d(current_chunk_3d_index, ChunkManager::NUMBER_OF_CHUNKS_PER_DIMENSION);
 
-        chunk_manager.create_chunk(renderer, current_chunk_index);
-
         if (setup_chunks)
         {
-            // Load chunks around the player (ChunkManager::CHUNK_RENDER_DISTANCE) determines how many of these chunks
-            // to load.
+            // Load chunks around the player (ChunkManager::CHUNK_RENDER_DISTANCE) determines how many of these
+            // chunks to load.
             for (const auto &offset : chunk_render_distance_offsets)
             {
                 const DirectX::XMUINT3 chunk_3d_index = {
@@ -254,8 +243,8 @@ int main()
                     current_chunk_3d_index.z + offset.z,
                 };
 
-                // chunk_manager.create_chunk(renderer,
-                // convert_to_1d(chunk_3d_index, ChunkManager::NUMBER_OF_CHUNKS_PER_DIMENSION));
+                chunk_manager.create_chunk(renderer,
+                                           convert_to_1d(chunk_3d_index, ChunkManager::NUMBER_OF_CHUNKS_PER_DIMENSION));
             }
         }
 
@@ -359,6 +348,9 @@ int main()
         ImGui::Checkbox("Start loading chunks", &setup_chunks);
         ImGui::Text("Camera Position : %f %f %f", camera.m_position.x, camera.m_position.y, camera.m_position.z);
         ImGui::Text("Current Index: %zu", current_chunk_index);
+        ImGui::Text("Number of copy alloc / list pairs : %zu",
+                    renderer.m_copy_queue.m_command_allocator_list_queue.size());
+
         ImGui::ShowMetricsWindow();
         ImGui::End();
 
@@ -383,12 +375,9 @@ int main()
         // Submit command list to queue for execution.
         renderer.m_direct_queue.execute_command_list();
 
-        renderer.m_copy_queue.execute_command_list();
-
         // Now, present the rendertarget and signal command queue.
         throw_if_failed(renderer.m_swapchain->Present(1u, 0u));
         renderer.m_direct_queue.signal_fence(renderer.m_swapchain_backbuffer_index);
-        renderer.m_copy_queue.signal_fence(copy_queue_frame_index);
 
         renderer.m_swapchain_backbuffer_index = static_cast<u8>(renderer.m_swapchain->GetCurrentBackBufferIndex());
 
