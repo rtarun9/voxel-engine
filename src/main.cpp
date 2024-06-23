@@ -186,9 +186,29 @@ int main()
     renderer.m_direct_queue.execute_command_list();
     renderer.m_direct_queue.flush_queue();
 
+    // Precompute the offset to a chunk index X, using which we can load chunks within the CHUNK_RENDER_DISTANCE volume
+    // around the player at any given moment.
+    // For precomputation, X is assumed to be zero. These values will be added to the current chunk index.
+    // NOTE : The current player chunk is loaded first, then the chunks 1 distance away, then 2 distance away, etc.
+    std::vector<DirectX::XMINT3> chunk_render_distance_offsets = {};
+    for (i32 z = -1 * ChunkManager::CHUNK_RENDER_DISTANCE; z <= (i32)ChunkManager::CHUNK_RENDER_DISTANCE; z++)
+    {
+        for (i32 y = -ChunkManager::CHUNK_RENDER_DISTANCE; y <= (i32)ChunkManager::CHUNK_RENDER_DISTANCE; y++)
+        {
+            for (i32 x = -ChunkManager::CHUNK_RENDER_DISTANCE; x <= (i32)ChunkManager::CHUNK_RENDER_DISTANCE; x++)
+            {
+                if ((z == -ChunkManager::CHUNK_RENDER_DISTANCE || z == ChunkManager::CHUNK_RENDER_DISTANCE) ||
+                    (y == -ChunkManager::CHUNK_RENDER_DISTANCE || y == ChunkManager::CHUNK_RENDER_DISTANCE) ||
+                    (x == -ChunkManager::CHUNK_RENDER_DISTANCE || x == ChunkManager::CHUNK_RENDER_DISTANCE))
+                {
+                    chunk_render_distance_offsets.emplace_back(DirectX::XMINT3{x, 0, z});
+                }
+            }
+        }
+    }
+
     Camera camera{};
     const u64 chunk_grid_middle = Chunk::CHUNK_LENGTH * ChunkManager::NUMBER_OF_CHUNKS_PER_DIMENSION / 2u;
-
     camera.m_position = {chunk_grid_middle, chunk_grid_middle, chunk_grid_middle};
 
     Timer timer{};
@@ -201,7 +221,13 @@ int main()
     bool quit{false};
     while (!quit)
     {
-        renderer.m_copy_queue.reset(renderer.m_swapchain_backbuffer_index);
+        const u8 copy_queue_frame_index = frame_count % Renderer::COPY_QUEUE_RING_BUFFER_SIZE;
+        if (copy_queue_frame_index == Renderer::COPY_QUEUE_RING_BUFFER_SIZE - 1)
+        {
+            renderer.m_copy_queue.wait_for_fence_value_at_index(copy_queue_frame_index);
+        }
+
+        renderer.m_copy_queue.reset(copy_queue_frame_index);
 
         // Get the player's current chunk index.
 
@@ -214,9 +240,23 @@ int main()
         const u64 current_chunk_index =
             convert_to_1d(current_chunk_3d_index, ChunkManager::NUMBER_OF_CHUNKS_PER_DIMENSION);
 
+        chunk_manager.create_chunk(renderer, current_chunk_index);
+
         if (setup_chunks)
         {
-            chunk_manager.create_chunk(renderer, current_chunk_index);
+            // Load chunks around the player (ChunkManager::CHUNK_RENDER_DISTANCE) determines how many of these chunks
+            // to load.
+            for (const auto &offset : chunk_render_distance_offsets)
+            {
+                const DirectX::XMUINT3 chunk_3d_index = {
+                    current_chunk_3d_index.x + offset.x,
+                    current_chunk_3d_index.y + offset.y,
+                    current_chunk_3d_index.z + offset.z,
+                };
+
+                // chunk_manager.create_chunk(renderer,
+                // convert_to_1d(chunk_3d_index, ChunkManager::NUMBER_OF_CHUNKS_PER_DIMENSION));
+            }
         }
 
         timer.start();
@@ -348,12 +388,11 @@ int main()
         // Now, present the rendertarget and signal command queue.
         throw_if_failed(renderer.m_swapchain->Present(1u, 0u));
         renderer.m_direct_queue.signal_fence(renderer.m_swapchain_backbuffer_index);
-        renderer.m_copy_queue.signal_fence(renderer.m_swapchain_backbuffer_index);
+        renderer.m_copy_queue.signal_fence(copy_queue_frame_index);
 
         renderer.m_swapchain_backbuffer_index = static_cast<u8>(renderer.m_swapchain->GetCurrentBackBufferIndex());
 
         // Wait for the previous frame (that is presenting to swpachain_backbuffer_index) to complete execution.
-        // NOTE : Do NOT do this for the copy queue if you want async copy.
         renderer.m_direct_queue.wait_for_fence_value_at_index(renderer.m_swapchain_backbuffer_index);
 
         ++frame_count;
