@@ -130,7 +130,7 @@ int main()
         .SampleMask = 0xffff'ffff,
         .RasterizerState =
             {
-                .FillMode = D3D12_FILL_MODE_WIREFRAME,
+                .FillMode = D3D12_FILL_MODE_SOLID,
                 .CullMode = D3D12_CULL_MODE_BACK,
                 .FrontCounterClockwise = FALSE,
             },
@@ -243,10 +243,12 @@ int main()
                     current_chunk_3d_index.z + offset.z,
                 };
 
-                chunk_manager.create_chunk(renderer,
-                                           convert_to_1d(chunk_3d_index, ChunkManager::NUMBER_OF_CHUNKS_PER_DIMENSION));
+                chunk_manager.add_chunk_to_setup_stack(
+                    convert_to_1d(chunk_3d_index, ChunkManager::NUMBER_OF_CHUNKS_PER_DIMENSION));
             }
         }
+
+        chunk_manager.create_chunks_from_setup_stack(renderer);
 
         timer.start();
 

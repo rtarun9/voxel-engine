@@ -7,7 +7,7 @@
 // position' and has a edge length as specified in the class below.
 struct Voxel
 {
-    static constexpr float EDGE_LENGTH{1.0f};
+    static constexpr float EDGE_LENGTH{16.0f};
     bool m_active{true};
 };
 
@@ -23,7 +23,7 @@ struct Chunk
 
     ~Chunk();
 
-    static constexpr u32 NUMBER_OF_VOXELS_PER_DIMENSION = 16u;
+    static constexpr u32 NUMBER_OF_VOXELS_PER_DIMENSION = 6u;
     static constexpr size_t NUMBER_OF_VOXELS =
         NUMBER_OF_VOXELS_PER_DIMENSION * NUMBER_OF_VOXELS_PER_DIMENSION * NUMBER_OF_VOXELS_PER_DIMENSION;
 
@@ -59,7 +59,9 @@ struct ChunkManager
     SetupChunkData internal_mt_setup_chunk(Renderer &renderer, const size_t index);
 
   public:
-    void create_chunk(Renderer &renderer, const size_t index);
+    // note(rtarun9) : These names are temporary, find more suitable names.
+    void add_chunk_to_setup_stack(const u64 chunk_index);
+    void create_chunks_from_setup_stack(Renderer &renderer);
 
     void transfer_chunks_from_setup_to_loaded_state(const u64 current_copy_queue_fence_value);
 
@@ -70,7 +72,8 @@ struct ChunkManager
     // Determines how many chunks are loaded around the player.
     static constexpr u32 CHUNK_RENDER_DISTANCE = 8u;
 
-    static constexpr u32 NUMBER_OF_CHUNKS_TO_LOAD_PER_FRAME = 4u;
+    static constexpr u32 NUMBER_OF_CHUNKS_TO_CREATE_PER_FRAME = 16u;
+    static constexpr u32 NUMBER_OF_CHUNKS_TO_LOAD_PER_FRAME = 32u;
 
     std::unordered_map<size_t, Chunk> m_loaded_chunks{};
     std::unordered_map<size_t, Chunk> m_unloaded_chunks{};
@@ -80,6 +83,11 @@ struct ChunkManager
     // (ii) The fence value is < the current copy queue fence value.
     // The setup chunks future queue consist of pairs of fence values , futures.
     std::queue<std::pair<u64, std::future<SetupChunkData>>> m_setup_chunk_futures_queue{};
+
+    // Why is there also a stack?
+    // Use the stack to store chunk indices that at any given point in time are close to the player.
+    // Then, each from from this stack, add elements into the queue.
+    std::stack<u64> m_chunks_to_setup_stack{};
 
     // A hashmap to keep track of chunks that are currently in process of being setup.
     // This is required in case create_chunk is called for a chunk that is being setup but not loaded. We do not want to
