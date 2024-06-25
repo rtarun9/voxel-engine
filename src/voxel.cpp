@@ -1,5 +1,7 @@
 #include "voxel-engine/voxel.hpp"
 
+#include "shaders/interop/render_resources.hlsli"
+
 Chunk::Chunk()
 {
     m_voxels = new Voxel[NUMBER_OF_VOXELS];
@@ -46,19 +48,11 @@ ChunkManager::SetupChunkData ChunkManager::internal_mt_setup_chunk(Renderer &ren
         DirectX::XMFLOAT3(Voxel::EDGE_LENGTH, 0.0f, Voxel::EDGE_LENGTH),
     };
 
-    const DirectX::XMUINT3 chunk_index_3d = convert_to_3d(index, ChunkManager::NUMBER_OF_CHUNKS_PER_DIMENSION);
-
-    const DirectX::XMFLOAT3 chunk_offset =
-        DirectX::XMFLOAT3(chunk_index_3d.x * Voxel::EDGE_LENGTH * Chunk::NUMBER_OF_VOXELS_PER_DIMENSION,
-                          chunk_index_3d.y * Voxel::EDGE_LENGTH * Chunk::NUMBER_OF_VOXELS_PER_DIMENSION,
-                          chunk_index_3d.z * Voxel::EDGE_LENGTH * Chunk::NUMBER_OF_VOXELS_PER_DIMENSION);
-
     for (size_t i = 0; i < Chunk::NUMBER_OF_VOXELS; i++)
     {
         const DirectX::XMUINT3 index_3d = convert_to_3d(i, Chunk::NUMBER_OF_VOXELS_PER_DIMENSION);
-        const DirectX::XMFLOAT3 offset = DirectX::XMFLOAT3(index_3d.x * Voxel::EDGE_LENGTH + chunk_offset.x,
-                                                           index_3d.y * Voxel::EDGE_LENGTH + chunk_offset.y,
-                                                           index_3d.z * Voxel::EDGE_LENGTH + chunk_offset.z);
+        const DirectX::XMFLOAT3 offset = DirectX::XMFLOAT3(
+            index_3d.x * Voxel::EDGE_LENGTH, index_3d.y * Voxel::EDGE_LENGTH, index_3d.z * Voxel::EDGE_LENGTH);
 
         // Check if there is a voxel that blocks the front face of current voxel.
         {
@@ -192,9 +186,14 @@ ChunkManager::SetupChunkData ChunkManager::internal_mt_setup_chunk(Renderer &ren
     {
         setup_chunk_data.m_chunk_position_buffer =
             renderer.create_structured_buffer((void *)setup_chunk_data.m_chunk_position_data.data(),
-                                              sizeof(DirectX::XMFLOAT3), setup_chunk_data.m_chunk_position_data.size());
-        setup_chunk_data.m_chunk_color_buffer = renderer.create_structured_buffer(
-            (void *)&setup_chunk_data.m_chunk_color_data, sizeof(DirectX::XMFLOAT3), 1u);
+                                              sizeof(DirectX::XMFLOAT3), setup_chunk_data.m_chunk_position_data.size(),
+                                              std::wstring(L"Chunk position buffer : ") + std::to_wstring(index));
+        setup_chunk_data.m_chunk_color_buffer =
+            renderer.create_structured_buffer((void *)&setup_chunk_data.m_chunk_color_data, sizeof(DirectX::XMFLOAT3),
+                                              1u, std::wstring(L"Chunk color buffer : ") + std::to_wstring(index));
+
+        setup_chunk_data.m_chunk_constant_buffer = renderer.create_constant_buffer(
+            sizeof(ChunkConstantBuffer), std::wstring(L"Chunk constant buffer : ") + std::to_wstring(index));
     }
 
     setup_chunk_data.m_chunk.m_chunk_index = index;
@@ -262,6 +261,20 @@ void ChunkManager::transfer_chunks_from_setup_to_loaded_state(const u64 current_
                 m_chunk_position_buffers[chunk_index] = std::move(chunk_to_load.m_chunk_position_buffer);
 
                 m_chunk_color_buffers[chunk_index] = std::move(chunk_to_load.m_chunk_color_buffer);
+
+                m_chunk_constant_buffers[chunk_index] = std::move(chunk_to_load.m_chunk_constant_buffer);
+
+                const DirectX::XMUINT3 chunk_index_3d =
+                    convert_to_3d(chunk_index, ChunkManager::NUMBER_OF_CHUNKS_PER_DIMENSION);
+
+                const DirectX::XMFLOAT3 chunk_offset =
+                    DirectX::XMFLOAT3(chunk_index_3d.x * Voxel::EDGE_LENGTH * Chunk::NUMBER_OF_VOXELS_PER_DIMENSION,
+                                      chunk_index_3d.y * Voxel::EDGE_LENGTH * Chunk::NUMBER_OF_VOXELS_PER_DIMENSION,
+                                      chunk_index_3d.z * Voxel::EDGE_LENGTH * Chunk::NUMBER_OF_VOXELS_PER_DIMENSION);
+
+                const DirectX::XMMATRIX chunk_model_matrix =
+                    DirectX::XMMatrixTranslation(chunk_offset.x, chunk_offset.y, chunk_offset.z);
+                m_chunk_constant_buffers[chunk_index].update(&chunk_model_matrix);
 
                 m_chunk_number_of_vertices[chunk_index] = num_vertices;
 

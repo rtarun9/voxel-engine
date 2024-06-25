@@ -31,3 +31,11 @@ static inline DirectX::XMUINT3 convert_to_3d(const size_t index, const size_t N)
 
     return {x, y, z};
 }
+
+static inline void name_d3d12_object(ID3D12Object *const object, const std::wstring_view name)
+{
+    if constexpr (VX_DEBUG_MODE)
+    {
+        object->SetName(std::wstring(name).c_str());
+    }
+}

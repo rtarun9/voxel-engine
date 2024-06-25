@@ -44,7 +44,8 @@ int main()
     ChunkManager chunk_manager{};
 
     SceneConstantBuffer scene_buffer_data{};
-    ConstantBuffer scene_buffer = renderer.create_constant_buffer(sizeof(SceneConstantBuffer));
+    ConstantBuffer scene_buffer =
+        renderer.create_constant_buffer(sizeof(SceneConstantBuffer), L"Scene constant buffer");
 
     // Compile the vertex and pixel shader.
     Microsoft::WRL::ComPtr<IDxcBlob> vertex_shader_blob = ShaderCompiler::compile(
@@ -207,8 +208,8 @@ int main()
     }
 
     Camera camera{};
-    const u64 chunk_grid_middle = Chunk::CHUNK_LENGTH * ChunkManager::NUMBER_OF_CHUNKS_PER_DIMENSION / 2u;
-    camera.m_position = {chunk_grid_middle, chunk_grid_middle, chunk_grid_middle};
+    // const u64 chunk_grid_middle = Chunk::CHUNK_LENGTH * ChunkManager::NUMBER_OF_CHUNKS_PER_DIMENSION / 2u;
+    // camera.m_position = {chunk_grid_middle, chunk_grid_middle, chunk_grid_middle};
 
     Timer timer{};
     float delta_time = 0.0f;
@@ -264,13 +265,14 @@ int main()
             quit = true;
         }
 
-        chunk_manager.transfer_chunks_from_setup_to_loaded_state(renderer.m_copy_queue.m_fence->GetCompletedValue());
+        chunk_manager.transfer_chunks_from_setup_to_loaded_state(renderer.m_copy_queue.m_fence->GetCompletedValue() +
+                                                                 1u);
 
         const float window_aspect_ratio = static_cast<float>(window.get_width()) / window.get_height();
 
         const DirectX::XMMATRIX view_projection_matrix =
             camera.update_and_get_view_matrix(delta_time) *
-            DirectX::XMMatrixPerspectiveFovLH(DirectX::XMConvertToRadians(45.0f), window_aspect_ratio, 0.1f, 1000.0f);
+            DirectX::XMMatrixPerspectiveFovLH(DirectX::XMConvertToRadians(45.0f), window_aspect_ratio, 0.1f, 100.0f);
         scene_buffer_data.view_projection_matrix = view_projection_matrix;
 
         scene_buffer.update(&scene_buffer_data);
@@ -335,6 +337,7 @@ int main()
             const VoxelRenderResources render_resources = {
                 .position_buffer_index = static_cast<u32>(chunk_manager.m_chunk_position_buffers[i].srv_index),
                 .color_buffer_index = static_cast<u32>(chunk_manager.m_chunk_color_buffers[i].srv_index),
+                .chunk_constant_buffer_index = static_cast<u32>(chunk_manager.m_chunk_constant_buffers[i].cbv_index),
                 .chunk_index = static_cast<u32>(i),
                 .scene_constant_buffer_index = static_cast<u32>(scene_buffer.cbv_index),
             };

@@ -7,7 +7,7 @@
 // position' and has a edge length as specified in the class below.
 struct Voxel
 {
-    static constexpr float EDGE_LENGTH{16.0f};
+    static constexpr float EDGE_LENGTH{4.0f};
     bool m_active{true};
 };
 
@@ -23,7 +23,7 @@ struct Chunk
 
     ~Chunk();
 
-    static constexpr u32 NUMBER_OF_VOXELS_PER_DIMENSION = 6u;
+    static constexpr u32 NUMBER_OF_VOXELS_PER_DIMENSION = 16u;
     static constexpr size_t NUMBER_OF_VOXELS =
         NUMBER_OF_VOXELS_PER_DIMENSION * NUMBER_OF_VOXELS_PER_DIMENSION * NUMBER_OF_VOXELS_PER_DIMENSION;
 
@@ -49,6 +49,7 @@ struct ChunkManager
 
         StructuredBuffer m_chunk_position_buffer{};
         StructuredBuffer m_chunk_color_buffer{};
+        ConstantBuffer m_chunk_constant_buffer{};
 
         std::vector<DirectX::XMFLOAT3> m_chunk_position_data{};
         DirectX::XMFLOAT3 m_chunk_color_data{};
@@ -65,7 +66,7 @@ struct ChunkManager
 
     void transfer_chunks_from_setup_to_loaded_state(const u64 current_copy_queue_fence_value);
 
-    static constexpr u32 NUMBER_OF_CHUNKS_PER_DIMENSION = 1024u;
+    static constexpr u32 NUMBER_OF_CHUNKS_PER_DIMENSION = 12u;
     static constexpr size_t NUMBER_OF_CHUNKS =
         NUMBER_OF_CHUNKS_PER_DIMENSION * NUMBER_OF_CHUNKS_PER_DIMENSION * NUMBER_OF_CHUNKS_PER_DIMENSION;
 
@@ -96,5 +97,7 @@ struct ChunkManager
 
     std::unordered_map<size_t, StructuredBuffer> m_chunk_position_buffers{};
     std::unordered_map<size_t, StructuredBuffer> m_chunk_color_buffers{};
+    std::unordered_map<size_t, ConstantBuffer> m_chunk_constant_buffers{};
+
     std::unordered_map<size_t, size_t> m_chunk_number_of_vertices{};
 };

@@ -188,7 +188,8 @@ Renderer::Renderer(const HWND window_handle, const u16 window_width, const u16 w
                                                   IID_PPV_ARGS(&m_bindless_root_signature)));
 }
 
-StructuredBuffer Renderer::create_structured_buffer(const void *data, const size_t stride, const size_t num_elements)
+StructuredBuffer Renderer::create_structured_buffer(const void *data, const size_t stride, const size_t num_elements,
+                                                    const std::wstring_view buffer_name)
 {
     // note(rtarun9) : Figure out how to handle these invalid cases.
     if (data == nullptr)
@@ -254,6 +255,9 @@ StructuredBuffer Renderer::create_structured_buffer(const void *data, const size
     m_intermediate_resources.emplace_back(std::move(intermediate_buffer_resource));
     m_resources.emplace_back(std::move(buffer_resource));
 
+    name_d3d12_object(m_resources.back().Get(), buffer_name);
+    name_d3d12_object(m_intermediate_resources.back().Get(), buffer_name);
+
     auto command_allocator_list_pair = m_copy_queue.get_command_allocator_list_pair(m_device.Get());
 
     command_allocator_list_pair.m_command_list->CopyResource(m_resources.back().Get(),
@@ -269,7 +273,7 @@ StructuredBuffer Renderer::create_structured_buffer(const void *data, const size
     };
 }
 
-ConstantBuffer Renderer::create_constant_buffer(const size_t size_in_bytes)
+ConstantBuffer Renderer::create_constant_buffer(const size_t size_in_bytes, const std::wstring_view buffer_name)
 {
 
     u8 *resource_ptr{};
@@ -307,6 +311,7 @@ ConstantBuffer Renderer::create_constant_buffer(const size_t size_in_bytes)
     std::scoped_lock<std::mutex> scoped_lock(m_resource_mutex);
 
     m_resources.emplace_back(std::move(buffer_resource));
+    name_d3d12_object(m_resources.back().Get(), buffer_name);
 
     // Create Constant buffer view.
     size_t cbv_index = create_constant_buffer_view(m_resources.size() - 1u, size_in_bytes);

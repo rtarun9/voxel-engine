@@ -54,8 +54,9 @@ struct Renderer
     explicit Renderer(const HWND window_handle, const u16 window_width, const u16 window_height);
 
     // Resource creation functions.
-    StructuredBuffer create_structured_buffer(const void *data, const size_t stride, const size_t num_elements);
-    ConstantBuffer create_constant_buffer(const size_t size_in_bytes);
+    StructuredBuffer create_structured_buffer(const void *data, const size_t stride, const size_t num_elements,
+                                              const std::wstring_view buffer_name);
+    ConstantBuffer create_constant_buffer(const size_t size_in_bytes, const std::wstring_view buffer_name);
 
   private:
     // This function automatically offset's the current descriptor handle of descriptor heap.

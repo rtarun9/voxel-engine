@@ -15,9 +15,12 @@ VSOutput vs_main(uint vertex_id : SV_VertexID)
 
     ConstantBuffer<SceneConstantBuffer> scene_buffer =
         ResourceDescriptorHeap[render_resources.scene_constant_buffer_index];
+    ConstantBuffer<ChunkConstantBuffer> chunk_constant_buffer =
+        ResourceDescriptorHeap[render_resources.chunk_constant_buffer_index];
 
     VSOutput output;
-    output.position = mul(float4(position_buffer[vertex_id], 1.0f), scene_buffer.view_projection_matrix);
+    output.position = mul(mul(float4(position_buffer[vertex_id], 1.0f), chunk_constant_buffer.model_matrix),
+                          scene_buffer.view_projection_matrix);
     output.color = float4(color_buffer[0], 1.0f);
 
     return output;
