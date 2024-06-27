@@ -56,6 +56,8 @@ void Renderer::DescriptorHeap::create(ID3D12Device *const device, const size_t n
         current_gpu_descriptor_handle = descriptor_heap->GetGPUDescriptorHandleForHeapStart();
     }
 
+    current_descriptor_handle_index = 0u;
+
     descriptor_handle_size = device->GetDescriptorHandleIncrementSize(descriptor_heap_type);
 }
 
@@ -66,6 +68,11 @@ Renderer::Renderer(const HWND window_handle, const u16 window_width, const u16 w
     {
         throw_if_failed(D3D12GetDebugInterface(IID_PPV_ARGS(&m_debug_device)));
         m_debug_device->EnableDebugLayer();
+
+        Microsoft::WRL::ComPtr<ID3D12Debug1> debug_1{};
+        throw_if_failed(m_debug_device->QueryInterface(IID_PPV_ARGS(&debug_1)));
+        debug_1->SetEnableGPUBasedValidation(TRUE);
+        debug_1->SetEnableSynchronizedCommandQueueValidation(TRUE);
     }
 
     // Create the DXGI Factory so we get access to DXGI objects (like adapters).
@@ -87,7 +94,7 @@ Renderer::Renderer(const HWND window_handle, const u16 window_width, const u16 w
     printf("Selected adapter desc :: %ls.\n", adapter_desc.Description);
 
     // Create the d3d12 device (logical adapter : All d3d objects require d3d12 device for creation).
-    throw_if_failed(D3D12CreateDevice(m_dxgi_adapter.Get(), D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&m_device)));
+    throw_if_failed(D3D12CreateDevice(m_dxgi_adapter.Get(), D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&m_device)));
 
     // In debug mode, setup the info queue so breakpoint is placed whenever a error / warning occurs that is d3d
     // related.
@@ -106,23 +113,20 @@ Renderer::Renderer(const HWND window_handle, const u16 window_width, const u16 w
     m_copy_queue.create(m_device.Get());
 
     // Create descriptor heaps.
-    m_cbv_srv_uav_descriptor_heap = DescriptorHeap{};
     m_cbv_srv_uav_descriptor_heap.create(m_device.Get(), D3D12_MAX_SHADER_VISIBLE_DESCRIPTOR_HEAP_SIZE_TIER_1,
                                          D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
                                          D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
 
-    m_rtv_descriptor_heap = DescriptorHeap{};
     m_rtv_descriptor_heap.create(m_device.Get(), 10u, D3D12_DESCRIPTOR_HEAP_TYPE_RTV, D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
 
-    m_dsv_descriptor_heap = DescriptorHeap{};
     m_dsv_descriptor_heap.create(m_device.Get(), 1u, D3D12_DESCRIPTOR_HEAP_TYPE_DSV, D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
 
     // Create the dxgi swapchain.
     {
         Microsoft::WRL::ComPtr<IDXGISwapChain1> swapchain_1{};
         const DXGI_SWAP_CHAIN_DESC1 swapchain_desc = {
-            .Width = window_width,
-            .Height = window_height,
+            .Width = static_cast<UINT>(window_width),
+            .Height = static_cast<UINT>(window_height),
             .Format = BACKBUFFER_FORMAT,
             .Stereo = FALSE,
             .SampleDesc = {1, 0},
@@ -256,7 +260,8 @@ StructuredBuffer Renderer::create_structured_buffer(const void *data, const size
     m_resources.emplace_back(std::move(buffer_resource));
 
     name_d3d12_object(m_resources.back().Get(), buffer_name);
-    name_d3d12_object(m_intermediate_resources.back().Get(), buffer_name);
+    name_d3d12_object(m_intermediate_resources.back().Get(),
+                      std::wstring(buffer_name) + std::wstring(L" [intermediate]"));
 
     auto command_allocator_list_pair = m_copy_queue.get_command_allocator_list_pair(m_device.Get());
 
@@ -275,7 +280,6 @@ StructuredBuffer Renderer::create_structured_buffer(const void *data, const size
 
 ConstantBuffer Renderer::create_constant_buffer(const size_t size_in_bytes, const std::wstring_view buffer_name)
 {
-
     u8 *resource_ptr{};
     Microsoft::WRL::ComPtr<ID3D12Resource> buffer_resource{};
 
@@ -289,6 +293,7 @@ ConstantBuffer Renderer::create_constant_buffer(const size_t size_in_bytes, cons
 
     const D3D12_RESOURCE_DESC buffer_resource_desc = {
         .Dimension = D3D12_RESOURCE_DIMENSION_BUFFER,
+        .Alignment = 0u,
         .Width = size_in_bytes,
         .Height = 1u,
         .DepthOrArraySize = 1u,
@@ -505,5 +510,5 @@ void Renderer::CopyCommandQueue::execute_command_list(CommandAllocatorListPair &
 void Renderer::CopyCommandQueue::flush_queue()
 {
     throw_if_failed(m_command_queue->Signal(m_fence.Get(), ++m_monotonic_fence_value));
-    m_fence->SetEventOnCompletion(m_monotonic_fence_value, nullptr);
+    throw_if_failed(m_fence->SetEventOnCompletion(m_monotonic_fence_value, nullptr));
 }

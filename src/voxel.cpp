@@ -259,9 +259,7 @@ void ChunkManager::transfer_chunks_from_setup_to_loaded_state(const u64 current_
                 m_loaded_chunks[chunk_index] = std::move(chunk_to_load.m_chunk);
 
                 m_chunk_position_buffers[chunk_index] = std::move(chunk_to_load.m_chunk_position_buffer);
-
                 m_chunk_color_buffers[chunk_index] = std::move(chunk_to_load.m_chunk_color_buffer);
-
                 m_chunk_constant_buffers[chunk_index] = std::move(chunk_to_load.m_chunk_constant_buffer);
 
                 const DirectX::XMUINT3 chunk_index_3d =
@@ -279,6 +277,8 @@ void ChunkManager::transfer_chunks_from_setup_to_loaded_state(const u64 current_
                 m_chunk_number_of_vertices[chunk_index] = num_vertices;
 
                 m_setup_chunk_futures_queue.pop();
+
+                m_chunk_indices_that_are_being_setup.erase(chunk_index);
             }
             else
             {

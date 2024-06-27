@@ -27,13 +27,13 @@ struct TriangleRenderResources
 ConstantBufferStruct
 SceneConstantBuffer
 {
-    row_major float4x4 view_projection_matrix;
+    float4x4 view_projection_matrix;
 };
 
 ConstantBufferStruct
 ChunkConstantBuffer
 {
-    row_major float4x4 model_matrix;
+    float4x4 model_matrix;
 };
 
 struct VoxelRenderResources

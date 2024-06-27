@@ -14,8 +14,6 @@
 
 int main()
 {
-    printf("Executable path :: %s\n", FileSystem::instance().executable_path().c_str());
-
     const Window window{};
     Renderer renderer(window.get_handle(), window.get_width(), window.get_height());
 
@@ -75,9 +73,10 @@ int main()
         .CreationNodeMask = 0u,
         .VisibleNodeMask = 0u,
     };
+
     const D3D12_CLEAR_VALUE depth_buffer_optimized_clear_value = {
         .Format = DXGI_FORMAT_D32_FLOAT,
-        .DepthStencil = {.Depth = 1.0f, .Stencil = 1u},
+        .DepthStencil = {.Depth = 0.0f, .Stencil = 0u},
     };
 
     throw_if_failed(renderer.m_device->CreateCommittedResource(
@@ -124,6 +123,7 @@ int main()
                 .RenderTarget =
                     {
                         D3D12_RENDER_TARGET_BLEND_DESC{
+                            .BlendEnable = FALSE,
                             .RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL,
                         },
                     },
@@ -134,12 +134,13 @@ int main()
                 .FillMode = D3D12_FILL_MODE_SOLID,
                 .CullMode = D3D12_CULL_MODE_BACK,
                 .FrontCounterClockwise = FALSE,
+                .DepthClipEnable = TRUE,
             },
         .DepthStencilState =
             {
                 .DepthEnable = TRUE,
                 .DepthWriteMask = D3D12_DEPTH_WRITE_MASK::D3D12_DEPTH_WRITE_MASK_ALL,
-                .DepthFunc = D3D12_COMPARISON_FUNC_LESS,
+                .DepthFunc = D3D12_COMPARISON_FUNC_GREATER,
                 .StencilEnable = FALSE,
             },
         .InputLayout =
@@ -201,15 +202,15 @@ int main()
                     (y == -ChunkManager::CHUNK_RENDER_DISTANCE || y == ChunkManager::CHUNK_RENDER_DISTANCE) ||
                     (x == -ChunkManager::CHUNK_RENDER_DISTANCE || x == ChunkManager::CHUNK_RENDER_DISTANCE))
                 {
-                    chunk_render_distance_offsets.emplace_back(DirectX::XMINT3{x, 0, z});
+                    chunk_render_distance_offsets.emplace_back(DirectX::XMINT3{x, y, z});
                 }
             }
         }
     }
 
     Camera camera{};
-    // const u64 chunk_grid_middle = Chunk::CHUNK_LENGTH * ChunkManager::NUMBER_OF_CHUNKS_PER_DIMENSION / 2u;
-    // camera.m_position = {chunk_grid_middle, chunk_grid_middle, chunk_grid_middle};
+    const u64 chunk_grid_middle = Chunk::CHUNK_LENGTH * ChunkManager::NUMBER_OF_CHUNKS_PER_DIMENSION / 2u;
+    camera.m_position = {chunk_grid_middle, chunk_grid_middle, chunk_grid_middle};
 
     Timer timer{};
     float delta_time = 0.0f;
@@ -221,6 +222,9 @@ int main()
     bool quit{false};
     while (!quit)
     {
+        static float near_plane = 1.0f;
+        static float far_plane = 1000.0f;
+
         // Get the player's current chunk index.
 
         const DirectX::XMUINT3 current_chunk_3d_index = {
@@ -265,14 +269,19 @@ int main()
             quit = true;
         }
 
-        chunk_manager.transfer_chunks_from_setup_to_loaded_state(renderer.m_copy_queue.m_fence->GetCompletedValue() +
-                                                                 1u);
+        chunk_manager.transfer_chunks_from_setup_to_loaded_state(renderer.m_copy_queue.m_fence->GetCompletedValue());
 
         const float window_aspect_ratio = static_cast<float>(window.get_width()) / window.get_height();
 
+        // Article followed for reverse Z:
+        //  https://iolite-engine.com/blog_posts/reverse_z_cheatsheet
+
+        const DirectX::XMMATRIX projection_matrix = DirectX::XMMatrixPerspectiveFovLH(
+            DirectX::XMConvertToRadians(45.0f), window_aspect_ratio, far_plane, near_plane);
+
         const DirectX::XMMATRIX view_projection_matrix =
-            camera.update_and_get_view_matrix(delta_time) *
-            DirectX::XMMatrixPerspectiveFovLH(DirectX::XMConvertToRadians(45.0f), window_aspect_ratio, 0.1f, 100.0f);
+            camera.update_and_get_view_matrix(delta_time) * projection_matrix;
+
         scene_buffer_data.view_projection_matrix = view_projection_matrix;
 
         scene_buffer.update(&scene_buffer_data);
@@ -306,19 +315,13 @@ int main()
         // Now, clear the RTV and DSV.
         const float clear_color[4] = {0.0f, 0.0f, 0.0f, 1.0f};
         command_list->ClearRenderTargetView(rtv_handle, clear_color, 0u, nullptr);
-        command_list->ClearDepthStencilView(dsv_handle, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 1u, 0u,
-                                            nullptr);
-
-        command_list->OMSetRenderTargets(1u, &rtv_handle, FALSE, &dsv_handle);
+        command_list->ClearDepthStencilView(dsv_handle, D3D12_CLEAR_FLAG_DEPTH, 0.0f, 0u, 0u, nullptr);
 
         // Set viewport.
         command_list->RSSetViewports(1u, &viewport);
         command_list->RSSetScissorRects(1u, &scissor_rect);
 
-        // Start the Dear ImGui frame
-        ImGui_ImplDX12_NewFrame();
-        ImGui_ImplWin32_NewFrame();
-        ImGui::NewFrame();
+        command_list->OMSetRenderTargets(1u, &rtv_handle, FALSE, &dsv_handle);
 
         ID3D12DescriptorHeap *const *shader_visible_descriptor_heaps = {
             renderer.m_cbv_srv_uav_descriptor_heap.descriptor_heap.GetAddressOf(),
@@ -347,9 +350,16 @@ int main()
         }
 
         // Render UI.
+        // Start the Dear ImGui frame
+        ImGui_ImplDX12_NewFrame();
+        ImGui_ImplWin32_NewFrame();
+        ImGui::NewFrame();
+
         ImGui::Begin("Debug Controller");
         ImGui::SliderFloat("movement_speed", &camera.m_movement_speed, 0.0f, 500.0f);
         ImGui::SliderFloat("rotation_speed", &camera.m_rotation_speed, 0.0f, 10.0f);
+        ImGui::SliderFloat("near plane", &near_plane, 0.1f, 1.0f);
+        ImGui::SliderFloat("Far plane", &far_plane, 10.0f, 100000.0f);
         ImGui::Checkbox("Start loading chunks", &setup_chunks);
         ImGui::Text("Camera Position : %f %f %f", camera.m_position.x, camera.m_position.y, camera.m_position.z);
         ImGui::Text("Current Index: %zu", current_chunk_index);
@@ -386,7 +396,8 @@ int main()
 
         renderer.m_swapchain_backbuffer_index = static_cast<u8>(renderer.m_swapchain->GetCurrentBackBufferIndex());
 
-        // Wait for the previous frame (that is presenting to swpachain_backbuffer_index) to complete execution.
+        // Wait for the previous frame (that is presenting to
+        // swpachain_backbuffer_index) to complete execution.
         renderer.m_direct_queue.wait_for_fence_value_at_index(renderer.m_swapchain_backbuffer_index);
 
         ++frame_count;

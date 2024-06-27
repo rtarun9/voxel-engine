@@ -7,7 +7,7 @@
 // position' and has a edge length as specified in the class below.
 struct Voxel
 {
-    static constexpr float EDGE_LENGTH{4.0f};
+    static constexpr float EDGE_LENGTH{1.0f};
     bool m_active{true};
 };
 
@@ -66,7 +66,7 @@ struct ChunkManager
 
     void transfer_chunks_from_setup_to_loaded_state(const u64 current_copy_queue_fence_value);
 
-    static constexpr u32 NUMBER_OF_CHUNKS_PER_DIMENSION = 12u;
+    static constexpr u32 NUMBER_OF_CHUNKS_PER_DIMENSION = 512u;
     static constexpr size_t NUMBER_OF_CHUNKS =
         NUMBER_OF_CHUNKS_PER_DIMENSION * NUMBER_OF_CHUNKS_PER_DIMENSION * NUMBER_OF_CHUNKS_PER_DIMENSION;
 
