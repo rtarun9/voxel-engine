@@ -22,6 +22,20 @@ struct ConstantBuffer
     }
 };
 
+// The command buffer is a bit different. It internally has two resources, a default and upload heap.
+// the update function is not similar to constant buffer, as here data is copied from the upload to default resource.
+struct CommandBuffer
+{
+    size_t default_resource_index{};
+    size_t upload_resource_index{};
+
+    u8 *upload_resource_mapped_ptr{};
+
+    // note(rtarun9) : Interesting chose to pass the resource into this functionn, but only for POC :(
+    void update(ID3D12GraphicsCommandList *const command_list, const void *data, ID3D12Resource *const default_resource,
+                ID3D12Resource *const upload_resource, const size_t size) const;
+};
+
 // A simple & straight forward high level renderer abstraction.
 struct Renderer
 {
@@ -57,6 +71,7 @@ struct Renderer
     StructuredBuffer create_structured_buffer(const void *data, const size_t stride, const size_t num_elements,
                                               const std::wstring_view buffer_name);
     ConstantBuffer create_constant_buffer(const size_t size_in_bytes, const std::wstring_view buffer_name);
+    CommandBuffer create_command_buffer(const size_t size_in_bytes, const std::wstring_view buffer_name);
 
   private:
     // This function automatically offset's the current descriptor handle of descriptor heap.

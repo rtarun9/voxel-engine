@@ -329,6 +329,73 @@ ConstantBuffer Renderer::create_constant_buffer(const size_t size_in_bytes, cons
     };
 }
 
+CommandBuffer Renderer::create_command_buffer(const size_t size_in_bytes, const std::wstring_view buffer_name)
+{
+    u8 *resource_ptr{};
+    Microsoft::WRL::ComPtr<ID3D12Resource> buffer_resource{};
+    Microsoft::WRL::ComPtr<ID3D12Resource> intermediate_buffer_resource{};
+
+    // First, create a upload buffer (that is placed in memory accesible by both GPU and CPU).
+    // Then create a GPU only buffer, and copy data from the previous buffer to GPU only one.
+    const D3D12_HEAP_PROPERTIES upload_heap_properties = {
+        .Type = D3D12_HEAP_TYPE_UPLOAD,
+        .CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+        .MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN,
+        .CreationNodeMask = 0u,
+        .VisibleNodeMask = 0u,
+    };
+
+    const D3D12_RESOURCE_DESC buffer_resource_desc = {
+        .Dimension = D3D12_RESOURCE_DIMENSION_BUFFER,
+        .Width = size_in_bytes,
+        .Height = 1u,
+        .DepthOrArraySize = 1u,
+        .MipLevels = 1u,
+        .Format = DXGI_FORMAT_UNKNOWN,
+        .SampleDesc = {1u, 0u},
+        .Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
+        .Flags = D3D12_RESOURCE_FLAG_NONE,
+    };
+
+    throw_if_failed(m_device->CreateCommittedResource(
+        &upload_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES, &buffer_resource_desc,
+        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, nullptr, IID_PPV_ARGS(&intermediate_buffer_resource)));
+
+    // Now that a resource is created, copy CPU data to this upload buffer.
+    const D3D12_RANGE read_range{.Begin = 0u, .End = 0u};
+
+    throw_if_failed(intermediate_buffer_resource->Map(0u, &read_range, (void **)&resource_ptr));
+
+    // Create the final resource and transfer the data from upload buffer to the final buffer.
+    // The heap type is : Default (no CPU access).
+    const D3D12_HEAP_PROPERTIES default_heap_properties = {
+        .Type = D3D12_HEAP_TYPE_DEFAULT,
+        .CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+        .MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN,
+        .CreationNodeMask = 0u,
+        .VisibleNodeMask = 0u,
+    };
+
+    throw_if_failed(m_device->CreateCommittedResource(
+        &default_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES, &buffer_resource_desc,
+        D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&buffer_resource)));
+
+    std::scoped_lock<std::mutex> scoped_lock(m_resource_mutex);
+
+    m_intermediate_resources.emplace_back(std::move(intermediate_buffer_resource));
+    m_resources.emplace_back(std::move(buffer_resource));
+
+    name_d3d12_object(m_resources.back().Get(), buffer_name);
+    name_d3d12_object(m_intermediate_resources.back().Get(),
+                      std::wstring(buffer_name) + std::wstring(L" [intermediate]"));
+
+    return CommandBuffer{
+        .default_resource_index = m_resources.size() - 1u,
+        .upload_resource_index = m_intermediate_resources.size() - 1u,
+        .upload_resource_mapped_ptr = resource_ptr,
+    };
+}
+
 size_t Renderer::create_constant_buffer_view(const size_t buffer_resource_index, const size_t size)
 {
     const D3D12_CPU_DESCRIPTOR_HANDLE handle = m_cbv_srv_uav_descriptor_heap.current_cpu_descriptor_handle;
@@ -511,4 +578,42 @@ void Renderer::CopyCommandQueue::flush_queue()
 {
     throw_if_failed(m_command_queue->Signal(m_fence.Get(), ++m_monotonic_fence_value));
     throw_if_failed(m_fence->SetEventOnCompletion(m_monotonic_fence_value, nullptr));
+}
+
+void CommandBuffer::update(ID3D12GraphicsCommandList *const command_list, const void *data,
+                           ID3D12Resource *const default_resource, ID3D12Resource *const upload_resource,
+                           const size_t size) const
+{
+    memcpy(upload_resource_mapped_ptr, data, size);
+
+    const D3D12_RESOURCE_BARRIER indirect_argument_to_copy_dest_state = {
+        .Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
+        .Flags = D3D12_RESOURCE_BARRIER_FLAGS::D3D12_RESOURCE_BARRIER_FLAG_NONE,
+        .Transition =
+            D3D12_RESOURCE_TRANSITION_BARRIER{
+                .pResource = default_resource,
+                .Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+                .StateBefore = D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT,
+                .StateAfter = D3D12_RESOURCE_STATE_COPY_DEST,
+            },
+    };
+
+    command_list->ResourceBarrier(1u, &indirect_argument_to_copy_dest_state);
+
+    // NOTE : The copy queue is NOT used here since the direct queue depends on this data.
+    command_list->CopyResource(default_resource, upload_resource);
+
+    const D3D12_RESOURCE_BARRIER copy_dest_to_indirect_argument_state = {
+        .Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
+        .Flags = D3D12_RESOURCE_BARRIER_FLAGS::D3D12_RESOURCE_BARRIER_FLAG_NONE,
+        .Transition =
+            D3D12_RESOURCE_TRANSITION_BARRIER{
+                .pResource = default_resource,
+                .Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+                .StateBefore = D3D12_RESOURCE_STATE_COPY_DEST,
+                .StateAfter = D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT,
+            },
+    };
+
+    command_list->ResourceBarrier(1u, &copy_dest_to_indirect_argument_state);
 }

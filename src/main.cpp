@@ -200,11 +200,11 @@ int main()
         &command_signature_desc, renderer.m_bindless_root_signature.Get(), IID_PPV_ARGS(&command_signature)));
 
     // Command buffer that will be used to store the indirect command args.
-    static constexpr size_t MAX_CHUNKS_TO_BE_DRAWN = 1'00'000;
+    static constexpr size_t MAX_CHUNKS_TO_BE_DRAWN = 10'00'000;
     std::vector<IndirectCommand> indirect_command_vector{};
 
-    ConstantBuffer indirect_command_constant_buffer = renderer.create_constant_buffer(
-        sizeof(IndirectCommand) * MAX_CHUNKS_TO_BE_DRAWN, L"Indirect command constant buffer");
+    CommandBuffer indirect_command_buffer =
+        renderer.create_command_buffer(sizeof(IndirectCommand) * MAX_CHUNKS_TO_BE_DRAWN, L"Indirect Command Buffer");
 
     // Create viewport and scissor.
     const D3D12_VIEWPORT viewport = {
@@ -266,7 +266,7 @@ int main()
     while (!quit)
     {
         static float near_plane = 1.0f;
-        static float far_plane = 1000.0f;
+        static float far_plane = 1000000.0f;
 
         // Get the player's current chunk index.
 
@@ -401,11 +401,19 @@ int main()
             });
         }
 
-        // Copy the indirect commands to the GPU side buffer.
-        indirect_command_constant_buffer.update(indirect_command_vector.data());
-        command_list->ExecuteIndirect(command_signature.Get(), indirect_command_vector.size(),
-                                      renderer.m_resources[indirect_command_constant_buffer.resource_index].Get(), 0u,
-                                      nullptr, 0u);
+        if (!indirect_command_vector.empty())
+        {
+            // Copy the indirect commands to the GPU side buffer.
+            indirect_command_buffer.update(
+                command_list.Get(), indirect_command_vector.data(),
+                renderer.m_resources[indirect_command_buffer.default_resource_index].Get(),
+                renderer.m_intermediate_resources[indirect_command_buffer.upload_resource_index].Get(),
+                indirect_command_vector.size() * sizeof(IndirectCommand));
+
+            command_list->ExecuteIndirect(command_signature.Get(), indirect_command_vector.size(),
+                                          renderer.m_resources[indirect_command_buffer.default_resource_index].Get(),
+                                          0u, nullptr, 0u);
+        }
 
         // Render UI.
         // Start the Dear ImGui frame
@@ -414,7 +422,7 @@ int main()
         ImGui::NewFrame();
 
         ImGui::Begin("Debug Controller");
-        ImGui::SliderFloat("movement_speed", &camera.m_movement_speed, 0.0f, 500.0f);
+        ImGui::SliderFloat("movement_speed", &camera.m_movement_speed, 0.0f, 50000.0f);
         ImGui::SliderFloat("rotation_speed", &camera.m_rotation_speed, 0.0f, 10.0f);
         ImGui::SliderFloat("near plane", &near_plane, 0.1f, 1.0f);
         ImGui::SliderFloat("Far plane", &far_plane, 10.0f, 100000.0f);
