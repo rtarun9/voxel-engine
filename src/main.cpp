@@ -163,6 +163,49 @@ int main()
     };
     throw_if_failed(renderer.m_device->CreateGraphicsPipelineState(&graphics_pso_desc, IID_PPV_ARGS(&pso)));
 
+    // Indirect command struct : command signature must match this struct.
+    // Each chunk will have its own IndirectCommand, with 2 arguments. The render resources struct root constants and a
+    // draw call.
+    struct IndirectCommand
+    {
+        VoxelRenderResources render_resources{};
+        D3D12_DRAW_ARGUMENTS draw_arguments{};
+    };
+
+    // Create the command signature, which tells the GPU how to interpret the data passed in the ExecuteIndirect call.
+    const std::array<D3D12_INDIRECT_ARGUMENT_DESC, 2u> argument_descs = {
+        D3D12_INDIRECT_ARGUMENT_DESC{
+            .Type = D3D12_INDIRECT_ARGUMENT_TYPE_CONSTANT,
+            .Constant =
+                {
+                    .RootParameterIndex = 0u,
+                    .DestOffsetIn32BitValues = 0u,
+                    .Num32BitValuesToSet = sizeof(VoxelRenderResources) / sizeof(u32),
+                },
+        },
+        D3D12_INDIRECT_ARGUMENT_DESC{
+            .Type = D3D12_INDIRECT_ARGUMENT_TYPE_DRAW,
+        },
+    };
+
+    Microsoft::WRL::ComPtr<ID3D12CommandSignature> command_signature{};
+    const D3D12_COMMAND_SIGNATURE_DESC command_signature_desc = {
+        .ByteStride = sizeof(IndirectCommand),
+        .NumArgumentDescs = argument_descs.size(),
+        .pArgumentDescs = argument_descs.data(),
+        .NodeMask = 0u,
+    };
+
+    throw_if_failed(renderer.m_device->CreateCommandSignature(
+        &command_signature_desc, renderer.m_bindless_root_signature.Get(), IID_PPV_ARGS(&command_signature)));
+
+    // Command buffer that will be used to store the indirect command args.
+    static constexpr size_t MAX_CHUNKS_TO_BE_DRAWN = 1'00'000;
+    std::vector<IndirectCommand> indirect_command_vector{};
+
+    ConstantBuffer indirect_command_constant_buffer = renderer.create_constant_buffer(
+        sizeof(IndirectCommand) * MAX_CHUNKS_TO_BE_DRAWN, L"Indirect command constant buffer");
+
     // Create viewport and scissor.
     const D3D12_VIEWPORT viewport = {
         .TopLeftX = 0.0f,
@@ -335,6 +378,7 @@ int main()
 
         command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
+        indirect_command_vector.clear();
         for (const auto &[i, chunk] : chunk_manager.m_loaded_chunks)
         {
             const VoxelRenderResources render_resources = {
@@ -345,9 +389,23 @@ int main()
                 .scene_constant_buffer_index = static_cast<u32>(scene_buffer.cbv_index),
             };
 
-            command_list->SetGraphicsRoot32BitConstants(0u, 64u, &render_resources, 0u);
-            command_list->DrawInstanced((u32)chunk_manager.m_chunk_number_of_vertices[i], 1u, 0u, 0u);
+            indirect_command_vector.emplace_back(IndirectCommand{
+                .render_resources = render_resources,
+                .draw_arguments =
+                    D3D12_DRAW_ARGUMENTS{
+                        .VertexCountPerInstance = (u32)chunk_manager.m_chunk_number_of_vertices[i],
+                        .InstanceCount = 1u,
+                        .StartVertexLocation = 0u,
+                        .StartInstanceLocation = 0u,
+                    },
+            });
         }
+
+        // Copy the indirect commands to the GPU side buffer.
+        indirect_command_constant_buffer.update(indirect_command_vector.data());
+        command_list->ExecuteIndirect(command_signature.Get(), indirect_command_vector.size(),
+                                      renderer.m_resources[indirect_command_constant_buffer.resource_index].Get(), 0u,
+                                      nullptr, 0u);
 
         // Render UI.
         // Start the Dear ImGui frame
@@ -363,6 +421,9 @@ int main()
         ImGui::Checkbox("Start loading chunks", &setup_chunks);
         ImGui::Text("Camera Position : %f %f %f", camera.m_position.x, camera.m_position.y, camera.m_position.z);
         ImGui::Text("Current Index: %zu", current_chunk_index);
+        ImGui::Text("Current 3D Index: %zu, %zu, %zu", current_chunk_3d_index.x, current_chunk_3d_index.y,
+                    current_chunk_3d_index.z);
+        ImGui::Text("Number of chunks: %zu", chunk_manager.m_loaded_chunks.size());
         ImGui::Text("Number of copy alloc / list pairs : %zu",
                     renderer.m_copy_queue.m_command_allocator_list_queue.size());
 
