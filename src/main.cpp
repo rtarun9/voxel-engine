@@ -245,7 +245,7 @@ int main()
                     (y == -ChunkManager::CHUNK_RENDER_DISTANCE || y == ChunkManager::CHUNK_RENDER_DISTANCE) ||
                     (x == -ChunkManager::CHUNK_RENDER_DISTANCE || x == ChunkManager::CHUNK_RENDER_DISTANCE))
                 {
-                    chunk_render_distance_offsets.emplace_back(DirectX::XMINT3{x, y, z});
+                    chunk_render_distance_offsets.emplace_back(DirectX::XMINT3{x, z, y});
                 }
             }
         }
@@ -389,16 +389,71 @@ int main()
                 .scene_constant_buffer_index = static_cast<u32>(scene_buffer.cbv_index),
             };
 
-            indirect_command_vector.emplace_back(IndirectCommand{
-                .render_resources = render_resources,
-                .draw_arguments =
-                    D3D12_DRAW_ARGUMENTS{
-                        .VertexCountPerInstance = (u32)chunk_manager.m_chunk_number_of_vertices[i],
-                        .InstanceCount = 1u,
-                        .StartVertexLocation = 0u,
-                        .StartInstanceLocation = 0u,
-                    },
-            });
+            // CPU side naive culling.
+            const DirectX::XMUINT3 chunk_index_3d = convert_to_3d(i, ChunkManager::NUMBER_OF_CHUNKS_PER_DIMENSION);
+
+            static constexpr float chunk_edge_length =
+                (float)Voxel::EDGE_LENGTH * Chunk::NUMBER_OF_VOXELS_PER_DIMENSION;
+
+            const DirectX::XMFLOAT3 chunk_offset =
+                DirectX::XMFLOAT3(chunk_index_3d.x * chunk_edge_length, chunk_index_3d.y * chunk_edge_length,
+                                  chunk_index_3d.z * chunk_edge_length);
+
+            // AABB for chunk.
+            static constexpr std::array<DirectX::XMFLOAT3, 8> chunk_vertices_data{
+                DirectX::XMFLOAT3(0.0f, 0.0f, 0.0f),
+                DirectX::XMFLOAT3(0.0f, chunk_edge_length, 0.0f),
+                DirectX::XMFLOAT3(chunk_edge_length, chunk_edge_length, 0.0f),
+                DirectX::XMFLOAT3(chunk_edge_length, 0.0f, 0.0f),
+                DirectX::XMFLOAT3(0.0f, 0.0f, chunk_edge_length),
+                DirectX::XMFLOAT3(0.0f, chunk_edge_length, chunk_edge_length),
+                DirectX::XMFLOAT3(chunk_edge_length, chunk_edge_length, chunk_edge_length),
+                DirectX::XMFLOAT3(chunk_edge_length, 0.0f, chunk_edge_length),
+            };
+
+            std::array<DirectX::XMFLOAT4, 8> chunk_aabb_vertices = {};
+            for (int i = 0; i < 8; i++)
+            {
+                chunk_aabb_vertices[i] = DirectX::XMFLOAT4{
+                    chunk_vertices_data[i].x + chunk_offset.x,
+                    chunk_vertices_data[i].y + chunk_offset.y,
+                    chunk_vertices_data[i].z + chunk_offset.z,
+                    1.0f,
+                };
+            }
+
+            // Check if atleast 1 vertex is in the correct range to NOT be culled away.
+            u32 culled_vertices = 0u;
+            for (int i = 0; i < 8; i++)
+            {
+                DirectX::XMVECTOR vertex = DirectX::XMLoadFloat4(&chunk_aabb_vertices[i]);
+                const DirectX::XMVECTOR clip_space_coords = DirectX::XMVector4Transform(vertex, view_projection_matrix);
+                const float w = DirectX::XMVectorGetW(clip_space_coords);
+
+                const float x = DirectX::XMVectorGetX(clip_space_coords);
+                const float y = DirectX::XMVectorGetY(clip_space_coords);
+                const float z = DirectX::XMVectorGetZ(clip_space_coords);
+
+                bool is_visible = (-w <= x) && (x <= w) && (-w <= y) && (y <= w) && (0 <= z) && (z <= w);
+                if (!is_visible)
+                {
+                    culled_vertices++;
+                }
+            }
+
+            if (culled_vertices < 7)
+            {
+                indirect_command_vector.emplace_back(IndirectCommand{
+                    .render_resources = render_resources,
+                    .draw_arguments =
+                        D3D12_DRAW_ARGUMENTS{
+                            .VertexCountPerInstance = (u32)chunk_manager.m_chunk_number_of_vertices[i],
+                            .InstanceCount = 1u,
+                            .StartVertexLocation = 0u,
+                            .StartInstanceLocation = 0u,
+                        },
+                });
+            }
         }
 
         if (!indirect_command_vector.empty())
@@ -431,7 +486,8 @@ int main()
         ImGui::Text("Current Index: %zu", current_chunk_index);
         ImGui::Text("Current 3D Index: %zu, %zu, %zu", current_chunk_3d_index.x, current_chunk_3d_index.y,
                     current_chunk_3d_index.z);
-        ImGui::Text("Number of chunks: %zu", chunk_manager.m_loaded_chunks.size());
+        ImGui::Text("Number of loaded chunks: %zu", chunk_manager.m_loaded_chunks.size());
+        ImGui::Text("Number of rendered chunks: %zu", indirect_command_vector.size());
         ImGui::Text("Number of copy alloc / list pairs : %zu",
                     renderer.m_copy_queue.m_command_allocator_list_queue.size());
 

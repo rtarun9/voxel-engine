@@ -12,7 +12,6 @@ class Camera
     DirectX::XMFLOAT3 m_up{0.0f, 1.0f, 0.0f};
     DirectX::XMFLOAT3 m_front{0.0f, 0.0f, 1.0f};
 
-  public:
     float m_movement_speed{50.0f};
     float m_rotation_speed{1.0f};
 
