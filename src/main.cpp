@@ -14,6 +14,8 @@
 
 int main()
 {
+    printf("%s\n", FileSystem::instance().executable_path().c_str());
+
     const Window window{};
     Renderer renderer(window.get_handle(), window.get_width(), window.get_height());
 
@@ -245,7 +247,7 @@ int main()
                     (y == -ChunkManager::CHUNK_RENDER_DISTANCE || y == ChunkManager::CHUNK_RENDER_DISTANCE) ||
                     (x == -ChunkManager::CHUNK_RENDER_DISTANCE || x == ChunkManager::CHUNK_RENDER_DISTANCE))
                 {
-                    chunk_render_distance_offsets.emplace_back(DirectX::XMINT3{x, z, y});
+                    chunk_render_distance_offsets.emplace_back(DirectX::XMINT3{x, y, z});
                 }
             }
         }
@@ -378,6 +380,64 @@ int main()
 
         command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
+        // All chunks whose distance from the camera is more than render distance are moved to the unloaded chunk hash
+        // map.
+        /*
+        std::vector<u64> chunks_to_unload{};
+        for (const auto &[i, chunk] : chunk_manager.m_loaded_chunks)
+        {
+            const DirectX::XMUINT3 chunk_index_3d = convert_to_3d(i, ChunkManager::NUMBER_OF_CHUNKS_PER_DIMENSION);
+
+            if (std::abs((i32)chunk_index_3d.x - (i32)current_chunk_3d_index.x) > ChunkManager::CHUNK_RENDER_DISTANCE ||
+                std::abs((i32)chunk_index_3d.y - (i32)current_chunk_3d_index.y) > ChunkManager::CHUNK_RENDER_DISTANCE ||
+                std::abs((i32)chunk_index_3d.z - (i32)current_chunk_3d_index.z) > ChunkManager::CHUNK_RENDER_DISTANCE)
+            {
+                chunks_to_unload.push_back(i);
+            }
+        }
+
+        for (const auto &chunk_to_unload : chunks_to_unload)
+        {
+            chunk_manager.m_unloaded_chunks[chunk_to_unload] =
+                std::move(chunk_manager.m_loaded_chunks[chunk_to_unload]);
+            chunk_manager.m_loaded_chunks.erase(chunk_to_unload);
+        }
+        */
+
+        /*
+        // If a chunk's distance is 3X of render distance, is it removed from memory.
+        std::vector<u64> chunks_to_evict_from_memory{};
+        for (const auto &[i, chunk] : chunk_manager.m_unloaded_chunks)
+        {
+            const DirectX::XMUINT3 chunk_index_3d = convert_to_3d(i, ChunkManager::NUMBER_OF_CHUNKS_PER_DIMENSION);
+
+            if (std::abs((i32)chunk_index_3d.x - (i32)current_chunk_3d_index.x) >
+                    3 * ChunkManager::CHUNK_RENDER_DISTANCE ||
+                std::abs((i32)chunk_index_3d.y - (i32)current_chunk_3d_index.y) >
+                    3 * ChunkManager::CHUNK_RENDER_DISTANCE ||
+                std::abs((i32)chunk_index_3d.z - (i32)current_chunk_3d_index.z) >
+                    3 * ChunkManager::CHUNK_RENDER_DISTANCE)
+            {
+                chunks_to_evict_from_memory.push_back(i);
+            }
+        }
+
+        for (const auto &chunk_to_evict : chunks_to_evict_from_memory)
+        {
+            chunk_manager.m_unloaded_chunks.erase(chunk_to_evict);
+
+            renderer.m_resources[chunk_manager.m_chunk_constant_buffers[chunk_to_evict].resource_index] = nullptr;
+            renderer.m_resources[chunk_manager.m_chunk_color_buffers[chunk_to_evict].resource_index] = nullptr;
+            renderer.m_resources[chunk_manager.m_chunk_position_buffers[chunk_to_evict].resource_index] = nullptr;
+
+            chunk_manager.m_chunk_number_of_vertices.erase(chunk_to_evict);
+            chunk_manager.m_chunk_constant_buffers.erase(chunk_to_evict);
+            chunk_manager.m_chunk_color_buffers.erase(chunk_to_evict);
+            chunk_manager.m_chunk_position_buffers.erase(chunk_to_evict);
+        }
+        */
+
+        // Setup indirect command vector.
         indirect_command_vector.clear();
         for (const auto &[i, chunk] : chunk_manager.m_loaded_chunks)
         {
@@ -459,15 +519,11 @@ int main()
         if (!indirect_command_vector.empty())
         {
             // Copy the indirect commands to the GPU side buffer.
-            indirect_command_buffer.update(
-                command_list.Get(), indirect_command_vector.data(),
-                renderer.m_resources[indirect_command_buffer.default_resource_index].Get(),
-                renderer.m_intermediate_resources[indirect_command_buffer.upload_resource_index].Get(),
-                indirect_command_vector.size() * sizeof(IndirectCommand));
+            indirect_command_buffer.update(command_list.Get(), indirect_command_vector.data(),
+                                           indirect_command_vector.size() * sizeof(IndirectCommand));
 
             command_list->ExecuteIndirect(command_signature.Get(), indirect_command_vector.size(),
-                                          renderer.m_resources[indirect_command_buffer.default_resource_index].Get(),
-                                          0u, nullptr, 0u);
+                                          indirect_command_buffer.default_resource.Get(), 0u, nullptr, 0u);
         }
 
         // Render UI.
@@ -486,6 +542,7 @@ int main()
         ImGui::Text("Current Index: %zu", current_chunk_index);
         ImGui::Text("Current 3D Index: %zu, %zu, %zu", current_chunk_3d_index.x, current_chunk_3d_index.y,
                     current_chunk_3d_index.z);
+        ImGui::Text("Number of unloaded chunks: %zu", chunk_manager.m_unloaded_chunks.size());
         ImGui::Text("Number of loaded chunks: %zu", chunk_manager.m_loaded_chunks.size());
         ImGui::Text("Number of rendered chunks: %zu", indirect_command_vector.size());
         ImGui::Text("Number of copy alloc / list pairs : %zu",

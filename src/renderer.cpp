@@ -230,8 +230,9 @@ StructuredBuffer Renderer::create_structured_buffer(const void *data, const size
     };
 
     throw_if_failed(m_device->CreateCommittedResource(
-        &upload_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES, &buffer_resource_desc,
-        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, nullptr, IID_PPV_ARGS(&intermediate_buffer_resource)));
+        &upload_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES | D3D12_HEAP_FLAG_CREATE_NOT_ZEROED,
+        &buffer_resource_desc, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, nullptr,
+        IID_PPV_ARGS(&intermediate_buffer_resource)));
 
     // Now that a resource is created, copy CPU data to this upload buffer.
     const D3D12_RANGE read_range{.Begin = 0u, .End = 0u};
@@ -251,8 +252,8 @@ StructuredBuffer Renderer::create_structured_buffer(const void *data, const size
     };
 
     throw_if_failed(m_device->CreateCommittedResource(
-        &default_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES, &buffer_resource_desc,
-        D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&buffer_resource)));
+        &default_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES | D3D12_HEAP_FLAG_CREATE_NOT_ZEROED,
+        &buffer_resource_desc, D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&buffer_resource)));
 
     std::scoped_lock<std::mutex> scoped_lock(m_resource_mutex);
 
@@ -305,8 +306,9 @@ ConstantBuffer Renderer::create_constant_buffer(const size_t size_in_bytes, cons
     };
 
     throw_if_failed(m_device->CreateCommittedResource(
-        &upload_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES, &buffer_resource_desc,
-        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, nullptr, IID_PPV_ARGS(&buffer_resource)));
+        &upload_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES | D3D12_HEAP_FLAG_CREATE_NOT_ZEROED,
+        &buffer_resource_desc, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, nullptr,
+        IID_PPV_ARGS(&buffer_resource)));
 
     // Now that a resource is created, copy CPU data to this upload buffer.
     const D3D12_RANGE read_range{.Begin = 0u, .End = 0u};
@@ -358,8 +360,9 @@ CommandBuffer Renderer::create_command_buffer(const size_t size_in_bytes, const 
     };
 
     throw_if_failed(m_device->CreateCommittedResource(
-        &upload_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES, &buffer_resource_desc,
-        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, nullptr, IID_PPV_ARGS(&intermediate_buffer_resource)));
+        &upload_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES | D3D12_HEAP_FLAG_CREATE_NOT_ZEROED,
+        &buffer_resource_desc, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, nullptr,
+        IID_PPV_ARGS(&intermediate_buffer_resource)));
 
     // Now that a resource is created, copy CPU data to this upload buffer.
     const D3D12_RANGE read_range{.Begin = 0u, .End = 0u};
@@ -377,21 +380,15 @@ CommandBuffer Renderer::create_command_buffer(const size_t size_in_bytes, const 
     };
 
     throw_if_failed(m_device->CreateCommittedResource(
-        &default_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES, &buffer_resource_desc,
-        D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&buffer_resource)));
+        &default_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES | D3D12_HEAP_FLAG_CREATE_NOT_ZEROED,
+        &buffer_resource_desc, D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&buffer_resource)));
 
-    std::scoped_lock<std::mutex> scoped_lock(m_resource_mutex);
-
-    m_intermediate_resources.emplace_back(std::move(intermediate_buffer_resource));
-    m_resources.emplace_back(std::move(buffer_resource));
-
-    name_d3d12_object(m_resources.back().Get(), buffer_name);
-    name_d3d12_object(m_intermediate_resources.back().Get(),
-                      std::wstring(buffer_name) + std::wstring(L" [intermediate]"));
+    name_d3d12_object(buffer_resource.Get(), buffer_name);
+    name_d3d12_object(intermediate_buffer_resource.Get(), std::wstring(buffer_name) + std::wstring(L" [intermediate]"));
 
     return CommandBuffer{
-        .default_resource_index = m_resources.size() - 1u,
-        .upload_resource_index = m_intermediate_resources.size() - 1u,
+        .default_resource = buffer_resource,
+        .upload_resource = intermediate_buffer_resource,
         .upload_resource_mapped_ptr = resource_ptr,
     };
 }
@@ -580,9 +577,7 @@ void Renderer::CopyCommandQueue::flush_queue()
     throw_if_failed(m_fence->SetEventOnCompletion(m_monotonic_fence_value, nullptr));
 }
 
-void CommandBuffer::update(ID3D12GraphicsCommandList *const command_list, const void *data,
-                           ID3D12Resource *const default_resource, ID3D12Resource *const upload_resource,
-                           const size_t size) const
+void CommandBuffer::update(ID3D12GraphicsCommandList *const command_list, const void *data, const size_t size) const
 {
     memcpy(upload_resource_mapped_ptr, data, size);
 
@@ -591,7 +586,7 @@ void CommandBuffer::update(ID3D12GraphicsCommandList *const command_list, const 
         .Flags = D3D12_RESOURCE_BARRIER_FLAGS::D3D12_RESOURCE_BARRIER_FLAG_NONE,
         .Transition =
             D3D12_RESOURCE_TRANSITION_BARRIER{
-                .pResource = default_resource,
+                .pResource = default_resource.Get(),
                 .Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
                 .StateBefore = D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT,
                 .StateAfter = D3D12_RESOURCE_STATE_COPY_DEST,
@@ -601,14 +596,14 @@ void CommandBuffer::update(ID3D12GraphicsCommandList *const command_list, const 
     command_list->ResourceBarrier(1u, &indirect_argument_to_copy_dest_state);
 
     // NOTE : The copy queue is NOT used here since the direct queue depends on this data.
-    command_list->CopyResource(default_resource, upload_resource);
+    command_list->CopyResource(default_resource.Get(), upload_resource.Get());
 
     const D3D12_RESOURCE_BARRIER copy_dest_to_indirect_argument_state = {
         .Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
         .Flags = D3D12_RESOURCE_BARRIER_FLAGS::D3D12_RESOURCE_BARRIER_FLAG_NONE,
         .Transition =
             D3D12_RESOURCE_TRANSITION_BARRIER{
-                .pResource = default_resource,
+                .pResource = default_resource.Get(),
                 .Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
                 .StateBefore = D3D12_RESOURCE_STATE_COPY_DEST,
                 .StateAfter = D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT,

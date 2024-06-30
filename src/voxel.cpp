@@ -201,8 +201,14 @@ ChunkManager::SetupChunkData ChunkManager::internal_mt_setup_chunk(Renderer &ren
 }
 void ChunkManager::add_chunk_to_setup_stack(const u64 index)
 {
-    if (m_loaded_chunks.contains(index) || m_unloaded_chunks.contains(index) ||
-        m_chunk_indices_that_are_being_setup.contains(index))
+    // If chunk is unloaded, move it to the loaded chunk hash map right away.
+    if (m_unloaded_chunks.contains(index))
+    {
+        m_loaded_chunks[index] = std::move(m_unloaded_chunks[index]);
+        m_unloaded_chunks.erase(index);
+        return;
+    }
+    else if (m_loaded_chunks.contains(index) || m_chunk_indices_that_are_being_setup.contains(index))
     {
         return;
     }

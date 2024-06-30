@@ -24,16 +24,15 @@ struct ConstantBuffer
 
 // The command buffer is a bit different. It internally has two resources, a default and upload heap.
 // the update function is not similar to constant buffer, as here data is copied from the upload to default resource.
+// The command buffer contains its ID3D12Resource directly since the same command buffer is used for the entire engine.
 struct CommandBuffer
 {
-    size_t default_resource_index{};
-    size_t upload_resource_index{};
+    Microsoft::WRL::ComPtr<ID3D12Resource> default_resource{};
+    Microsoft::WRL::ComPtr<ID3D12Resource> upload_resource{};
 
     u8 *upload_resource_mapped_ptr{};
 
-    // note(rtarun9) : Interesting chose to pass the resource into this functionn, but only for POC :(
-    void update(ID3D12GraphicsCommandList *const command_list, const void *data, ID3D12Resource *const default_resource,
-                ID3D12Resource *const upload_resource, const size_t size) const;
+    void update(ID3D12GraphicsCommandList *const command_list, const void *data, const size_t size) const;
 };
 
 // A simple & straight forward high level renderer abstraction.
