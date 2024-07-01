@@ -339,6 +339,7 @@ CommandBuffer Renderer::create_command_buffer(const size_t stride, const size_t 
     u8 *resource_ptr{};
     Microsoft::WRL::ComPtr<ID3D12Resource> buffer_resource{};
     Microsoft::WRL::ComPtr<ID3D12Resource> intermediate_buffer_resource{};
+    Microsoft::WRL::ComPtr<ID3D12Resource> zeroed_counter_buffer_resource{};
 
     // First, create a upload buffer (that is placed in memory accesible by both GPU and CPU).
     // Then create a GPU only buffer, and copy data from the previous buffer to GPU only one.
@@ -371,6 +372,32 @@ CommandBuffer Renderer::create_command_buffer(const size_t stride, const size_t 
     const D3D12_RANGE read_range{.Begin = 0u, .End = 0u};
 
     throw_if_failed(intermediate_buffer_resource->Map(0u, &read_range, (void **)&resource_ptr));
+
+    // Create a small resource that only has a single uint -> whose value is always zero.
+    // This is used each frame to reset the counter value to 0 for the uav.
+    {
+
+        const D3D12_RESOURCE_DESC zeroed_counter_buffer_resource_desc = {
+            .Dimension = D3D12_RESOURCE_DIMENSION_BUFFER,
+            .Width = 4u,
+            .Height = 1u,
+            .DepthOrArraySize = 1u,
+            .MipLevels = 1u,
+            .Format = DXGI_FORMAT_UNKNOWN,
+            .SampleDesc = {1u, 0u},
+            .Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
+            .Flags = D3D12_RESOURCE_FLAG_NONE,
+        };
+
+        u8 *zeroed_counter_buffer_ptr = nullptr;
+        throw_if_failed(m_device->CreateCommittedResource(
+            &upload_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES | D3D12_HEAP_FLAG_CREATE_NOT_ZEROED,
+            &upload_buffer_resource_desc, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, nullptr,
+            IID_PPV_ARGS(&zeroed_counter_buffer_resource)));
+        throw_if_failed(zeroed_counter_buffer_resource->Map(0u, &read_range, (void **)&zeroed_counter_buffer_ptr));
+        u32 zero = 0u;
+        memcpy(zeroed_counter_buffer_ptr, &zero, sizeof(u32));
+    }
 
     const D3D12_RESOURCE_DESC buffer_resource_desc = {
         .Dimension = D3D12_RESOURCE_DIMENSION_BUFFER,
@@ -412,6 +439,7 @@ CommandBuffer Renderer::create_command_buffer(const size_t stride, const size_t 
     return CommandBuffer{
         .default_resource = buffer_resource,
         .upload_resource = intermediate_buffer_resource,
+        .zeroed_counter_buffer_resource = zeroed_counter_buffer_resource,
         .upload_resource_mapped_ptr = resource_ptr,
         .upload_resource_srv_index = upload_resource_srv_index,
         .default_resource_uav_index = default_resource_uav_index,
@@ -466,7 +494,7 @@ size_t Renderer::create_unordered_access_view(ID3D12Resource *const resource, co
 {
     const D3D12_CPU_DESCRIPTOR_HANDLE handle = m_cbv_srv_uav_descriptor_heap.current_cpu_descriptor_handle;
 
-    const D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {
+    D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {
         .Format = DXGI_FORMAT_UNKNOWN,
         .ViewDimension = D3D12_UAV_DIMENSION_BUFFER,
         .Buffer{
@@ -484,6 +512,7 @@ size_t Renderer::create_unordered_access_view(ID3D12Resource *const resource, co
     }
     else
     {
+        uav_desc.Buffer.CounterOffsetInBytes = D3D12_UAV_COUNTER_PLACEMENT_ALIGNMENT;
         m_device->CreateUnorderedAccessView(resource, resource, &uav_desc, handle);
     }
 
@@ -633,40 +662,4 @@ void Renderer::CopyCommandQueue::flush_queue()
 {
     throw_if_failed(m_command_queue->Signal(m_fence.Get(), ++m_monotonic_fence_value));
     throw_if_failed(m_fence->SetEventOnCompletion(m_monotonic_fence_value, nullptr));
-}
-
-void CommandBuffer::update(ID3D12GraphicsCommandList *const command_list, const void *data, const size_t size) const
-{
-    memcpy(upload_resource_mapped_ptr, data, size);
-
-    const D3D12_RESOURCE_BARRIER indirect_argument_to_copy_dest_state = {
-        .Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
-        .Flags = D3D12_RESOURCE_BARRIER_FLAGS::D3D12_RESOURCE_BARRIER_FLAG_NONE,
-        .Transition =
-            D3D12_RESOURCE_TRANSITION_BARRIER{
-                .pResource = default_resource.Get(),
-                .Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
-                .StateBefore = D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT,
-                .StateAfter = D3D12_RESOURCE_STATE_COPY_DEST,
-            },
-    };
-
-    command_list->ResourceBarrier(1u, &indirect_argument_to_copy_dest_state);
-
-    // NOTE : The copy queue is NOT used here since the direct queue depends on this data.
-    command_list->CopyResource(default_resource.Get(), upload_resource.Get());
-
-    const D3D12_RESOURCE_BARRIER copy_dest_to_indirect_argument_state = {
-        .Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
-        .Flags = D3D12_RESOURCE_BARRIER_FLAGS::D3D12_RESOURCE_BARRIER_FLAG_NONE,
-        .Transition =
-            D3D12_RESOURCE_TRANSITION_BARRIER{
-                .pResource = default_resource.Get(),
-                .Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
-                .StateBefore = D3D12_RESOURCE_STATE_COPY_DEST,
-                .StateAfter = D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT,
-            },
-    };
-
-    command_list->ResourceBarrier(1u, &copy_dest_to_indirect_argument_state);
 }

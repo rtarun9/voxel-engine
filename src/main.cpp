@@ -510,6 +510,39 @@ int main()
 
             command_list->SetComputeRoot32BitConstants(0u, 64u, &gpu_cull_render_resources, 0u);
 
+            // Clear the counter associated with UAV.
+
+            const D3D12_RESOURCE_BARRIER indirect_argument_to_copy_dest_state = {
+                .Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
+                .Flags = D3D12_RESOURCE_BARRIER_FLAGS::D3D12_RESOURCE_BARRIER_FLAG_NONE,
+                .Transition =
+                    D3D12_RESOURCE_TRANSITION_BARRIER{
+                        .pResource = indirect_command_buffer.default_resource.Get(),
+                        .Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+                        .StateBefore = D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT,
+                        .StateAfter = D3D12_RESOURCE_STATE_COPY_DEST,
+                    },
+            };
+            command_list->ResourceBarrier(1u, &indirect_argument_to_copy_dest_state);
+
+            command_list->CopyBufferRegion(indirect_command_buffer.default_resource.Get(),
+                                           D3D12_UAV_COUNTER_PLACEMENT_ALIGNMENT,
+                                           indirect_command_buffer.zeroed_counter_buffer_resource.Get(), 0u, 4u);
+
+            const D3D12_RESOURCE_BARRIER copy_dest_to_indirect_argument_state = {
+                .Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
+                .Flags = D3D12_RESOURCE_BARRIER_FLAGS::D3D12_RESOURCE_BARRIER_FLAG_NONE,
+                .Transition =
+                    D3D12_RESOURCE_TRANSITION_BARRIER{
+                        .pResource = indirect_command_buffer.default_resource.Get(),
+                        .Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+                        .StateBefore = D3D12_RESOURCE_STATE_COPY_DEST,
+                        .StateAfter = D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT,
+                    },
+            };
+
+            command_list->ResourceBarrier(1u, &copy_dest_to_indirect_argument_state);
+
             command_list->Dispatch(indirect_command_vector.size(), 1u, 1u);
 
             command_list->SetDescriptorHeaps(1u, shader_visible_descriptor_heaps);

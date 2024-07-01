@@ -29,12 +29,11 @@ struct CommandBuffer
 {
     Microsoft::WRL::ComPtr<ID3D12Resource> default_resource{};
     Microsoft::WRL::ComPtr<ID3D12Resource> upload_resource{};
+    Microsoft::WRL::ComPtr<ID3D12Resource> zeroed_counter_buffer_resource{};
 
     u8 *upload_resource_mapped_ptr{};
     size_t upload_resource_srv_index{};
     size_t default_resource_uav_index{};
-
-    void update(ID3D12GraphicsCommandList *const command_list, const void *data, const size_t size) const;
 };
 
 // A simple & straight forward high level renderer abstraction.
