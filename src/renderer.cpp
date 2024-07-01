@@ -331,8 +331,11 @@ ConstantBuffer Renderer::create_constant_buffer(const size_t size_in_bytes, cons
     };
 }
 
-CommandBuffer Renderer::create_command_buffer(const size_t size_in_bytes, const std::wstring_view buffer_name)
+CommandBuffer Renderer::create_command_buffer(const size_t stride, const size_t max_number_of_elements,
+                                              const std::wstring_view buffer_name)
 {
+    const size_t size_in_bytes = stride * max_number_of_elements;
+
     u8 *resource_ptr{};
     Microsoft::WRL::ComPtr<ID3D12Resource> buffer_resource{};
     Microsoft::WRL::ComPtr<ID3D12Resource> intermediate_buffer_resource{};
@@ -386,10 +389,31 @@ CommandBuffer Renderer::create_command_buffer(const size_t size_in_bytes, const 
     name_d3d12_object(buffer_resource.Get(), buffer_name);
     name_d3d12_object(intermediate_buffer_resource.Get(), std::wstring(buffer_name) + std::wstring(L" [intermediate]"));
 
+    // Create the SRV.
+    const D3D12_CPU_DESCRIPTOR_HANDLE handle = m_cbv_srv_uav_descriptor_heap.current_cpu_descriptor_handle;
+
+    const D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {
+        .Format = DXGI_FORMAT_UNKNOWN,
+        .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
+        .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+        .Buffer{
+            .FirstElement = 0u,
+            .NumElements = static_cast<UINT>(max_number_of_elements),
+            .StructureByteStride = static_cast<UINT>(stride),
+        },
+    };
+
+    m_device->CreateShaderResourceView(buffer_resource.Get(), &srv_desc, handle);
+
+    const size_t srv_index = m_cbv_srv_uav_descriptor_heap.current_descriptor_handle_index;
+
+    m_cbv_srv_uav_descriptor_heap.offset_current_descriptor_handles();
+
     return CommandBuffer{
         .default_resource = buffer_resource,
         .upload_resource = intermediate_buffer_resource,
         .upload_resource_mapped_ptr = resource_ptr,
+        .srv_index = srv_index,
     };
 }
 

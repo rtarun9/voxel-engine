@@ -7,6 +7,7 @@
 #define float4 DirectX::XMFLOAT4
 #define float3 DirectX::XMFLOAT3
 #define uint u32
+#define uint4 DirectX::XMFLOAT4
 #define ConstantBufferStruct struct alignas(256)
 
 #else
@@ -24,25 +25,41 @@ struct TriangleRenderResources
     uint color_buffer_index;
 };
 
+struct VoxelRenderResources
+{
+    uint scene_constant_buffer_index;
+    uint chunk_constant_buffer_index;
+};
+
 ConstantBufferStruct
 SceneConstantBuffer
 {
     float4x4 view_projection_matrix;
+
+    // note(rtarun9) : Putting this here because scene depends on chunk edge length, which determines the AABB vertices.
+    float4 aabb_vertices[8];
 };
 
 ConstantBufferStruct
 ChunkConstantBuffer
 {
-    float4x4 model_matrix;
+    float4 translation_vector;
 
     uint position_buffer_index;
     uint color_buffer_index;
 };
 
-struct VoxelRenderResources
+struct GPUIndirectCommand
 {
+    VoxelRenderResources voxel_render_resources;
+    uint4 draw_arguments;
+};
+
+struct GPUCullRenderResources
+{
+    uint indirect_command_srv_index;
+    uint output_command_uav_index;
     uint scene_constant_buffer_index;
-    uint chunk_constant_buffer_index;
 };
 
 #endif

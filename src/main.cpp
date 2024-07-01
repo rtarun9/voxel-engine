@@ -165,6 +165,11 @@ int main()
     };
     throw_if_failed(renderer.m_device->CreateGraphicsPipelineState(&graphics_pso_desc, IID_PPV_ARGS(&pso)));
 
+    // Setup the gpu culling compute shader.
+    Microsoft::WRL::ComPtr<IDxcBlob> gpu_culling_compute_shader_blob = ShaderCompiler::compile(
+        FileSystem::instance().get_relative_path_wstr(L"shaders/gpu_culling_shader.hlsl").c_str(), L"cs_main",
+        L"cs_6_6");
+
     // Indirect command struct : command signature must match this struct.
     // Each chunk will have its own IndirectCommand, with 2 arguments. The render resources struct root constants and a
     // draw call.
@@ -206,7 +211,7 @@ int main()
     std::vector<IndirectCommand> indirect_command_vector{};
 
     CommandBuffer indirect_command_buffer =
-        renderer.create_command_buffer(sizeof(IndirectCommand) * MAX_CHUNKS_TO_BE_DRAWN, L"Indirect Command Buffer");
+        renderer.create_command_buffer(sizeof(IndirectCommand), MAX_CHUNKS_TO_BE_DRAWN, L"Indirect Command Buffer");
 
     // Create viewport and scissor.
     const D3D12_VIEWPORT viewport = {

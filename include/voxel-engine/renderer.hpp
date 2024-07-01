@@ -31,6 +31,7 @@ struct CommandBuffer
     Microsoft::WRL::ComPtr<ID3D12Resource> upload_resource{};
 
     u8 *upload_resource_mapped_ptr{};
+    size_t srv_index{};
 
     void update(ID3D12GraphicsCommandList *const command_list, const void *data, const size_t size) const;
 };
@@ -70,7 +71,8 @@ struct Renderer
     StructuredBuffer create_structured_buffer(const void *data, const size_t stride, const size_t num_elements,
                                               const std::wstring_view buffer_name);
     ConstantBuffer create_constant_buffer(const size_t size_in_bytes, const std::wstring_view buffer_name);
-    CommandBuffer create_command_buffer(const size_t size_in_bytes, const std::wstring_view buffer_name);
+    CommandBuffer create_command_buffer(const size_t stride, const size_t max_number_of_elements,
+                                        const std::wstring_view buffer_name);
 
   private:
     // This function automatically offset's the current descriptor handle of descriptor heap.

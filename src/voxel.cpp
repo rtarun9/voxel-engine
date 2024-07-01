@@ -288,7 +288,7 @@ void ChunkManager::transfer_chunks_from_setup_to_loaded_state(const u64 current_
                                       chunk_index_3d.z * Voxel::EDGE_LENGTH * Chunk::NUMBER_OF_VOXELS_PER_DIMENSION);
 
                 const ChunkConstantBuffer chunk_constant_buffer_data = {
-                    .model_matrix = DirectX::XMMatrixTranslation(chunk_offset.x, chunk_offset.y, chunk_offset.z),
+                    .translation_vector = {chunk_offset.x, chunk_offset.y, chunk_offset.z, 0.0f},
                     .position_buffer_index = static_cast<u32>(m_chunk_position_buffers[chunk_index].srv_index),
                     .color_buffer_index = static_cast<u32>(m_chunk_color_buffers[chunk_index].srv_index),
                 };
