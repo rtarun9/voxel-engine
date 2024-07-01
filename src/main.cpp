@@ -442,11 +442,8 @@ int main()
         for (const auto &[i, chunk] : chunk_manager.m_loaded_chunks)
         {
             const VoxelRenderResources render_resources = {
-                .position_buffer_index = static_cast<u32>(chunk_manager.m_chunk_position_buffers[i].srv_index),
-                .color_buffer_index = static_cast<u32>(chunk_manager.m_chunk_color_buffers[i].srv_index),
-                .chunk_constant_buffer_index = static_cast<u32>(chunk_manager.m_chunk_constant_buffers[i].cbv_index),
-                .chunk_index = static_cast<u32>(i),
                 .scene_constant_buffer_index = static_cast<u32>(scene_buffer.cbv_index),
+                .chunk_constant_buffer_index = static_cast<u32>(chunk_manager.m_chunk_constant_buffers[i].cbv_index),
             };
 
             // CPU side naive culling.

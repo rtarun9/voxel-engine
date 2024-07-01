@@ -48,8 +48,19 @@ ChunkManager::SetupChunkData ChunkManager::internal_mt_setup_chunk(Renderer &ren
         DirectX::XMFLOAT3(Voxel::EDGE_LENGTH, 0.0f, Voxel::EDGE_LENGTH),
     };
 
+    setup_chunk_data.m_chunk.m_voxels[0].m_active = true;
+    for (size_t i = 1; i < Chunk::NUMBER_OF_VOXELS; i++)
+    {
+        setup_chunk_data.m_chunk.m_voxels[i].m_active = false;
+    }
+
     for (size_t i = 0; i < Chunk::NUMBER_OF_VOXELS; i++)
     {
+        if (!setup_chunk_data.m_chunk.m_voxels[i].m_active)
+        {
+            continue;
+        }
+
         const DirectX::XMUINT3 index_3d = convert_to_3d(i, Chunk::NUMBER_OF_VOXELS_PER_DIMENSION);
         const DirectX::XMFLOAT3 offset = DirectX::XMFLOAT3(
             index_3d.x * Voxel::EDGE_LENGTH, index_3d.y * Voxel::EDGE_LENGTH, index_3d.z * Voxel::EDGE_LENGTH);
@@ -276,9 +287,13 @@ void ChunkManager::transfer_chunks_from_setup_to_loaded_state(const u64 current_
                                       chunk_index_3d.y * Voxel::EDGE_LENGTH * Chunk::NUMBER_OF_VOXELS_PER_DIMENSION,
                                       chunk_index_3d.z * Voxel::EDGE_LENGTH * Chunk::NUMBER_OF_VOXELS_PER_DIMENSION);
 
-                const DirectX::XMMATRIX chunk_model_matrix =
-                    DirectX::XMMatrixTranslation(chunk_offset.x, chunk_offset.y, chunk_offset.z);
-                m_chunk_constant_buffers[chunk_index].update(&chunk_model_matrix);
+                const ChunkConstantBuffer chunk_constant_buffer_data = {
+                    .model_matrix = DirectX::XMMatrixTranslation(chunk_offset.x, chunk_offset.y, chunk_offset.z),
+                    .position_buffer_index = static_cast<u32>(m_chunk_position_buffers[chunk_index].srv_index),
+                    .color_buffer_index = static_cast<u32>(m_chunk_color_buffers[chunk_index].srv_index),
+                };
+
+                m_chunk_constant_buffers[chunk_index].update(&chunk_constant_buffer_data);
 
                 m_chunk_number_of_vertices[chunk_index] = num_vertices;
 

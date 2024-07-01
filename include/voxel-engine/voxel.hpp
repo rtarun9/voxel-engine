@@ -7,7 +7,7 @@
 // position' and has a edge length as specified in the class below.
 struct Voxel
 {
-    static constexpr float EDGE_LENGTH{16.0f};
+    static constexpr float EDGE_LENGTH{64.0f};
     bool m_active{true};
 };
 
@@ -23,7 +23,7 @@ struct Chunk
 
     ~Chunk();
 
-    static constexpr u32 NUMBER_OF_VOXELS_PER_DIMENSION = 8u;
+    static constexpr u32 NUMBER_OF_VOXELS_PER_DIMENSION = 16u;
     static constexpr size_t NUMBER_OF_VOXELS =
         NUMBER_OF_VOXELS_PER_DIMENSION * NUMBER_OF_VOXELS_PER_DIMENSION * NUMBER_OF_VOXELS_PER_DIMENSION;
 
@@ -49,6 +49,9 @@ struct ChunkManager
 
         StructuredBuffer m_chunk_position_buffer{};
         StructuredBuffer m_chunk_color_buffer{};
+
+        // A strange design decision, but rather than accessing the render resources via root constants, render
+        // resources will now be embedded into the chunk constant buffer.
         ConstantBuffer m_chunk_constant_buffer{};
 
         std::vector<DirectX::XMFLOAT3> m_chunk_position_data{};

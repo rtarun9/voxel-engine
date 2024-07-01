@@ -34,17 +34,15 @@ ConstantBufferStruct
 ChunkConstantBuffer
 {
     float4x4 model_matrix;
+
+    uint position_buffer_index;
+    uint color_buffer_index;
 };
 
 struct VoxelRenderResources
 {
-    uint position_buffer_index;
-    uint color_buffer_index;
-    uint chunk_constant_buffer_index;
-
-    uint chunk_index;
-
     uint scene_constant_buffer_index;
+    uint chunk_constant_buffer_index;
 };
 
 #endif
