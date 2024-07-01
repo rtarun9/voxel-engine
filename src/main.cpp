@@ -44,6 +44,26 @@ int main()
     ChunkManager chunk_manager{};
 
     SceneConstantBuffer scene_buffer_data{};
+
+    // Setup the AABB data for scene buffer.
+
+    // AABB for chunk.
+    static constexpr std::array<DirectX::XMFLOAT4, 8> aabb_vertices{
+        DirectX::XMFLOAT4(0.0f, 0.0f, 0.0f, 1.0f),
+        DirectX::XMFLOAT4(0.0f, Chunk::CHUNK_LENGTH, 0.0f, 1.0f),
+        DirectX::XMFLOAT4(Chunk::CHUNK_LENGTH, Chunk::CHUNK_LENGTH, 0.0f, 1.0f),
+        DirectX::XMFLOAT4(Chunk::CHUNK_LENGTH, 0.0f, 0.0f, 1.0f),
+        DirectX::XMFLOAT4(0.0f, 0.0f, Chunk::CHUNK_LENGTH, 1.0f),
+        DirectX::XMFLOAT4(0.0f, Chunk::CHUNK_LENGTH, Chunk::CHUNK_LENGTH, 1.0f),
+        DirectX::XMFLOAT4(Chunk::CHUNK_LENGTH, Chunk::CHUNK_LENGTH, Chunk::CHUNK_LENGTH, 1.0f),
+        DirectX::XMFLOAT4(Chunk::CHUNK_LENGTH, 0.0f, Chunk::CHUNK_LENGTH, 1.0f),
+    };
+
+    for (int i = 0; i < 8; i++)
+    {
+        scene_buffer_data.aabb_vertices[i] = aabb_vertices[i];
+    }
+
     ConstantBuffer scene_buffer =
         renderer.create_constant_buffer(sizeof(SceneConstantBuffer), L"Scene constant buffer");
 
@@ -169,6 +189,20 @@ int main()
     Microsoft::WRL::ComPtr<IDxcBlob> gpu_culling_compute_shader_blob = ShaderCompiler::compile(
         FileSystem::instance().get_relative_path_wstr(L"shaders/gpu_culling_shader.hlsl").c_str(), L"cs_main",
         L"cs_6_6");
+
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> gpu_culling_pso{};
+    const D3D12_COMPUTE_PIPELINE_STATE_DESC gpu_culling_compute_pso_desc = {
+        .pRootSignature = renderer.m_bindless_root_signature.Get(),
+        .CS =
+            {
+                .pShaderBytecode = gpu_culling_compute_shader_blob->GetBufferPointer(),
+                .BytecodeLength = gpu_culling_compute_shader_blob->GetBufferSize(),
+            },
+        .NodeMask = 0u,
+        .Flags = D3D12_PIPELINE_STATE_FLAG_NONE,
+    };
+    throw_if_failed(
+        renderer.m_device->CreateComputePipelineState(&gpu_culling_compute_pso_desc, IID_PPV_ARGS(&gpu_culling_pso)));
 
     // Indirect command struct : command signature must match this struct.
     // Each chunk will have its own IndirectCommand, with 2 arguments. The render resources struct root constants and a
@@ -371,20 +405,6 @@ int main()
         command_list->RSSetViewports(1u, &viewport);
         command_list->RSSetScissorRects(1u, &scissor_rect);
 
-        command_list->OMSetRenderTargets(1u, &rtv_handle, FALSE, &dsv_handle);
-
-        ID3D12DescriptorHeap *const *shader_visible_descriptor_heaps = {
-            renderer.m_cbv_srv_uav_descriptor_heap.descriptor_heap.GetAddressOf(),
-        };
-
-        command_list->SetDescriptorHeaps(1u, shader_visible_descriptor_heaps);
-
-        // Set the index buffer, pso and all config settings for rendering.
-        command_list->SetGraphicsRootSignature(renderer.m_bindless_root_signature.Get());
-        command_list->SetPipelineState(pso.Get());
-
-        command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-
         // All chunks whose distance from the camera is more than render distance are moved to the unloaded chunk hash
         // map.
         /*
@@ -451,85 +471,60 @@ int main()
                 .chunk_constant_buffer_index = static_cast<u32>(chunk_manager.m_chunk_constant_buffers[i].cbv_index),
             };
 
-            // CPU side naive culling.
-            const DirectX::XMUINT3 chunk_index_3d = convert_to_3d(i, ChunkManager::NUMBER_OF_CHUNKS_PER_DIMENSION);
-
-            static constexpr float chunk_edge_length =
-                (float)Voxel::EDGE_LENGTH * Chunk::NUMBER_OF_VOXELS_PER_DIMENSION;
-
-            const DirectX::XMFLOAT3 chunk_offset =
-                DirectX::XMFLOAT3(chunk_index_3d.x * chunk_edge_length, chunk_index_3d.y * chunk_edge_length,
-                                  chunk_index_3d.z * chunk_edge_length);
-
-            // AABB for chunk.
-            static constexpr std::array<DirectX::XMFLOAT3, 8> chunk_vertices_data{
-                DirectX::XMFLOAT3(0.0f, 0.0f, 0.0f),
-                DirectX::XMFLOAT3(0.0f, chunk_edge_length, 0.0f),
-                DirectX::XMFLOAT3(chunk_edge_length, chunk_edge_length, 0.0f),
-                DirectX::XMFLOAT3(chunk_edge_length, 0.0f, 0.0f),
-                DirectX::XMFLOAT3(0.0f, 0.0f, chunk_edge_length),
-                DirectX::XMFLOAT3(0.0f, chunk_edge_length, chunk_edge_length),
-                DirectX::XMFLOAT3(chunk_edge_length, chunk_edge_length, chunk_edge_length),
-                DirectX::XMFLOAT3(chunk_edge_length, 0.0f, chunk_edge_length),
-            };
-
-            std::array<DirectX::XMFLOAT4, 8> chunk_aabb_vertices = {};
-            for (int i = 0; i < 8; i++)
-            {
-                chunk_aabb_vertices[i] = DirectX::XMFLOAT4{
-                    chunk_vertices_data[i].x + chunk_offset.x,
-                    chunk_vertices_data[i].y + chunk_offset.y,
-                    chunk_vertices_data[i].z + chunk_offset.z,
-                    1.0f,
-                };
-            }
-
-            // Check if atleast 1 vertex is in the correct range to NOT be culled away.
-            u32 culled_vertices = 0u;
-            for (int i = 0; i < 8; i++)
-            {
-                DirectX::XMVECTOR vertex = DirectX::XMLoadFloat4(&chunk_aabb_vertices[i]);
-                const DirectX::XMVECTOR clip_space_coords = DirectX::XMVector4Transform(vertex, view_projection_matrix);
-                const float w = DirectX::XMVectorGetW(clip_space_coords);
-
-                const float x = DirectX::XMVectorGetX(clip_space_coords);
-                const float y = DirectX::XMVectorGetY(clip_space_coords);
-                const float z = DirectX::XMVectorGetZ(clip_space_coords);
-
-                bool is_visible = (-w <= x) && (x <= w) && (-w <= y) && (y <= w) && (0 <= z) && (z <= w);
-                if (!is_visible)
-                {
-                    culled_vertices++;
-                }
-            }
-
-            if (culled_vertices < 7)
-            {
-                indirect_command_vector.emplace_back(IndirectCommand{
-                    .render_resources = render_resources,
-                    .draw_arguments =
-                        D3D12_DRAW_ARGUMENTS{
-                            .VertexCountPerInstance = (u32)chunk_manager.m_chunk_number_of_vertices[i],
-                            .InstanceCount = 1u,
-                            .StartVertexLocation = 0u,
-                            .StartInstanceLocation = 0u,
-                        },
-                });
-            }
+            indirect_command_vector.emplace_back(IndirectCommand{
+                .render_resources = render_resources,
+                .draw_arguments =
+                    D3D12_DRAW_ARGUMENTS{
+                        .VertexCountPerInstance = (u32)chunk_manager.m_chunk_number_of_vertices[i],
+                        .InstanceCount = 1u,
+                        .StartVertexLocation = 0u,
+                        .StartInstanceLocation = 0u,
+                    },
+            });
         }
 
+        ID3D12DescriptorHeap *const *shader_visible_descriptor_heaps = {
+            renderer.m_cbv_srv_uav_descriptor_heap.descriptor_heap.GetAddressOf(),
+        };
+
+        command_list->SetDescriptorHeaps(1u, shader_visible_descriptor_heaps);
+
+        // Prepare rendering commands.
+        command_list->OMSetRenderTargets(1u, &rtv_handle, FALSE, &dsv_handle);
+
+        // Run the culling compute shader, followed by voxel rendering shader.
         if (!indirect_command_vector.empty())
         {
-            // Copy the indirect commands to the GPU side buffer.
-            indirect_command_buffer.update(command_list.Get(), indirect_command_vector.data(),
-                                           indirect_command_vector.size() * sizeof(IndirectCommand));
+            memcpy(indirect_command_buffer.upload_resource_mapped_ptr, indirect_command_vector.data(),
+                   indirect_command_vector.size() * sizeof(IndirectCommand));
 
-            command_list->ExecuteIndirect(command_signature.Get(), indirect_command_vector.size(),
-                                          indirect_command_buffer.default_resource.Get(), 0u, nullptr, 0u);
+            GPUCullRenderResources gpu_cull_render_resources = {
+                .indirect_command_srv_index = static_cast<u32>(indirect_command_buffer.upload_resource_srv_index),
+                .output_command_uav_index = static_cast<u32>(indirect_command_buffer.default_resource_uav_index),
+                .scene_constant_buffer_index = static_cast<u32>(scene_buffer.cbv_index),
+            };
+
+            command_list->SetDescriptorHeaps(1u, shader_visible_descriptor_heaps);
+            command_list->SetComputeRootSignature(renderer.m_bindless_root_signature.Get());
+            command_list->SetPipelineState(gpu_culling_pso.Get());
+
+            command_list->SetComputeRoot32BitConstants(0u, 64u, &gpu_cull_render_resources, 0u);
+
+            command_list->Dispatch(indirect_command_vector.size(), 1u, 1u);
+
+            command_list->SetDescriptorHeaps(1u, shader_visible_descriptor_heaps);
+            command_list->SetGraphicsRootSignature(renderer.m_bindless_root_signature.Get());
+            command_list->SetPipelineState(pso.Get());
+
+            command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+            command_list->ExecuteIndirect(command_signature.Get(), MAX_CHUNKS_TO_BE_DRAWN,
+                                          indirect_command_buffer.default_resource.Get(), 0u,
+                                          indirect_command_buffer.default_resource.Get(), 0u);
         }
 
         // Render UI.
         // Start the Dear ImGui frame
+
         ImGui_ImplDX12_NewFrame();
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
@@ -553,6 +548,7 @@ int main()
         ImGui::ShowMetricsWindow();
         ImGui::End();
 
+        command_list->SetDescriptorHeaps(1u, shader_visible_descriptor_heaps);
         ImGui::Render();
         ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), command_list.Get());
 

@@ -271,7 +271,7 @@ StructuredBuffer Renderer::create_structured_buffer(const void *data, const size
     m_copy_queue.execute_command_list(std::move(command_allocator_list_pair));
 
     // Create structured buffer view.
-    size_t srv_index = create_shader_resource_view(m_resources.size() - 1u, stride, num_elements);
+    size_t srv_index = create_shader_resource_view(m_resources.back().Get(), stride, num_elements);
 
     return StructuredBuffer{
         .resource_index = m_resources.size() - 1u,
@@ -321,7 +321,7 @@ ConstantBuffer Renderer::create_constant_buffer(const size_t size_in_bytes, cons
     name_d3d12_object(m_resources.back().Get(), buffer_name);
 
     // Create Constant buffer view.
-    size_t cbv_index = create_constant_buffer_view(m_resources.size() - 1u, size_in_bytes);
+    size_t cbv_index = create_constant_buffer_view(m_resources.back().Get(), size_in_bytes);
 
     return ConstantBuffer{
         .resource_index = m_resources.size() - 1u,
@@ -350,7 +350,7 @@ CommandBuffer Renderer::create_command_buffer(const size_t stride, const size_t 
         .VisibleNodeMask = 0u,
     };
 
-    const D3D12_RESOURCE_DESC buffer_resource_desc = {
+    const D3D12_RESOURCE_DESC upload_buffer_resource_desc = {
         .Dimension = D3D12_RESOURCE_DIMENSION_BUFFER,
         .Width = size_in_bytes,
         .Height = 1u,
@@ -364,13 +364,25 @@ CommandBuffer Renderer::create_command_buffer(const size_t stride, const size_t 
 
     throw_if_failed(m_device->CreateCommittedResource(
         &upload_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES | D3D12_HEAP_FLAG_CREATE_NOT_ZEROED,
-        &buffer_resource_desc, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, nullptr,
+        &upload_buffer_resource_desc, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, nullptr,
         IID_PPV_ARGS(&intermediate_buffer_resource)));
 
     // Now that a resource is created, copy CPU data to this upload buffer.
     const D3D12_RANGE read_range{.Begin = 0u, .End = 0u};
 
     throw_if_failed(intermediate_buffer_resource->Map(0u, &read_range, (void **)&resource_ptr));
+
+    const D3D12_RESOURCE_DESC buffer_resource_desc = {
+        .Dimension = D3D12_RESOURCE_DIMENSION_BUFFER,
+        .Width = size_in_bytes,
+        .Height = 1u,
+        .DepthOrArraySize = 1u,
+        .MipLevels = 1u,
+        .Format = DXGI_FORMAT_UNKNOWN,
+        .SampleDesc = {1u, 0u},
+        .Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
+        .Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
+    };
 
     // Create the final resource and transfer the data from upload buffer to the final buffer.
     // The heap type is : Default (no CPU access).
@@ -390,39 +402,28 @@ CommandBuffer Renderer::create_command_buffer(const size_t stride, const size_t 
     name_d3d12_object(intermediate_buffer_resource.Get(), std::wstring(buffer_name) + std::wstring(L" [intermediate]"));
 
     // Create the SRV.
-    const D3D12_CPU_DESCRIPTOR_HANDLE handle = m_cbv_srv_uav_descriptor_heap.current_cpu_descriptor_handle;
+    const size_t upload_resource_srv_index =
+        create_shader_resource_view(intermediate_buffer_resource.Get(), stride, max_number_of_elements);
 
-    const D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {
-        .Format = DXGI_FORMAT_UNKNOWN,
-        .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
-        .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
-        .Buffer{
-            .FirstElement = 0u,
-            .NumElements = static_cast<UINT>(max_number_of_elements),
-            .StructureByteStride = static_cast<UINT>(stride),
-        },
-    };
-
-    m_device->CreateShaderResourceView(buffer_resource.Get(), &srv_desc, handle);
-
-    const size_t srv_index = m_cbv_srv_uav_descriptor_heap.current_descriptor_handle_index;
-
-    m_cbv_srv_uav_descriptor_heap.offset_current_descriptor_handles();
+    // Create the UAV.
+    const size_t default_resource_uav_index =
+        create_unordered_access_view(buffer_resource.Get(), stride, max_number_of_elements, true);
 
     return CommandBuffer{
         .default_resource = buffer_resource,
         .upload_resource = intermediate_buffer_resource,
         .upload_resource_mapped_ptr = resource_ptr,
-        .srv_index = srv_index,
+        .upload_resource_srv_index = upload_resource_srv_index,
+        .default_resource_uav_index = default_resource_uav_index,
     };
 }
 
-size_t Renderer::create_constant_buffer_view(const size_t buffer_resource_index, const size_t size)
+size_t Renderer::create_constant_buffer_view(ID3D12Resource *const resource, const size_t size)
 {
     const D3D12_CPU_DESCRIPTOR_HANDLE handle = m_cbv_srv_uav_descriptor_heap.current_cpu_descriptor_handle;
 
     const D3D12_CONSTANT_BUFFER_VIEW_DESC cbv_desc = {
-        .BufferLocation = m_resources[buffer_resource_index]->GetGPUVirtualAddress(),
+        .BufferLocation = resource->GetGPUVirtualAddress(),
         .SizeInBytes = static_cast<UINT>(size),
     };
 
@@ -435,7 +436,7 @@ size_t Renderer::create_constant_buffer_view(const size_t buffer_resource_index,
     return cbv_index;
 }
 
-size_t Renderer::create_shader_resource_view(const size_t buffer_resource_index, const size_t stride,
+size_t Renderer::create_shader_resource_view(ID3D12Resource *const resource, const size_t stride,
                                              const size_t num_elements)
 {
     const D3D12_CPU_DESCRIPTOR_HANDLE handle = m_cbv_srv_uav_descriptor_heap.current_cpu_descriptor_handle;
@@ -451,13 +452,46 @@ size_t Renderer::create_shader_resource_view(const size_t buffer_resource_index,
         },
     };
 
-    m_device->CreateShaderResourceView(m_resources[buffer_resource_index].Get(), &srv_desc, handle);
+    m_device->CreateShaderResourceView(resource, &srv_desc, handle);
 
     const size_t srv_index = m_cbv_srv_uav_descriptor_heap.current_descriptor_handle_index;
 
     m_cbv_srv_uav_descriptor_heap.offset_current_descriptor_handles();
 
     return srv_index;
+}
+
+size_t Renderer::create_unordered_access_view(ID3D12Resource *const resource, const size_t stride,
+                                              const size_t num_elements, const bool use_counter)
+{
+    const D3D12_CPU_DESCRIPTOR_HANDLE handle = m_cbv_srv_uav_descriptor_heap.current_cpu_descriptor_handle;
+
+    const D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {
+        .Format = DXGI_FORMAT_UNKNOWN,
+        .ViewDimension = D3D12_UAV_DIMENSION_BUFFER,
+        .Buffer{
+            .FirstElement = 0u,
+            .NumElements = static_cast<UINT>(num_elements),
+            .StructureByteStride = static_cast<UINT>(stride),
+            .CounterOffsetInBytes = 0u,
+            .Flags = D3D12_BUFFER_UAV_FLAGS::D3D12_BUFFER_UAV_FLAG_NONE,
+        },
+    };
+
+    if (!use_counter)
+    {
+        m_device->CreateUnorderedAccessView(resource, nullptr, &uav_desc, handle);
+    }
+    else
+    {
+        m_device->CreateUnorderedAccessView(resource, resource, &uav_desc, handle);
+    }
+
+    const size_t uav_index = m_cbv_srv_uav_descriptor_heap.current_descriptor_handle_index;
+
+    m_cbv_srv_uav_descriptor_heap.offset_current_descriptor_handles();
+
+    return uav_index;
 }
 
 void Renderer::DirectCommandQueue::create(ID3D12Device *const device)

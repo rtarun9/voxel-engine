@@ -31,7 +31,8 @@ struct CommandBuffer
     Microsoft::WRL::ComPtr<ID3D12Resource> upload_resource{};
 
     u8 *upload_resource_mapped_ptr{};
-    size_t srv_index{};
+    size_t upload_resource_srv_index{};
+    size_t default_resource_uav_index{};
 
     void update(ID3D12GraphicsCommandList *const command_list, const void *data, const size_t size) const;
 };
@@ -76,9 +77,10 @@ struct Renderer
 
   private:
     // This function automatically offset's the current descriptor handle of descriptor heap.
-    size_t create_constant_buffer_view(const size_t buffer_resource_index, const size_t size);
-    size_t create_shader_resource_view(const size_t buffer_resource_index, const size_t stride,
-                                       const size_t num_elements);
+    size_t create_constant_buffer_view(ID3D12Resource *const resource, size_t size);
+    size_t create_shader_resource_view(ID3D12Resource *const resource, const size_t stride, const size_t num_elements);
+    size_t create_unordered_access_view(ID3D12Resource *const resource, const size_t stride, const size_t num_elements,
+                                        const bool use_counter = false);
 
   public:
     // Static globals.

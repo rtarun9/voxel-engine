@@ -33,7 +33,7 @@ ConstantBuffer<GPUCullRenderResources> render_resources : register(b0);
             (-clip_space_coords.w <= clip_space_coords.y) && (clip_space_coords.y <= clip_space_coords.w) &&
             (0 <= clip_space_coords.z) && (clip_space_coords.z <= clip_space_coords.w);
 
-        if (is_visible)
+        if (!is_visible)
         {
             ++culled_vertices;
         }
