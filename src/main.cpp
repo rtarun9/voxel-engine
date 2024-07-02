@@ -510,8 +510,6 @@ int main()
 
             command_list->SetComputeRoot32BitConstants(0u, 64u, &gpu_cull_render_resources, 0u);
 
-            // Clear the counter associated with UAV.
-
             const D3D12_RESOURCE_BARRIER indirect_argument_to_copy_dest_state = {
                 .Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
                 .Flags = D3D12_RESOURCE_BARRIER_FLAGS::D3D12_RESOURCE_BARRIER_FLAG_NONE,
@@ -525,11 +523,13 @@ int main()
             };
             command_list->ResourceBarrier(1u, &indirect_argument_to_copy_dest_state);
 
-            command_list->CopyBufferRegion(indirect_command_buffer.default_resource.Get(),
-                                           D3D12_UAV_COUNTER_PLACEMENT_ALIGNMENT,
-                                           indirect_command_buffer.zeroed_counter_buffer_resource.Get(), 0u, 4u);
+            // Clear the counter associated with UAV.
 
-            const D3D12_RESOURCE_BARRIER copy_dest_to_indirect_argument_state = {
+            command_list->CopyBufferRegion(indirect_command_buffer.default_resource.Get(), 0u,
+                                           indirect_command_buffer.zeroed_counter_buffer_resource.Get(),
+                                           indirect_command_buffer.counter_offset, 4u);
+
+            const D3D12_RESOURCE_BARRIER copy_dest_to_unordered_access_state = {
                 .Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
                 .Flags = D3D12_RESOURCE_BARRIER_FLAGS::D3D12_RESOURCE_BARRIER_FLAG_NONE,
                 .Transition =
@@ -537,22 +537,38 @@ int main()
                         .pResource = indirect_command_buffer.default_resource.Get(),
                         .Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
                         .StateBefore = D3D12_RESOURCE_STATE_COPY_DEST,
-                        .StateAfter = D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT,
+                        .StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
                     },
+
             };
 
-            command_list->ResourceBarrier(1u, &copy_dest_to_indirect_argument_state);
+            command_list->ResourceBarrier(1u, &copy_dest_to_unordered_access_state);
 
-            command_list->Dispatch(indirect_command_vector.size(), 1u, 1u);
+            command_list->Dispatch((indirect_command_vector.size() + 31) / 32u, 1u, 1u);
+
+            const D3D12_RESOURCE_BARRIER unordered_access_to_indirect_argument_state = {
+                .Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
+                .Flags = D3D12_RESOURCE_BARRIER_FLAGS::D3D12_RESOURCE_BARRIER_FLAG_NONE,
+                .Transition =
+                    D3D12_RESOURCE_TRANSITION_BARRIER{
+                        .pResource = indirect_command_buffer.default_resource.Get(),
+                        .Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+                        .StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                        .StateAfter = D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT,
+                    },
+
+            };
+
+            command_list->ResourceBarrier(1u, &unordered_access_to_indirect_argument_state);
 
             command_list->SetDescriptorHeaps(1u, shader_visible_descriptor_heaps);
             command_list->SetGraphicsRootSignature(renderer.m_bindless_root_signature.Get());
             command_list->SetPipelineState(pso.Get());
 
             command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-            command_list->ExecuteIndirect(command_signature.Get(), MAX_CHUNKS_TO_BE_DRAWN,
-                                          indirect_command_buffer.default_resource.Get(), 0u,
-                                          indirect_command_buffer.default_resource.Get(), 0u);
+            command_list->ExecuteIndirect(
+                command_signature.Get(), MAX_CHUNKS_TO_BE_DRAWN, indirect_command_buffer.default_resource.Get(), 0u,
+                indirect_command_buffer.default_resource.Get(), indirect_command_buffer.counter_offset);
         }
 
         // Render UI.

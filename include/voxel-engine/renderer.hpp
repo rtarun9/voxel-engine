@@ -34,6 +34,7 @@ struct CommandBuffer
     u8 *upload_resource_mapped_ptr{};
     size_t upload_resource_srv_index{};
     size_t default_resource_uav_index{};
+    size_t counter_offset{};
 };
 
 // A simple & straight forward high level renderer abstraction.
@@ -79,7 +80,8 @@ struct Renderer
     size_t create_constant_buffer_view(ID3D12Resource *const resource, size_t size);
     size_t create_shader_resource_view(ID3D12Resource *const resource, const size_t stride, const size_t num_elements);
     size_t create_unordered_access_view(ID3D12Resource *const resource, const size_t stride, const size_t num_elements,
-                                        const bool use_counter = false);
+                                        const bool use_counter = false,
+                                        const size_t counter_offset = D3D12_UAV_COUNTER_PLACEMENT_ALIGNMENT);
 
   public:
     // Static globals.

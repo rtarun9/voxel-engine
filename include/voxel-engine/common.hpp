@@ -39,3 +39,15 @@ static inline void name_d3d12_object(ID3D12Object *const object, const std::wstr
         object->SetName(std::wstring(name).c_str());
     }
 }
+
+static inline size_t round_up_to_multiple(size_t a, size_t multiple)
+{
+    if (a % multiple == 0)
+    {
+        return a;
+    }
+    else
+    {
+        return a + multiple - (a % multiple);
+    }
+}

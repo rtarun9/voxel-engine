@@ -334,7 +334,10 @@ ConstantBuffer Renderer::create_constant_buffer(const size_t size_in_bytes, cons
 CommandBuffer Renderer::create_command_buffer(const size_t stride, const size_t max_number_of_elements,
                                               const std::wstring_view buffer_name)
 {
-    const size_t size_in_bytes = stride * max_number_of_elements;
+    // Note that counter offset must be multiple of d3d12 uav counter placement alignment.
+    size_t counter_offset =
+        round_up_to_multiple(stride * max_number_of_elements, D3D12_UAV_COUNTER_PLACEMENT_ALIGNMENT);
+    const size_t size_in_bytes = counter_offset + 4u;
 
     u8 *resource_ptr{};
     Microsoft::WRL::ComPtr<ID3D12Resource> buffer_resource{};
@@ -394,9 +397,11 @@ CommandBuffer Renderer::create_command_buffer(const size_t stride, const size_t 
             &upload_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES | D3D12_HEAP_FLAG_CREATE_NOT_ZEROED,
             &upload_buffer_resource_desc, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, nullptr,
             IID_PPV_ARGS(&zeroed_counter_buffer_resource)));
+
         throw_if_failed(zeroed_counter_buffer_resource->Map(0u, &read_range, (void **)&zeroed_counter_buffer_ptr));
         u32 zero = 0u;
         memcpy(zeroed_counter_buffer_ptr, &zero, sizeof(u32));
+        zeroed_counter_buffer_resource->Unmap(0u, nullptr);
     }
 
     const D3D12_RESOURCE_DESC buffer_resource_desc = {
@@ -443,6 +448,7 @@ CommandBuffer Renderer::create_command_buffer(const size_t stride, const size_t 
         .upload_resource_mapped_ptr = resource_ptr,
         .upload_resource_srv_index = upload_resource_srv_index,
         .default_resource_uav_index = default_resource_uav_index,
+        .counter_offset = counter_offset,
     };
 }
 
@@ -490,7 +496,8 @@ size_t Renderer::create_shader_resource_view(ID3D12Resource *const resource, con
 }
 
 size_t Renderer::create_unordered_access_view(ID3D12Resource *const resource, const size_t stride,
-                                              const size_t num_elements, const bool use_counter)
+                                              const size_t num_elements, const bool use_counter,
+                                              const size_t counter_offset)
 {
     const D3D12_CPU_DESCRIPTOR_HANDLE handle = m_cbv_srv_uav_descriptor_heap.current_cpu_descriptor_handle;
 
@@ -512,7 +519,7 @@ size_t Renderer::create_unordered_access_view(ID3D12Resource *const resource, co
     }
     else
     {
-        uav_desc.Buffer.CounterOffsetInBytes = D3D12_UAV_COUNTER_PLACEMENT_ALIGNMENT;
+        uav_desc.Buffer.CounterOffsetInBytes = counter_offset;
         m_device->CreateUnorderedAccessView(resource, resource, &uav_desc, handle);
     }
 
