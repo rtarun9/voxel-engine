@@ -439,7 +439,7 @@ CommandBuffer Renderer::create_command_buffer(const size_t stride, const size_t 
 
     // Create the UAV.
     const size_t default_resource_uav_index =
-        create_unordered_access_view(buffer_resource.Get(), stride, max_number_of_elements, true);
+        create_unordered_access_view(buffer_resource.Get(), stride, max_number_of_elements, true, counter_offset);
 
     return CommandBuffer{
         .default_resource = buffer_resource,

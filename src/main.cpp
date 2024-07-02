@@ -407,7 +407,6 @@ int main()
 
         // All chunks whose distance from the camera is more than render distance are moved to the unloaded chunk hash
         // map.
-        /*
         std::vector<u64> chunks_to_unload{};
         for (const auto &[i, chunk] : chunk_manager.m_loaded_chunks)
         {
@@ -427,7 +426,6 @@ int main()
                 std::move(chunk_manager.m_loaded_chunks[chunk_to_unload]);
             chunk_manager.m_loaded_chunks.erase(chunk_to_unload);
         }
-        */
 
         /*
         // If a chunk's distance is 3X of render distance, is it removed from memory.
@@ -499,6 +497,7 @@ int main()
                    indirect_command_vector.size() * sizeof(IndirectCommand));
 
             GPUCullRenderResources gpu_cull_render_resources = {
+                .number_of_chunks = static_cast<u32>(indirect_command_vector.size()),
                 .indirect_command_srv_index = static_cast<u32>(indirect_command_buffer.upload_resource_srv_index),
                 .output_command_uav_index = static_cast<u32>(indirect_command_buffer.default_resource_uav_index),
                 .scene_constant_buffer_index = static_cast<u32>(scene_buffer.cbv_index),
@@ -525,9 +524,9 @@ int main()
 
             // Clear the counter associated with UAV.
 
-            command_list->CopyBufferRegion(indirect_command_buffer.default_resource.Get(), 0u,
-                                           indirect_command_buffer.zeroed_counter_buffer_resource.Get(),
-                                           indirect_command_buffer.counter_offset, 4u);
+            command_list->CopyBufferRegion(indirect_command_buffer.default_resource.Get(),
+                                           indirect_command_buffer.counter_offset,
+                                           indirect_command_buffer.zeroed_counter_buffer_resource.Get(), 0u, 4u);
 
             const D3D12_RESOURCE_BARRIER copy_dest_to_unordered_access_state = {
                 .Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,

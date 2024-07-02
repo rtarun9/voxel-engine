@@ -57,6 +57,7 @@ struct GPUIndirectCommand
 
 struct GPUCullRenderResources
 {
+    uint number_of_chunks;
     uint indirect_command_srv_index;
     uint output_command_uav_index;
     uint scene_constant_buffer_index;
