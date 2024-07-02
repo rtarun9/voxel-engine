@@ -1,9 +1,16 @@
-#include "pch.hpp"
+#include "voxel-engine/window.hpp"
 
-#include "window.hpp"
+#include <imgui.h>
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND window_handle, UINT message, WPARAM w_param,
+                                                             LPARAM l_param);
 
 static LRESULT CALLBACK window_proc(HWND window_handle, UINT message, WPARAM w_param, LPARAM l_param)
 {
+    if (ImGui_ImplWin32_WndProcHandler(window_handle, message, w_param, l_param))
+    {
+        return true;
+    }
+
     switch (message)
     {
         // Handle case when the close button / alt f4 is pressed.
