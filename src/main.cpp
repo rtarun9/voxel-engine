@@ -153,7 +153,7 @@ int main()
         .SampleMask = 0xffff'ffff,
         .RasterizerState =
             {
-                .FillMode = D3D12_FILL_MODE_SOLID,
+                .FillMode = D3D12_FILL_MODE_WIREFRAME,
                 .CullMode = D3D12_CULL_MODE_BACK,
                 .FrontCounterClockwise = FALSE,
                 .DepthClipEnable = TRUE,
@@ -592,6 +592,7 @@ int main()
         ImGui::Begin("Debug Controller");
         ImGui::SliderFloat("movement_speed", &camera.m_movement_speed, 0.0f, 50000.0f);
         ImGui::SliderFloat("rotation_speed", &camera.m_rotation_speed, 0.0f, 10.0f);
+        ImGui::SliderFloat("friction", &camera.m_friction, 0.0f, 1.0f);
         ImGui::SliderFloat("near plane", &near_plane, 0.1f, 1.0f);
         ImGui::SliderFloat("Far plane", &far_plane, 10.0f, 10000000.0f);
         ImGui::Checkbox("Start loading chunks", &setup_chunks);

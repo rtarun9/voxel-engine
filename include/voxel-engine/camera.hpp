@@ -15,6 +15,10 @@ class Camera
     float m_movement_speed{50.0f};
     float m_rotation_speed{1.0f};
 
+    // Used to determine how 'smooth' the camera behaves.
+    // For now, both rotation and movement use the same friction value, purely for simplicity.
+    float m_friction{0.30f};
+
     float m_pitch{};
     float m_yaw{};
 };

@@ -49,6 +49,13 @@ ChunkManager::SetupChunkData ChunkManager::internal_mt_setup_chunk(Renderer &ren
         DirectX::XMFLOAT3(Voxel::EDGE_LENGTH, 0.0f, Voxel::EDGE_LENGTH),
     };
 
+    // note(rtarun9) : Only for demo purposes.
+    const DirectX::XMFLOAT3 chunk_color = {
+        (float)rand() / RAND_MAX,
+        (float)rand() / RAND_MAX,
+        (float)rand() / RAND_MAX,
+    };
+
     for (size_t i = 0; i < Chunk::NUMBER_OF_VOXELS; i++)
     {
         if (!setup_chunk_data.m_chunk.m_voxels[i].m_active)
@@ -56,11 +63,7 @@ ChunkManager::SetupChunkData ChunkManager::internal_mt_setup_chunk(Renderer &ren
             continue;
         }
 
-        const DirectX::XMFLOAT3 voxel_color = {
-            (float)rand() / RAND_MAX,
-            (float)rand() / RAND_MAX,
-            (float)rand() / RAND_MAX,
-        };
+        const auto voxel_color = chunk_color;
 
         const DirectX::XMUINT3 index_3d = convert_to_3d(i, Chunk::NUMBER_OF_VOXELS_PER_DIMENSION);
         const DirectX::XMFLOAT3 offset = DirectX::XMFLOAT3(
@@ -215,6 +218,7 @@ ChunkManager::SetupChunkData ChunkManager::internal_mt_setup_chunk(Renderer &ren
     setup_chunk_data.m_chunk.m_chunk_index = index;
     return setup_chunk_data;
 }
+
 void ChunkManager::add_chunk_to_setup_stack(const u64 index)
 {
     // If chunk is unloaded, move it to the loaded chunk hash map right away.

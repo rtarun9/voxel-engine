@@ -7,6 +7,7 @@ project(voxel-engine
         DESCRIPTION "A voxel engine made for learning purposes"
         LANGUAGES CXX)
 
+
 # For simplicity, all the outputs will lie in the same path (build/<configuration>/bin)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR}/debug/bin)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR}/debug/bin)
