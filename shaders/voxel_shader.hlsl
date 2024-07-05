@@ -13,6 +13,7 @@ VSOutput vs_main(uint vertex_id : SV_VertexID)
 
     ConstantBuffer<SceneConstantBuffer> scene_buffer =
         ResourceDescriptorHeap[render_resources.scene_constant_buffer_index];
+
     ConstantBuffer<ChunkConstantBuffer> chunk_constant_buffer =
         ResourceDescriptorHeap[render_resources.chunk_constant_buffer_index];
 

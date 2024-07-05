@@ -31,9 +31,6 @@ ConstantBuffer<GPUCullRenderResources> render_resources : register(b0);
             clip_space_coords.y /= clip_space_coords.w;
             clip_space_coords.z /= clip_space_coords.w;
 
-            // note(rtarun9) : For testing purposes only.
-            clip_space_coords.w /= 2.0f;
-
             bool is_visible =
                 (-clip_space_coords.w <= clip_space_coords.x) && (clip_space_coords.x <= clip_space_coords.w) &&
                 (-clip_space_coords.w <= clip_space_coords.y) && (clip_space_coords.y <= clip_space_coords.w) &&

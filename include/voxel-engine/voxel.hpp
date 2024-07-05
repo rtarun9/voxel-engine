@@ -7,7 +7,7 @@
 // position' and has a edge length as specified in the class below.
 struct Voxel
 {
-    static constexpr float EDGE_LENGTH{64.0f};
+    static constexpr float EDGE_LENGTH{8.0f};
     bool m_active{true};
 };
 
@@ -23,7 +23,7 @@ struct Chunk
 
     ~Chunk();
 
-    static constexpr u32 NUMBER_OF_VOXELS_PER_DIMENSION = 16u;
+    static constexpr u32 NUMBER_OF_VOXELS_PER_DIMENSION = 8u;
     static constexpr size_t NUMBER_OF_VOXELS =
         NUMBER_OF_VOXELS_PER_DIMENSION * NUMBER_OF_VOXELS_PER_DIMENSION * NUMBER_OF_VOXELS_PER_DIMENSION;
 
@@ -76,8 +76,11 @@ struct ChunkManager
     // Determines how many chunks are loaded around the player.
     static constexpr u32 CHUNK_RENDER_DISTANCE = 6u;
 
-    static constexpr u32 NUMBER_OF_CHUNKS_TO_CREATE_PER_FRAME = 16u;
-    static constexpr u32 NUMBER_OF_CHUNKS_TO_LOAD_PER_FRAME = 32u;
+    // Chunks to create per frame : How many chunks are setup (i.e the meshing processes occurs).
+    static constexpr u32 NUMBER_OF_CHUNKS_TO_CREATE_PER_FRAME = 1u;
+
+    // Chunks to load per frame : How many setup chunks are moved into the loaded chunk hash map.
+    static constexpr u32 NUMBER_OF_CHUNKS_TO_LOAD_PER_FRAME = 1u;
 
     std::unordered_map<size_t, Chunk> m_loaded_chunks{};
     std::unordered_map<size_t, Chunk> m_unloaded_chunks{};
@@ -93,10 +96,10 @@ struct ChunkManager
     // Then, each from from this stack, add elements into the queue.
     std::stack<u64> m_chunks_to_setup_stack{};
 
-    // A hashmap to keep track of chunks that are currently in process of being setup.
+    // A unordered set to keep track of chunks that are currently in process of being setup.
     // This is required in case create_chunk is called for a chunk that is being setup but not loaded. We do not want to
     // load this chunk again.
-    std::unordered_map<size_t, size_t> m_chunk_indices_that_are_being_setup{};
+    std::unordered_set<size_t> m_chunk_indices_that_are_being_setup{};
 
     std::unordered_map<size_t, StructuredBuffer> m_chunk_position_buffers{};
     std::unordered_map<size_t, StructuredBuffer> m_chunk_color_buffers{};

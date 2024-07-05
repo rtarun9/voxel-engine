@@ -275,7 +275,10 @@ int main()
     // around the player at any given moment.
     // For precomputation, X is assumed to be zero. These values will be added to the current chunk index.
     // NOTE : The current player chunk is loaded first, then the chunks 1 distance away, then 2 distance away, etc.
+    // note(rtarun9) : Make this more efficient?
     std::vector<DirectX::XMINT3> chunk_render_distance_offsets = {};
+    chunk_render_distance_offsets.push_back(DirectX::XMINT3{0, 0, 0});
+
     for (i32 z = -1 * ChunkManager::CHUNK_RENDER_DISTANCE; z <= (i32)ChunkManager::CHUNK_RENDER_DISTANCE; z++)
     {
         for (i32 y = -ChunkManager::CHUNK_RENDER_DISTANCE; y <= (i32)ChunkManager::CHUNK_RENDER_DISTANCE; y++)
@@ -291,10 +294,14 @@ int main()
             }
         }
     }
+    std::sort(chunk_render_distance_offsets.begin(), chunk_render_distance_offsets.end(),
+              [](const DirectX::XMINT3 &a, const DirectX::XMINT3 &b) {
+                  return a.x * a.x + a.y * a.y + a.z * a.z < b.x * b.x + b.y * b.y + b.z * b.z;
+              });
 
     Camera camera{};
     const u64 chunk_grid_middle = Chunk::CHUNK_LENGTH * ChunkManager::NUMBER_OF_CHUNKS_PER_DIMENSION / 2u;
-    camera.m_position = {chunk_grid_middle, chunk_grid_middle, chunk_grid_middle};
+    camera.m_position = {chunk_grid_middle, chunk_grid_middle, chunk_grid_middle, 1.0f};
 
     Timer timer{};
     float delta_time = 0.0f;
@@ -405,16 +412,20 @@ int main()
         command_list->RSSetViewports(1u, &viewport);
         command_list->RSSetScissorRects(1u, &scissor_rect);
 
-        // All chunks whose distance from the camera is more than render distance are moved to the unloaded chunk hash
-        // map.
+        // All chunks whose distance from the camera is more than render distance * 10 are moved to the unloaded chunk
+        // hash map.
+        /*
         std::vector<u64> chunks_to_unload{};
         for (const auto &[i, chunk] : chunk_manager.m_loaded_chunks)
         {
             const DirectX::XMUINT3 chunk_index_3d = convert_to_3d(i, ChunkManager::NUMBER_OF_CHUNKS_PER_DIMENSION);
 
-            if (std::abs((i32)chunk_index_3d.x - (i32)current_chunk_3d_index.x) > ChunkManager::CHUNK_RENDER_DISTANCE ||
-                std::abs((i32)chunk_index_3d.y - (i32)current_chunk_3d_index.y) > ChunkManager::CHUNK_RENDER_DISTANCE ||
-                std::abs((i32)chunk_index_3d.z - (i32)current_chunk_3d_index.z) > ChunkManager::CHUNK_RENDER_DISTANCE)
+            if (std::abs((i32)chunk_index_3d.x - (i32)current_chunk_3d_index.x) >
+                    10 * ChunkManager::CHUNK_RENDER_DISTANCE ||
+                std::abs((i32)chunk_index_3d.y - (i32)current_chunk_3d_index.y) >
+                    10 * ChunkManager::CHUNK_RENDER_DISTANCE ||
+                std::abs((i32)chunk_index_3d.z - (i32)current_chunk_3d_index.z) >
+                    10 * ChunkManager::CHUNK_RENDER_DISTANCE)
             {
                 chunks_to_unload.push_back(i);
             }
@@ -426,6 +437,7 @@ int main()
                 std::move(chunk_manager.m_loaded_chunks[chunk_to_unload]);
             chunk_manager.m_loaded_chunks.erase(chunk_to_unload);
         }
+        */
 
         /*
         // If a chunk's distance is 3X of render distance, is it removed from memory.
@@ -581,9 +593,11 @@ int main()
         ImGui::SliderFloat("movement_speed", &camera.m_movement_speed, 0.0f, 50000.0f);
         ImGui::SliderFloat("rotation_speed", &camera.m_rotation_speed, 0.0f, 10.0f);
         ImGui::SliderFloat("near plane", &near_plane, 0.1f, 1.0f);
-        ImGui::SliderFloat("Far plane", &far_plane, 10.0f, 100000.0f);
+        ImGui::SliderFloat("Far plane", &far_plane, 10.0f, 10000000.0f);
         ImGui::Checkbox("Start loading chunks", &setup_chunks);
+        ImGui::Text("Delta Time: %f", delta_time);
         ImGui::Text("Camera Position : %f %f %f", camera.m_position.x, camera.m_position.y, camera.m_position.z);
+        ImGui::Text("Pitch and Yaw: %f %f", camera.m_pitch, camera.m_yaw);
         ImGui::Text("Current Index: %zu", current_chunk_index);
         ImGui::Text("Current 3D Index: %zu, %zu, %zu", current_chunk_3d_index.x, current_chunk_3d_index.y,
                     current_chunk_3d_index.z);

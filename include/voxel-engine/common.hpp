@@ -3,7 +3,8 @@
 #include "types.hpp"
 
 // Helper function to print to console in debug mode if the passed Hresult has failed.
-inline void throw_if_failed(const HRESULT hr, const std::source_location src_loc = std::source_location::current())
+static inline void throw_if_failed(const HRESULT hr,
+                                   const std::source_location src_loc = std::source_location::current())
 {
     if constexpr (VX_DEBUG_MODE)
     {

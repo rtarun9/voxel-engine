@@ -48,12 +48,6 @@ ChunkManager::SetupChunkData ChunkManager::internal_mt_setup_chunk(Renderer &ren
         DirectX::XMFLOAT3(Voxel::EDGE_LENGTH, 0.0f, Voxel::EDGE_LENGTH),
     };
 
-    setup_chunk_data.m_chunk.m_voxels[0].m_active = true;
-    for (size_t i = 1; i < Chunk::NUMBER_OF_VOXELS; i++)
-    {
-        setup_chunk_data.m_chunk.m_voxels[i].m_active = false;
-    }
-
     for (size_t i = 0; i < Chunk::NUMBER_OF_VOXELS; i++)
     {
         if (!setup_chunk_data.m_chunk.m_voxels[i].m_active)
@@ -224,7 +218,7 @@ void ChunkManager::add_chunk_to_setup_stack(const u64 index)
         return;
     }
 
-    m_chunk_indices_that_are_being_setup[index] = index;
+    m_chunk_indices_that_are_being_setup.insert(index);
     m_chunks_to_setup_stack.push(index);
 }
 
