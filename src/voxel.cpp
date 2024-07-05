@@ -34,8 +34,9 @@ ChunkManager::SetupChunkData ChunkManager::internal_mt_setup_chunk(Renderer &ren
 {
     SetupChunkData setup_chunk_data{};
 
-    // Iterate over each voxel in chunk and setup the chunk common position buffer.
+    // Iterate over each voxel in chunk and setup the chunk common position and color buffer.
     std::vector<DirectX::XMFLOAT3> position_data{};
+    std::vector<DirectX::XMFLOAT3> color_data{};
 
     static constexpr std::array<DirectX::XMFLOAT3, 8> voxel_vertices_data{
         DirectX::XMFLOAT3(0.0f, 0.0f, 0.0f),
@@ -54,6 +55,12 @@ ChunkManager::SetupChunkData ChunkManager::internal_mt_setup_chunk(Renderer &ren
         {
             continue;
         }
+
+        const DirectX::XMFLOAT3 voxel_color = {
+            (float)rand() / RAND_MAX,
+            (float)rand() / RAND_MAX,
+            (float)rand() / RAND_MAX,
+        };
 
         const DirectX::XMUINT3 index_3d = convert_to_3d(i, Chunk::NUMBER_OF_VOXELS_PER_DIMENSION);
         const DirectX::XMFLOAT3 offset = DirectX::XMFLOAT3(
@@ -75,6 +82,7 @@ ChunkManager::SetupChunkData ChunkManager::internal_mt_setup_chunk(Renderer &ren
                     const auto &vertex = voxel_vertices_data[vertex_index];
                     position_data.emplace_back(
                         DirectX::XMFLOAT3{vertex.x + offset.x, vertex.y + offset.y, vertex.z + offset.z});
+                    color_data.emplace_back(voxel_color);
                 }
             }
         }
@@ -95,6 +103,7 @@ ChunkManager::SetupChunkData ChunkManager::internal_mt_setup_chunk(Renderer &ren
                     const auto &vertex = voxel_vertices_data[vertex_index];
                     position_data.emplace_back(
                         DirectX::XMFLOAT3{vertex.x + offset.x, vertex.y + offset.y, vertex.z + offset.z});
+                    color_data.emplace_back(voxel_color);
                 }
             }
         }
@@ -115,6 +124,7 @@ ChunkManager::SetupChunkData ChunkManager::internal_mt_setup_chunk(Renderer &ren
                     const auto &vertex = voxel_vertices_data[vertex_index];
                     position_data.emplace_back(
                         DirectX::XMFLOAT3{vertex.x + offset.x, vertex.y + offset.y, vertex.z + offset.z});
+                    color_data.emplace_back(voxel_color);
                 }
             }
         }
@@ -135,6 +145,7 @@ ChunkManager::SetupChunkData ChunkManager::internal_mt_setup_chunk(Renderer &ren
                     const auto &vertex = voxel_vertices_data[vertex_index];
                     position_data.emplace_back(
                         DirectX::XMFLOAT3{vertex.x + offset.x, vertex.y + offset.y, vertex.z + offset.z});
+                    color_data.emplace_back(voxel_color);
                 }
             }
         }
@@ -155,6 +166,7 @@ ChunkManager::SetupChunkData ChunkManager::internal_mt_setup_chunk(Renderer &ren
                     const auto &vertex = voxel_vertices_data[vertex_index];
                     position_data.emplace_back(
                         DirectX::XMFLOAT3{vertex.x + offset.x, vertex.y + offset.y, vertex.z + offset.z});
+                    color_data.emplace_back(voxel_color);
                 }
             }
         }
@@ -175,27 +187,26 @@ ChunkManager::SetupChunkData ChunkManager::internal_mt_setup_chunk(Renderer &ren
                     const auto &vertex = voxel_vertices_data[vertex_index];
                     position_data.emplace_back(
                         DirectX::XMFLOAT3{vertex.x + offset.x, vertex.y + offset.y, vertex.z + offset.z});
+                    color_data.emplace_back(voxel_color);
                 }
             }
         }
     }
 
     setup_chunk_data.m_chunk_position_data = std::move(position_data);
-    setup_chunk_data.m_chunk_color_data = {
-        rand() / (float)RAND_MAX,
-        rand() / (float)RAND_MAX,
-        rand() / (float)RAND_MAX,
-    };
+    setup_chunk_data.m_chunk_color_data = std::move(color_data);
 
     if (!setup_chunk_data.m_chunk_position_data.empty())
     {
+
         setup_chunk_data.m_chunk_position_buffer =
             renderer.create_structured_buffer((void *)setup_chunk_data.m_chunk_position_data.data(),
                                               sizeof(DirectX::XMFLOAT3), setup_chunk_data.m_chunk_position_data.size(),
                                               std::wstring(L"Chunk position buffer : ") + std::to_wstring(index));
         setup_chunk_data.m_chunk_color_buffer =
-            renderer.create_structured_buffer((void *)&setup_chunk_data.m_chunk_color_data, sizeof(DirectX::XMFLOAT3),
-                                              1u, std::wstring(L"Chunk color buffer : ") + std::to_wstring(index));
+            renderer.create_structured_buffer((void *)setup_chunk_data.m_chunk_color_data.data(),
+                                              sizeof(DirectX::XMFLOAT3), setup_chunk_data.m_chunk_color_data.size(),
+                                              std::wstring(L"Chunk color buffer : ") + std::to_wstring(index));
 
         setup_chunk_data.m_chunk_constant_buffer = renderer.create_constant_buffer(
             sizeof(ChunkConstantBuffer), std::wstring(L"Chunk constant buffer : ") + std::to_wstring(index));

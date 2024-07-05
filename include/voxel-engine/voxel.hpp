@@ -55,7 +55,7 @@ struct ChunkManager
         ConstantBuffer m_chunk_constant_buffer{};
 
         std::vector<DirectX::XMFLOAT3> m_chunk_position_data{};
-        DirectX::XMFLOAT3 m_chunk_color_data{};
+        std::vector<DirectX::XMFLOAT3> m_chunk_color_data{};
     };
 
   private:

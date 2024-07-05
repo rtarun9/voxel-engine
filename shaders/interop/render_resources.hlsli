@@ -46,6 +46,7 @@ ChunkConstantBuffer
     float4 translation_vector;
 
     uint position_buffer_index;
+
     uint color_buffer_index;
 };
 

@@ -20,10 +20,11 @@ VSOutput vs_main(uint vertex_id : SV_VertexID)
     StructuredBuffer<float3> position_buffer = ResourceDescriptorHeap[chunk_constant_buffer.position_buffer_index];
     StructuredBuffer<float3> color_buffer = ResourceDescriptorHeap[chunk_constant_buffer.color_buffer_index];
 
+    const float3 position = position_buffer[vertex_id] + chunk_constant_buffer.translation_vector.xyz;
+
     VSOutput output;
-    output.position = mul((float4(position_buffer[vertex_id], 1.0f) + chunk_constant_buffer.translation_vector),
-                          scene_buffer.view_projection_matrix);
-    output.color = float4(color_buffer[0], 1.0f);
+    output.position = mul(float4(position, 1.0f), scene_buffer.view_projection_matrix);
+    output.color = float4(color_buffer[vertex_id], 1.0f);
 
     return output;
 }
