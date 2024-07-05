@@ -43,18 +43,21 @@ struct Chunk
 
 struct ChunkManager
 {
+    // Constructor creates the shared position buffer.
+    explicit ChunkManager(Renderer &renderer);
+
     struct SetupChunkData
     {
         Chunk m_chunk{};
 
-        StructuredBuffer m_chunk_position_buffer{};
+        IndexBuffer m_chunk_index_buffer{};
         StructuredBuffer m_chunk_color_buffer{};
 
         // A strange design decision, but rather than accessing the render resources via root constants, render
         // resources will now be embedded into the chunk constant buffer.
         ConstantBuffer m_chunk_constant_buffer{};
 
-        std::vector<DirectX::XMFLOAT3> m_chunk_position_data{};
+        std::vector<u16> m_chunk_indices_data{};
         std::vector<DirectX::XMFLOAT3> m_chunk_color_data{};
     };
 
@@ -101,9 +104,13 @@ struct ChunkManager
     // load this chunk again.
     std::unordered_set<size_t> m_chunk_indices_that_are_being_setup{};
 
-    std::unordered_map<size_t, StructuredBuffer> m_chunk_position_buffers{};
+    std::unordered_map<size_t, IndexBuffer> m_chunk_index_buffers{};
     std::unordered_map<size_t, StructuredBuffer> m_chunk_color_buffers{};
     std::unordered_map<size_t, ConstantBuffer> m_chunk_constant_buffers{};
 
     std::unordered_map<size_t, size_t> m_chunk_number_of_vertices{};
+
+    // All chunks only have a index buffer with them. The indices 'index' into this common shared chunk constant buffer.
+    // The data in this buffer is ordered vertex wise, voxel wise.
+    StructuredBuffer m_shared_chunk_position_buffer{};
 };

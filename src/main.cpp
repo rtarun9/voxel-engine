@@ -41,7 +41,7 @@ int main()
                             gpu_descriptor_handle);
     }
 
-    ChunkManager chunk_manager{};
+    ChunkManager chunk_manager{renderer};
 
     SceneConstantBuffer scene_buffer_data{};
 
@@ -205,16 +205,17 @@ int main()
         renderer.m_device->CreateComputePipelineState(&gpu_culling_compute_pso_desc, IID_PPV_ARGS(&gpu_culling_pso)));
 
     // Indirect command struct : command signature must match this struct.
-    // Each chunk will have its own IndirectCommand, with 2 arguments. The render resources struct root constants and a
-    // draw call.
+    // Each chunk will have its own IndirectCommand, with 3 arguments. The render resources struct root constants, index
+    // buffer view and a draw call.
     struct IndirectCommand
     {
         VoxelRenderResources render_resources{};
-        D3D12_DRAW_ARGUMENTS draw_arguments{};
+        D3D12_INDEX_BUFFER_VIEW index_buffer_view{};
+        D3D12_DRAW_INDEXED_ARGUMENTS draw_arguments{};
     };
 
     // Create the command signature, which tells the GPU how to interpret the data passed in the ExecuteIndirect call.
-    const std::array<D3D12_INDIRECT_ARGUMENT_DESC, 2u> argument_descs = {
+    const std::array<D3D12_INDIRECT_ARGUMENT_DESC, 3u> argument_descs = {
         D3D12_INDIRECT_ARGUMENT_DESC{
             .Type = D3D12_INDIRECT_ARGUMENT_TYPE_CONSTANT,
             .Constant =
@@ -225,7 +226,10 @@ int main()
                 },
         },
         D3D12_INDIRECT_ARGUMENT_DESC{
-            .Type = D3D12_INDIRECT_ARGUMENT_TYPE_DRAW,
+            .Type = D3D12_INDIRECT_ARGUMENT_TYPE_INDEX_BUFFER_VIEW,
+        },
+        D3D12_INDIRECT_ARGUMENT_DESC{
+            .Type = D3D12_INDIRECT_ARGUMENT_TYPE_DRAW_INDEXED,
         },
     };
 
@@ -483,11 +487,13 @@ int main()
 
             indirect_command_vector.emplace_back(IndirectCommand{
                 .render_resources = render_resources,
+                .index_buffer_view = chunk_manager.m_chunk_index_buffers[i].index_buffer_view,
                 .draw_arguments =
-                    D3D12_DRAW_ARGUMENTS{
-                        .VertexCountPerInstance = (u32)chunk_manager.m_chunk_number_of_vertices[i],
+                    D3D12_DRAW_INDEXED_ARGUMENTS{
+                        .IndexCountPerInstance = (u32)chunk_manager.m_chunk_number_of_vertices[i],
                         .InstanceCount = 1u,
-                        .StartVertexLocation = 0u,
+                        .StartIndexLocation = 0u,
+                        .BaseVertexLocation = 0u,
                         .StartInstanceLocation = 0u,
                     },
             });

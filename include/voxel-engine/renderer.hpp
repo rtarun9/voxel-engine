@@ -22,6 +22,13 @@ struct ConstantBuffer
     }
 };
 
+struct IndexBuffer
+{
+    size_t resource_index{};
+    size_t indices_count{};
+    D3D12_INDEX_BUFFER_VIEW index_buffer_view{};
+};
+
 // The command buffer is a bit different. It internally has two resources, a default and upload heap.
 // the update function is not similar to constant buffer, as here data is copied from the upload to default resource.
 // The command buffer contains its ID3D12Resource directly since the same command buffer is used for the entire engine.
@@ -69,6 +76,8 @@ struct Renderer
     explicit Renderer(const HWND window_handle, const u16 window_width, const u16 window_height);
 
     // Resource creation functions.
+    IndexBuffer create_index_buffer(const void *data, const size_t stride, const size_t indices_count,
+                                    const std::wstring_view buffer_name);
     StructuredBuffer create_structured_buffer(const void *data, const size_t stride, const size_t num_elements,
                                               const std::wstring_view buffer_name);
     ConstantBuffer create_constant_buffer(const size_t size_in_bytes, const std::wstring_view buffer_name);

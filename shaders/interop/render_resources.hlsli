@@ -50,10 +50,13 @@ ChunkConstantBuffer
     uint color_buffer_index;
 };
 
+// D3D12_DRAW_INDEXED_ARGUMENTS has 5 32 bit members, which is why draw arguments is split into a uint4 and uint.
 struct GPUIndirectCommand
 {
     VoxelRenderResources voxel_render_resources;
-    uint4 draw_arguments;
+    uint4 index_buffer_view;
+    uint4 draw_arguments_1;
+    uint draw_arguments_2;
 };
 
 struct GPUCullRenderResources

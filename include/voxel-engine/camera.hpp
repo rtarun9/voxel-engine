@@ -12,7 +12,7 @@ class Camera
     DirectX::XMFLOAT4 m_right{1.0f, 0.0f, 0.0f, 0.0f};
     DirectX::XMFLOAT4 m_front{0.0f, 0.0f, 1.0f, 0.0f};
 
-    float m_movement_speed{50.0f};
+    float m_movement_speed{500.0f};
     float m_rotation_speed{1.0f};
 
     // Used to determine how 'smooth' the camera behaves.

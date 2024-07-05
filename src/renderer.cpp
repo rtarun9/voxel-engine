@@ -71,7 +71,6 @@ Renderer::Renderer(const HWND window_handle, const u16 window_width, const u16 w
 
         Microsoft::WRL::ComPtr<ID3D12Debug1> debug_1{};
         throw_if_failed(m_debug_device->QueryInterface(IID_PPV_ARGS(&debug_1)));
-        debug_1->SetEnableGPUBasedValidation(TRUE);
         debug_1->SetEnableSynchronizedCommandQueueValidation(TRUE);
     }
 
@@ -190,6 +189,96 @@ Renderer::Renderer(const HWND window_handle, const u16 window_width, const u16 w
     throw_if_failed(m_device->CreateRootSignature(0u, bindless_root_signature_blob->GetBufferPointer(),
                                                   bindless_root_signature_blob->GetBufferSize(),
                                                   IID_PPV_ARGS(&m_bindless_root_signature)));
+}
+
+IndexBuffer Renderer::create_index_buffer(const void *data, const size_t stride, const size_t indices_count,
+                                          const std::wstring_view buffer_name)
+{
+    // note(rtarun9) : Figure out how to handle these invalid cases.
+    if (data == nullptr)
+    {
+        return IndexBuffer{};
+    }
+
+    const size_t size_in_bytes = stride * indices_count;
+
+    u8 *resource_ptr{};
+    Microsoft::WRL::ComPtr<ID3D12Resource> buffer_resource{};
+    Microsoft::WRL::ComPtr<ID3D12Resource> intermediate_buffer_resource{};
+
+    // First, create a upload buffer (that is placed in memory accesible by both GPU and CPU).
+    // Then create a GPU only buffer, and copy data from the previous buffer to GPU only one.
+    const D3D12_HEAP_PROPERTIES upload_heap_properties = {
+        .Type = D3D12_HEAP_TYPE_UPLOAD,
+        .CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+        .MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN,
+        .CreationNodeMask = 0u,
+        .VisibleNodeMask = 0u,
+    };
+
+    const D3D12_RESOURCE_DESC buffer_resource_desc = {
+        .Dimension = D3D12_RESOURCE_DIMENSION_BUFFER,
+        .Width = size_in_bytes,
+        .Height = 1u,
+        .DepthOrArraySize = 1u,
+        .MipLevels = 1u,
+        .Format = DXGI_FORMAT_UNKNOWN,
+        .SampleDesc = {1u, 0u},
+        .Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
+        .Flags = D3D12_RESOURCE_FLAG_NONE,
+    };
+
+    throw_if_failed(m_device->CreateCommittedResource(
+        &upload_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES, &buffer_resource_desc,
+        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, nullptr, IID_PPV_ARGS(&intermediate_buffer_resource)));
+
+    // Now that a resource is created, copy CPU data to this upload buffer.
+    const D3D12_RANGE read_range{.Begin = 0u, .End = 0u};
+
+    throw_if_failed(intermediate_buffer_resource->Map(0u, &read_range, (void **)&resource_ptr));
+
+    memcpy(resource_ptr, data, size_in_bytes);
+
+    // Create the final resource and transfer the data from upload buffer to the final buffer.
+    // The heap type is : Default (no CPU access).
+    const D3D12_HEAP_PROPERTIES default_heap_properties = {
+        .Type = D3D12_HEAP_TYPE_DEFAULT,
+        .CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+        .MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN,
+        .CreationNodeMask = 0u,
+        .VisibleNodeMask = 0u,
+    };
+
+    throw_if_failed(m_device->CreateCommittedResource(
+        &default_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES, &buffer_resource_desc,
+        D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&buffer_resource)));
+
+    std::scoped_lock<std::mutex> scoped_lock(m_resource_mutex);
+
+    m_intermediate_resources.emplace_back(std::move(intermediate_buffer_resource));
+    m_resources.emplace_back(std::move(buffer_resource));
+
+    name_d3d12_object(m_resources.back().Get(), buffer_name);
+    name_d3d12_object(m_intermediate_resources.back().Get(),
+                      std::wstring(buffer_name) + std::wstring(L" [intermediate]"));
+
+    auto command_allocator_list_pair = m_copy_queue.get_command_allocator_list_pair(m_device.Get());
+
+    command_allocator_list_pair.m_command_list->CopyResource(m_resources.back().Get(),
+                                                             m_intermediate_resources.back().Get());
+    m_copy_queue.execute_command_list(std::move(command_allocator_list_pair));
+
+    const D3D12_INDEX_BUFFER_VIEW index_buffer_view = {
+        .BufferLocation = m_resources.back()->GetGPUVirtualAddress(),
+        .SizeInBytes = static_cast<UINT>(size_in_bytes),
+        .Format = DXGI_FORMAT_R16_UINT,
+    };
+
+    return IndexBuffer{
+        .resource_index = m_resources.size() - 1u,
+        .indices_count = indices_count,
+        .index_buffer_view = index_buffer_view,
+    };
 }
 
 StructuredBuffer Renderer::create_structured_buffer(const void *data, const size_t stride, const size_t num_elements,
