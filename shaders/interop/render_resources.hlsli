@@ -38,6 +38,7 @@ SceneConstantBuffer
 
     // note(rtarun9) : Putting this here because scene depends on chunk edge length, which determines the AABB vertices.
     float4 aabb_vertices[8];
+    float4 camera_position;
 };
 
 ConstantBufferStruct

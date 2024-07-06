@@ -7,7 +7,7 @@
 // position' and has a edge length as specified in the class below.
 struct Voxel
 {
-    static constexpr float EDGE_LENGTH{8.0f};
+    static constexpr float EDGE_LENGTH{32.0f};
     bool m_active{true};
 };
 
@@ -77,7 +77,7 @@ struct ChunkManager
         NUMBER_OF_CHUNKS_PER_DIMENSION * NUMBER_OF_CHUNKS_PER_DIMENSION * NUMBER_OF_CHUNKS_PER_DIMENSION;
 
     // Determines how many chunks are loaded around the player.
-    static constexpr u32 CHUNK_RENDER_DISTANCE = 16u;
+    static constexpr u32 CHUNK_RENDER_DISTANCE = 32u;
 
     // Chunks to create per frame : How many chunks are setup (i.e the meshing processes occurs).
     static constexpr u32 NUMBER_OF_CHUNKS_TO_CREATE_PER_FRAME = 16u;

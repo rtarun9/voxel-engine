@@ -24,7 +24,8 @@ ConstantBuffer<GPUCullRenderResources> render_resources : register(b0);
         for (int i = 0; i < 8; i++)
         {
             float4 clip_space_coords =
-                mul(scene_constant_buffer.aabb_vertices[i] + chunk_constant_buffer.translation_vector,
+                mul(scene_constant_buffer.aabb_vertices[i] + chunk_constant_buffer.translation_vector -
+                        float4(scene_constant_buffer.camera_position.xyz, 0.0f),
                     scene_constant_buffer.view_projection_matrix);
 
             clip_space_coords.x /= clip_space_coords.w;

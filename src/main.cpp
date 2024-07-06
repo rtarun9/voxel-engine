@@ -374,13 +374,26 @@ int main()
         // Article followed for reverse Z:
         //  https://iolite-engine.com/blog_posts/reverse_z_cheatsheet
 
-        const DirectX::XMMATRIX projection_matrix = DirectX::XMMatrixPerspectiveFovLH(
-            DirectX::XMConvertToRadians(45.0f), window_aspect_ratio, far_plane, near_plane);
+        // https://github.com/microsoft/DirectXMath/issues/158 link that shows the projection matrix for infinite far
+        // plane.
+        // Note : This code is taken from the directxmath source code for perspective projection fov lh, but modified
+        // for infinite far plane.
+
+        float sin_fov{};
+        float cos_fov{};
+        DirectX::XMScalarSinCos(&sin_fov, &cos_fov, 0.5f * DirectX::XMConvertToRadians(45.0f));
+
+        float height = cos_fov / sin_fov;
+        float width = height / window_aspect_ratio;
+
+        const DirectX::XMMATRIX projection_matrix = DirectX::XMMatrixSet(
+            width, 0.0f, 0.0f, 0.0f, 0.0f, height, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, near_plane, 0.0f);
 
         const DirectX::XMMATRIX view_projection_matrix =
             camera.update_and_get_view_matrix(delta_time) * projection_matrix;
 
         scene_buffer_data.view_projection_matrix = view_projection_matrix;
+        scene_buffer_data.camera_position = camera.m_position;
 
         scene_buffer.update(&scene_buffer_data);
 
