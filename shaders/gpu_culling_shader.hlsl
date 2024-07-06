@@ -19,6 +19,8 @@ ConstantBuffer<GPUCullRenderResources> render_resources : register(b0);
             ResourceDescriptorHeap[indirect_command[dispatch_thread_id]
                                        .voxel_render_resources.chunk_constant_buffer_index];
 
+        output_commands.Append(indirect_command[dispatch_thread_id]);
+        return;
         // For each vertex, find the clip space coord and check if AABB vertex is culled.
         uint culled_vertices = 0;
         for (int i = 0; i < 8; i++)

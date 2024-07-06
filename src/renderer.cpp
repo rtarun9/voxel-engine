@@ -72,6 +72,14 @@ Renderer::Renderer(const HWND window_handle, const u16 window_width, const u16 w
         Microsoft::WRL::ComPtr<ID3D12Debug1> debug_1{};
         throw_if_failed(m_debug_device->QueryInterface(IID_PPV_ARGS(&debug_1)));
         debug_1->SetEnableSynchronizedCommandQueueValidation(TRUE);
+
+        // Note : This cannot be set, because of the warning message
+        // contains a shader op (Draw/Dispatch/ExecuteIndirect) recorded while using Shader Patch Mode NONE, or contains
+        // an ExecuteIndirect that changes VB/IB/Root bindings. Hence, all further GPU-based validation may
+        // undervalidate or produce true GBV errors with imprecise tracked state (labelled with 'Possibly imprecise')
+        // for resources in the COMMON state or Promoted-from-COMMON state at the time of execute.
+
+        debug_1->SetEnableGPUBasedValidation(FALSE);
     }
 
     // Create the DXGI Factory so we get access to DXGI objects (like adapters).

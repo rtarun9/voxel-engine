@@ -77,7 +77,7 @@ struct ChunkManager
         NUMBER_OF_CHUNKS_PER_DIMENSION * NUMBER_OF_CHUNKS_PER_DIMENSION * NUMBER_OF_CHUNKS_PER_DIMENSION;
 
     // Determines how many chunks are loaded around the player.
-    static constexpr u32 CHUNK_RENDER_DISTANCE = 16u;
+    static constexpr u32 CHUNK_RENDER_DISTANCE = 1u;
 
     // Chunks to create per frame : How many chunks are setup (i.e the meshing processes occurs).
     static constexpr u32 NUMBER_OF_CHUNKS_TO_CREATE_PER_FRAME = 16u;

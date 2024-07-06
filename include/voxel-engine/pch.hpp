@@ -8,7 +8,8 @@ constexpr bool VX_DEBUG_MODE = false;
 
 // Windows includes.
 #define WIN32_LEAN_AND_MEAN
-#include <Windows.h>
+// #include <Windows.h>
+#include "external/DirectXAgilitySDK/build/native/include/d3d12.h"
 
 // Dx12 / Com headers.
 #include <d3d12.h>

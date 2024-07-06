@@ -153,7 +153,7 @@ int main()
         .SampleMask = 0xffff'ffff,
         .RasterizerState =
             {
-                .FillMode = D3D12_FILL_MODE_WIREFRAME,
+                .FillMode = D3D12_FILL_MODE_SOLID,
                 .CullMode = D3D12_CULL_MODE_BACK,
                 .FrontCounterClockwise = FALSE,
                 .DepthClipEnable = TRUE,
@@ -212,7 +212,10 @@ int main()
         VoxelRenderResources render_resources{};
         D3D12_INDEX_BUFFER_VIEW index_buffer_view{};
         D3D12_DRAW_INDEXED_ARGUMENTS draw_arguments{};
+        float padding;
     };
+
+    printf("Size of indirect command : %zd\n", sizeof(IndirectCommand));
 
     // Create the command signature, which tells the GPU how to interpret the data passed in the ExecuteIndirect call.
     const std::array<D3D12_INDIRECT_ARGUMENT_DESC, 3u> argument_descs = {
@@ -416,66 +419,6 @@ int main()
         command_list->RSSetViewports(1u, &viewport);
         command_list->RSSetScissorRects(1u, &scissor_rect);
 
-        // All chunks whose distance from the camera is more than render distance * 10 are moved to the unloaded chunk
-        // hash map.
-        /*
-        std::vector<u64> chunks_to_unload{};
-        for (const auto &[i, chunk] : chunk_manager.m_loaded_chunks)
-        {
-            const DirectX::XMUINT3 chunk_index_3d = convert_to_3d(i, ChunkManager::NUMBER_OF_CHUNKS_PER_DIMENSION);
-
-            if (std::abs((i32)chunk_index_3d.x - (i32)current_chunk_3d_index.x) >
-                    10 * ChunkManager::CHUNK_RENDER_DISTANCE ||
-                std::abs((i32)chunk_index_3d.y - (i32)current_chunk_3d_index.y) >
-                    10 * ChunkManager::CHUNK_RENDER_DISTANCE ||
-                std::abs((i32)chunk_index_3d.z - (i32)current_chunk_3d_index.z) >
-                    10 * ChunkManager::CHUNK_RENDER_DISTANCE)
-            {
-                chunks_to_unload.push_back(i);
-            }
-        }
-
-        for (const auto &chunk_to_unload : chunks_to_unload)
-        {
-            chunk_manager.m_unloaded_chunks[chunk_to_unload] =
-                std::move(chunk_manager.m_loaded_chunks[chunk_to_unload]);
-            chunk_manager.m_loaded_chunks.erase(chunk_to_unload);
-        }
-        */
-
-        /*
-        // If a chunk's distance is 3X of render distance, is it removed from memory.
-        std::vector<u64> chunks_to_evict_from_memory{};
-        for (const auto &[i, chunk] : chunk_manager.m_unloaded_chunks)
-        {
-            const DirectX::XMUINT3 chunk_index_3d = convert_to_3d(i, ChunkManager::NUMBER_OF_CHUNKS_PER_DIMENSION);
-
-            if (std::abs((i32)chunk_index_3d.x - (i32)current_chunk_3d_index.x) >
-                    3 * ChunkManager::CHUNK_RENDER_DISTANCE ||
-                std::abs((i32)chunk_index_3d.y - (i32)current_chunk_3d_index.y) >
-                    3 * ChunkManager::CHUNK_RENDER_DISTANCE ||
-                std::abs((i32)chunk_index_3d.z - (i32)current_chunk_3d_index.z) >
-                    3 * ChunkManager::CHUNK_RENDER_DISTANCE)
-            {
-                chunks_to_evict_from_memory.push_back(i);
-            }
-        }
-
-        for (const auto &chunk_to_evict : chunks_to_evict_from_memory)
-        {
-            chunk_manager.m_unloaded_chunks.erase(chunk_to_evict);
-
-            renderer.m_resources[chunk_manager.m_chunk_constant_buffers[chunk_to_evict].resource_index] = nullptr;
-            renderer.m_resources[chunk_manager.m_chunk_color_buffers[chunk_to_evict].resource_index] = nullptr;
-            renderer.m_resources[chunk_manager.m_chunk_position_buffers[chunk_to_evict].resource_index] = nullptr;
-
-            chunk_manager.m_chunk_number_of_vertices.erase(chunk_to_evict);
-            chunk_manager.m_chunk_constant_buffers.erase(chunk_to_evict);
-            chunk_manager.m_chunk_color_buffers.erase(chunk_to_evict);
-            chunk_manager.m_chunk_position_buffers.erase(chunk_to_evict);
-        }
-        */
-
         // Setup indirect command vector.
         indirect_command_vector.clear();
         for (const auto &[i, chunk] : chunk_manager.m_loaded_chunks)
@@ -583,6 +526,7 @@ int main()
             command_list->SetPipelineState(pso.Get());
 
             command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
             command_list->ExecuteIndirect(
                 command_signature.Get(), MAX_CHUNKS_TO_BE_DRAWN, indirect_command_buffer.default_resource.Get(), 0u,
                 indirect_command_buffer.default_resource.Get(), indirect_command_buffer.counter_offset);

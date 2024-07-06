@@ -57,6 +57,7 @@ struct GPUIndirectCommand
     uint4 index_buffer_view;
     uint4 draw_arguments_1;
     uint draw_arguments_2;
+    uint padding;
 };
 
 struct GPUCullRenderResources
