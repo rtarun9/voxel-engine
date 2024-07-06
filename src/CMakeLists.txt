@@ -10,6 +10,7 @@ set (SRC_FILES
 )
 
 set (HEADER_FILES
+
     ${CMAKE_SOURCE_DIR}/include/voxel-engine/common.hpp
     ${CMAKE_SOURCE_DIR}/include/voxel-engine/timer.hpp
     ${CMAKE_SOURCE_DIR}/include/voxel-engine/types.hpp

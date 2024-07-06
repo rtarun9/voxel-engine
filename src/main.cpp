@@ -411,7 +411,7 @@ int main()
         command_list->ResourceBarrier(1u, &presentation_to_render_target_barrier);
 
         // Now, clear the RTV and DSV.
-        const float clear_color[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+        const float clear_color[4] = {0.1f, 0.1f, 0.1f, 1.0f};
         command_list->ClearRenderTargetView(rtv_handle, clear_color, 0u, nullptr);
         command_list->ClearDepthStencilView(dsv_handle, D3D12_CLEAR_FLAG_DEPTH, 0.0f, 0u, 0u, nullptr);
 
@@ -540,7 +540,7 @@ int main()
         ImGui::NewFrame();
 
         ImGui::Begin("Debug Controller");
-        ImGui::SliderFloat("movement_speed", &camera.m_movement_speed, 0.0f, 50000.0f);
+        ImGui::SliderFloat("movement_speed", &camera.m_movement_speed, 0.0f, 500.0f);
         ImGui::SliderFloat("rotation_speed", &camera.m_rotation_speed, 0.0f, 10.0f);
         ImGui::SliderFloat("friction", &camera.m_friction, 0.0f, 1.0f);
         ImGui::SliderFloat("near plane", &near_plane, 0.1f, 1.0f);
