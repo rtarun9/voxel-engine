@@ -199,15 +199,10 @@ Renderer::Renderer(const HWND window_handle, const u16 window_width, const u16 w
                                                   IID_PPV_ARGS(&m_bindless_root_signature)));
 }
 
-IndexBuffer Renderer::create_index_buffer(const void *data, const size_t stride, const size_t indices_count,
-                                          const std::wstring_view buffer_name)
+Renderer::IndexBufferWithIntermediateResource Renderer::create_index_buffer(const void *data, const size_t stride,
+                                                                            const size_t indices_count,
+                                                                            const std::wstring_view buffer_name)
 {
-    // note(rtarun9) : Figure out how to handle these invalid cases.
-    if (data == nullptr)
-    {
-        return IndexBuffer{};
-    }
-
     const size_t size_in_bytes = stride * indices_count;
 
     u8 *resource_ptr{};
@@ -263,41 +258,33 @@ IndexBuffer Renderer::create_index_buffer(const void *data, const size_t stride,
 
     std::scoped_lock<std::mutex> scoped_lock(m_resource_mutex);
 
-    m_intermediate_resources.emplace_back(std::move(intermediate_buffer_resource));
-    m_resources.emplace_back(std::move(buffer_resource));
-
-    name_d3d12_object(m_resources.back().Get(), buffer_name);
-    name_d3d12_object(m_intermediate_resources.back().Get(),
-                      std::wstring(buffer_name) + std::wstring(L" [intermediate]"));
+    name_d3d12_object(buffer_resource.Get(), buffer_name);
+    name_d3d12_object(intermediate_buffer_resource.Get(), std::wstring(buffer_name) + std::wstring(L" [intermediate]"));
 
     auto command_allocator_list_pair = m_copy_queue.get_command_allocator_list_pair(m_device.Get());
 
-    command_allocator_list_pair.m_command_list->CopyResource(m_resources.back().Get(),
-                                                             m_intermediate_resources.back().Get());
+    command_allocator_list_pair.m_command_list->CopyResource(buffer_resource.Get(), intermediate_buffer_resource.Get());
     m_copy_queue.execute_command_list(std::move(command_allocator_list_pair));
 
     const D3D12_INDEX_BUFFER_VIEW index_buffer_view = {
-        .BufferLocation = m_resources.back()->GetGPUVirtualAddress(),
+        .BufferLocation = buffer_resource->GetGPUVirtualAddress(),
         .SizeInBytes = static_cast<UINT>(size_in_bytes),
         .Format = DXGI_FORMAT_R16_UINT,
     };
 
-    return IndexBuffer{
-        .resource_index = m_resources.size() - 1u,
-        .indices_count = indices_count,
-        .index_buffer_view = index_buffer_view,
+    return {
+        IndexBuffer{
+            .resource = buffer_resource,
+            .indices_count = indices_count,
+            .index_buffer_view = index_buffer_view,
+        },
+        intermediate_buffer_resource,
     };
 }
 
-StructuredBuffer Renderer::create_structured_buffer(const void *data, const size_t stride, const size_t num_elements,
-                                                    const std::wstring_view buffer_name)
+Renderer::StucturedBufferWithIntermediateResource Renderer::create_structured_buffer(
+    const void *data, const size_t stride, const size_t num_elements, const std::wstring_view buffer_name)
 {
-    // note(rtarun9) : Figure out how to handle these invalid cases.
-    if (data == nullptr)
-    {
-        return StructuredBuffer{};
-    }
-
     const size_t size_in_bytes = stride * num_elements;
 
     u8 *resource_ptr{};
@@ -354,25 +341,23 @@ StructuredBuffer Renderer::create_structured_buffer(const void *data, const size
 
     std::scoped_lock<std::mutex> scoped_lock(m_resource_mutex);
 
-    m_intermediate_resources.emplace_back(std::move(intermediate_buffer_resource));
-    m_resources.emplace_back(std::move(buffer_resource));
-
-    name_d3d12_object(m_resources.back().Get(), buffer_name);
-    name_d3d12_object(m_intermediate_resources.back().Get(),
-                      std::wstring(buffer_name) + std::wstring(L" [intermediate]"));
+    name_d3d12_object(buffer_resource.Get(), buffer_name);
+    name_d3d12_object(intermediate_buffer_resource.Get(), std::wstring(buffer_name) + std::wstring(L" [intermediate]"));
 
     auto command_allocator_list_pair = m_copy_queue.get_command_allocator_list_pair(m_device.Get());
 
-    command_allocator_list_pair.m_command_list->CopyResource(m_resources.back().Get(),
-                                                             m_intermediate_resources.back().Get());
+    command_allocator_list_pair.m_command_list->CopyResource(buffer_resource.Get(), intermediate_buffer_resource.Get());
     m_copy_queue.execute_command_list(std::move(command_allocator_list_pair));
 
     // Create structured buffer view.
-    size_t srv_index = create_shader_resource_view(m_resources.back().Get(), stride, num_elements);
+    size_t srv_index = create_shader_resource_view(buffer_resource.Get(), stride, num_elements);
 
-    return StructuredBuffer{
-        .resource_index = m_resources.size() - 1u,
-        .srv_index = srv_index,
+    return {
+        StructuredBuffer{
+            .resource = buffer_resource,
+            .srv_index = srv_index,
+        },
+        intermediate_buffer_resource,
     };
 }
 
@@ -415,14 +400,13 @@ ConstantBuffer Renderer::internal_create_constant_buffer(const size_t size_in_by
 
     std::scoped_lock<std::mutex> scoped_lock(m_resource_mutex);
 
-    m_resources.emplace_back(std::move(buffer_resource));
-    name_d3d12_object(m_resources.back().Get(), buffer_name);
+    name_d3d12_object(buffer_resource.Get(), buffer_name);
 
     // Create Constant buffer view.
-    size_t cbv_index = create_constant_buffer_view(m_resources.back().Get(), size_in_bytes);
+    size_t cbv_index = create_constant_buffer_view(buffer_resource.Get(), size_in_bytes);
 
     return ConstantBuffer{
-        .resource_index = m_resources.size() - 1u,
+        .resource = buffer_resource,
         .cbv_index = cbv_index,
         .size_in_bytes = size_in_bytes,
         .resource_mapped_ptr = resource_ptr,

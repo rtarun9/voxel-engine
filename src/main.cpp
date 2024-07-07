@@ -310,6 +310,8 @@ int main()
     const u64 chunk_grid_middle = Chunk::CHUNK_LENGTH * ChunkManager::NUMBER_OF_CHUNKS_PER_DIMENSION / 2u;
     camera.m_position = {chunk_grid_middle, chunk_grid_middle, chunk_grid_middle, 1.0f};
 
+    std::queue<u64> chunks_to_unload{};
+
     Timer timer{};
     float delta_time = 0.0f;
 
@@ -431,6 +433,43 @@ int main()
         command_list->RSSetViewports(1u, &viewport);
         command_list->RSSetScissorRects(1u, &scissor_rect);
 
+        // Evict the chunks that are out of range of render distance.
+        // Because evicting chunks seems to have such a high overhead (more specifically freeing allocated id3d12
+        // resources) each frame only a certain number of chunks are unloaded.
+        for (const auto &[i, chunk] : chunk_manager.m_loaded_chunks)
+        {
+            const DirectX::XMUINT3 chunk_index_3d = convert_to_3d(i, ChunkManager::NUMBER_OF_CHUNKS_PER_DIMENSION);
+            if (std::abs((i32)chunk_index_3d.x - (i32)current_chunk_3d_index.x) >
+                    ChunkManager::CHUNK_RENDER_DISTANCE * 8 ||
+                std::abs((i32)chunk_index_3d.y - (i32)current_chunk_3d_index.y) >
+                    ChunkManager::CHUNK_RENDER_DISTANCE * 8 ||
+                std::abs((i32)chunk_index_3d.z - (i32)current_chunk_3d_index.z) >
+                    ChunkManager::CHUNK_RENDER_DISTANCE * 8)
+            {
+                chunks_to_unload.push(i);
+            }
+        }
+
+        size_t unloaded_chunks = 0;
+        while (false && !chunks_to_unload.empty() && unloaded_chunks < ChunkManager::CHUNKS_TO_UNLOAD_PER_FRAME)
+        {
+            const auto chunk_to_unload = chunks_to_unload.front();
+            chunks_to_unload.pop();
+
+            chunk_manager.m_loaded_chunks.erase(chunk_to_unload);
+
+            chunk_manager.m_chunk_index_buffers.erase(chunk_to_unload);
+            chunk_manager.m_chunk_index_buffers[chunk_to_unload].resource.Reset();
+
+            chunk_manager.m_chunk_color_buffers.erase(chunk_to_unload);
+            chunk_manager.m_chunk_color_buffers[chunk_to_unload].resource.Reset();
+
+            chunk_manager.m_chunk_constant_buffers[chunk_to_unload].resource.Reset();
+            chunk_manager.m_chunk_constant_buffers.erase(chunk_to_unload);
+
+            ++unloaded_chunks;
+        }
+
         // Setup indirect command vector.
         indirect_command_vector.clear();
         for (const auto &[i, chunk] : chunk_manager.m_loaded_chunks)
@@ -445,7 +484,7 @@ int main()
                 .index_buffer_view = chunk_manager.m_chunk_index_buffers[i].index_buffer_view,
                 .draw_arguments =
                     D3D12_DRAW_INDEXED_ARGUMENTS{
-                        .IndexCountPerInstance = (u32)chunk_manager.m_chunk_number_of_vertices[i],
+                        .IndexCountPerInstance = (u32)chunk_manager.m_chunk_index_buffers[i].indices_count,
                         .InstanceCount = 1u,
                         .StartIndexLocation = 0u,
                         .BaseVertexLocation = 0u,
@@ -568,6 +607,7 @@ int main()
         ImGui::Text("Number of rendered chunks: %zu", indirect_command_vector.size());
         ImGui::Text("Number of copy alloc / list pairs : %zu",
                     renderer.m_copy_queue.m_command_allocator_list_queue.size());
+        ImGui::Text("Voxel edge length : %zu", Voxel::EDGE_LENGTH);
 
         ImGui::ShowMetricsWindow();
         ImGui::End();

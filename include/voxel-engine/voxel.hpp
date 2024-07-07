@@ -7,7 +7,7 @@
 // position' and has a edge length as specified in the class below.
 struct Voxel
 {
-    static constexpr u32 EDGE_LENGTH{640u};
+    static constexpr u32 EDGE_LENGTH{64 * 32u};
     bool m_active{true};
 };
 
@@ -23,7 +23,7 @@ struct Chunk
 
     ~Chunk();
 
-    static constexpr u32 NUMBER_OF_VOXELS_PER_DIMENSION = 8u;
+    static constexpr u32 NUMBER_OF_VOXELS_PER_DIMENSION = 16u;
     static constexpr size_t NUMBER_OF_VOXELS =
         NUMBER_OF_VOXELS_PER_DIMENSION * NUMBER_OF_VOXELS_PER_DIMENSION * NUMBER_OF_VOXELS_PER_DIMENSION;
 
@@ -34,13 +34,11 @@ struct Chunk
     size_t m_chunk_index{};
 };
 
-// A class that contains a collection of chunks with data for each stored in hash maps for quick access.
+// A class that contains a collection of chunks and associated data.
 // The states a chunk can be in:
 // (i) Loaded -> Ready to be rendered.
 // (ii) Setup -> Chunk mesh is ready, but associated buffers may or maynot be ready. Once the buffers are ready, these
-// chunks are moved into the loaded chunks list.
-// (iii) Unloaded -> Buffers are ready, but chunk is not rendered.
-
+// chunks are moved into the loaded chunks hashmap.
 struct ChunkManager
 {
     // Constructor creates the shared position buffer.
@@ -50,11 +48,12 @@ struct ChunkManager
     {
         Chunk m_chunk{};
 
-        IndexBuffer m_chunk_index_buffer{};
-        StructuredBuffer m_chunk_color_buffer{};
+        Renderer::IndexBufferWithIntermediateResource m_chunk_index_buffer{};
+        Renderer::StucturedBufferWithIntermediateResource m_chunk_color_buffer{};
 
         // A strange design decision, but rather than accessing the render resources via root constants, render
         // resources will now be embedded into the chunk constant buffer.
+        // This is done to make the indirect rendering & GPU culling process simpler.
         ConstantBuffer m_chunk_constant_buffer{};
 
         std::vector<u16> m_chunk_indices_data{};
@@ -66,18 +65,24 @@ struct ChunkManager
     SetupChunkData internal_mt_setup_chunk(Renderer &renderer, const size_t index);
 
   public:
-    // note(rtarun9) : These names are temporary, find more suitable names.
     void add_chunk_to_setup_stack(const u64 chunk_index);
     void create_chunks_from_setup_stack(Renderer &renderer);
 
     void transfer_chunks_from_setup_to_loaded_state(const u64 current_copy_queue_fence_value);
 
-    static constexpr u32 NUMBER_OF_CHUNKS_PER_DIMENSION = 1024u * 2;
+    static constexpr u32 NUMBER_OF_CHUNKS_PER_DIMENSION = 2048u;
     static constexpr size_t NUMBER_OF_CHUNKS =
         NUMBER_OF_CHUNKS_PER_DIMENSION * NUMBER_OF_CHUNKS_PER_DIMENSION * NUMBER_OF_CHUNKS_PER_DIMENSION;
 
     // Determines how many chunks are loaded around the player.
-    static constexpr u32 CHUNK_RENDER_DISTANCE = 16u;
+    static constexpr u32 CHUNKS_LOADED_AROUND_PLAYER = 8u;
+
+    // Determines how many chunks are deleted per frame.
+    static constexpr u32 CHUNKS_TO_UNLOAD_PER_FRAME = 64u * 4u;
+
+    // Determine how many chunks can be loaded at once. If a chunk is to be loaded and loaded chunks is already at the
+    // limit, re-use of memory happens.
+    static constexpr u32 CHUNK_RENDER_DISTANCE = CHUNKS_LOADED_AROUND_PLAYER;
 
     // Chunks to create per frame : How many chunks are setup (i.e the meshing processes occurs).
     static constexpr u32 NUMBER_OF_CHUNKS_TO_CREATE_PER_FRAME = 16u;
@@ -86,12 +91,11 @@ struct ChunkManager
     static constexpr u32 NUMBER_OF_CHUNKS_TO_LOAD_PER_FRAME = 64u;
 
     std::unordered_map<size_t, Chunk> m_loaded_chunks{};
-    std::unordered_map<size_t, Chunk> m_unloaded_chunks{};
 
     // NOTE : Chunks are considered to be setup when :
     // (i) The result of async call (i.e the future) is ready,
     // (ii) The fence value is < the current copy queue fence value.
-    // The setup chunks future queue consist of pairs of fence values , futures.
+    // The setup chunks future stack consist of pairs of fence values , futures.
     std::queue<std::pair<u64, std::future<SetupChunkData>>> m_setup_chunk_futures_queue{};
 
     // Why is there also a stack?
@@ -107,8 +111,6 @@ struct ChunkManager
     std::unordered_map<size_t, IndexBuffer> m_chunk_index_buffers{};
     std::unordered_map<size_t, StructuredBuffer> m_chunk_color_buffers{};
     std::unordered_map<size_t, ConstantBuffer> m_chunk_constant_buffers{};
-
-    std::unordered_map<size_t, size_t> m_chunk_number_of_vertices{};
 
     // All chunks only have a index buffer with them. The indices 'index' into this common shared chunk constant buffer.
     // The data in this buffer is ordered vertex wise, voxel wise.

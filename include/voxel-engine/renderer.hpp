@@ -1,16 +1,14 @@
 #pragma once
 
-// Note : For simplicity purposes, the renderer will have a vector of ID3D12Resources.
-// The user will only have a index into this vector to access the resource.
 struct StructuredBuffer
 {
-    size_t resource_index{};
+    Microsoft::WRL::ComPtr<ID3D12Resource> resource{};
     size_t srv_index{};
 };
 
 struct ConstantBuffer
 {
-    size_t resource_index{};
+    Microsoft::WRL::ComPtr<ID3D12Resource> resource{};
     size_t cbv_index{};
     size_t size_in_bytes{};
 
@@ -24,7 +22,7 @@ struct ConstantBuffer
 
 struct IndexBuffer
 {
-    size_t resource_index{};
+    Microsoft::WRL::ComPtr<ID3D12Resource> resource{};
     size_t indices_count{};
     D3D12_INDEX_BUFFER_VIEW index_buffer_view{};
 };
@@ -76,10 +74,28 @@ struct Renderer
     explicit Renderer(const HWND window_handle, const u16 window_width, const u16 window_height);
 
     // Resource creation functions.
-    IndexBuffer create_index_buffer(const void *data, const size_t stride, const size_t indices_count,
-                                    const std::wstring_view buffer_name);
-    StructuredBuffer create_structured_buffer(const void *data, const size_t stride, const size_t num_elements,
-                                              const std::wstring_view buffer_name);
+    // The functions return a buffer and intermediate resource (which can be discarded once the CopyResource operation
+    // is complete).
+    struct IndexBufferWithIntermediateResource
+    {
+        IndexBuffer index_buffer;
+        Microsoft::WRL::ComPtr<ID3D12Resource> intermediate_resource;
+    };
+
+    IndexBufferWithIntermediateResource create_index_buffer(const void *data, const size_t stride,
+                                                            const size_t indices_count,
+                                                            const std::wstring_view buffer_name);
+
+    struct StucturedBufferWithIntermediateResource
+    {
+        StructuredBuffer structured_buffer;
+        Microsoft::WRL::ComPtr<ID3D12Resource> intermediate_resource;
+    };
+
+    StucturedBufferWithIntermediateResource create_structured_buffer(const void *data, const size_t stride,
+                                                                     const size_t num_elements,
+                                                                     const std::wstring_view buffer_name);
+
     CommandBuffer create_command_buffer(const size_t stride, const size_t max_number_of_elements,
                                         const std::wstring_view buffer_name);
 
@@ -122,12 +138,6 @@ struct Renderer
     DescriptorHeap m_dsv_descriptor_heap{};
 
     u8 m_swapchain_backbuffer_index{};
-
-    // Resource vectors.
-    std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> m_resources{};
-
-    // note(rtarun9) : Try to figure out when is a good time to get rid of the intermediate resources.
-    std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> m_intermediate_resources{};
 
     // Bindless root signature, that is shared by all pipelines.
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_bindless_root_signature{};
