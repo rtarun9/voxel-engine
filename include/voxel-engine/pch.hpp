@@ -1,6 +1,12 @@
 #pragma once
 
-// Windows headers.
+#ifdef _DEBUG
+constexpr bool VX_DEBUG_MODE = true;
+#else
+constexpr bool VX_DEBUG_MODE = false;
+#endif
+
+// Windows includes.
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 
@@ -23,11 +29,19 @@
 #include <stdlib.h>
 
 #include <array>
+#include <filesystem>
+#include <future>
 #include <queue>
+#include <random>
 #include <set>
 #include <source_location>
 #include <stack>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+
+// Custom includes.
+#include "common.hpp"
+#include "types.hpp"
