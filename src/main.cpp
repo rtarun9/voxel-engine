@@ -64,8 +64,8 @@ int main()
         scene_buffer_data.aabb_vertices[i] = aabb_vertices[i];
     }
 
-    ConstantBuffer scene_buffer =
-        renderer.create_constant_buffer(sizeof(SceneConstantBuffer), L"Scene constant buffer");
+    auto scene_buffers = renderer.create_constant_buffer<Renderer::NUMBER_OF_BACKBUFFERS>(sizeof(SceneConstantBuffer),
+                                                                                          L"Scene constant buffer");
 
     // Compile the vertex and pixel shader.
     Microsoft::WRL::ComPtr<IDxcBlob> vertex_shader_blob = ShaderCompiler::compile(
@@ -389,12 +389,11 @@ int main()
         const DirectX::XMMATRIX projection_matrix = DirectX::XMMatrixSet(
             width, 0.0f, 0.0f, 0.0f, 0.0f, height, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, near_plane, 0.0f);
 
-        const DirectX::XMMATRIX view_projection_matrix =
-            camera.update_and_get_view_matrix(delta_time) * projection_matrix;
-
-        scene_buffer_data.view_projection_matrix = view_projection_matrix;
+        scene_buffer_data.view_matrix = camera.update_and_get_view_matrix(delta_time);
+        scene_buffer_data.projection_matrix = projection_matrix;
         scene_buffer_data.camera_position = camera.m_position;
 
+        ConstantBuffer &scene_buffer = scene_buffers[renderer.m_swapchain_backbuffer_index];
         scene_buffer.update(&scene_buffer_data);
 
         const auto &swapchain_index = renderer.m_swapchain_backbuffer_index;
@@ -553,7 +552,7 @@ int main()
         ImGui::NewFrame();
 
         ImGui::Begin("Debug Controller");
-        ImGui::SliderFloat("movement_speed", &camera.m_movement_speed, 0.0f, 500.0f);
+        ImGui::SliderFloat("movement_speed", &camera.m_movement_speed, 0.0f, 5000.0f);
         ImGui::SliderFloat("rotation_speed", &camera.m_rotation_speed, 0.0f, 10.0f);
         ImGui::SliderFloat("friction", &camera.m_friction, 0.0f, 1.0f);
         ImGui::SliderFloat("near plane", &near_plane, 0.1f, 1.0f);
@@ -565,7 +564,6 @@ int main()
         ImGui::Text("Current Index: %zu", current_chunk_index);
         ImGui::Text("Current 3D Index: %zu, %zu, %zu", current_chunk_3d_index.x, current_chunk_3d_index.y,
                     current_chunk_3d_index.z);
-        ImGui::Text("Number of unloaded chunks: %zu", chunk_manager.m_unloaded_chunks.size());
         ImGui::Text("Number of loaded chunks: %zu", chunk_manager.m_loaded_chunks.size());
         ImGui::Text("Number of rendered chunks: %zu", indirect_command_vector.size());
         ImGui::Text("Number of copy alloc / list pairs : %zu",

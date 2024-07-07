@@ -80,9 +80,14 @@ struct Renderer
                                     const std::wstring_view buffer_name);
     StructuredBuffer create_structured_buffer(const void *data, const size_t stride, const size_t num_elements,
                                               const std::wstring_view buffer_name);
-    ConstantBuffer create_constant_buffer(const size_t size_in_bytes, const std::wstring_view buffer_name);
     CommandBuffer create_command_buffer(const size_t stride, const size_t max_number_of_elements,
                                         const std::wstring_view buffer_name);
+
+    ConstantBuffer internal_create_constant_buffer(const size_t size_in_bytes, const std::wstring_view buffer_name);
+
+    template <size_t T>
+    std::array<ConstantBuffer, T> create_constant_buffer(const size_t size_in_bytes,
+                                                         const std::wstring_view buffer_name);
 
   private:
     // This function automatically offset's the current descriptor handle of descriptor heap.
@@ -182,3 +187,17 @@ struct Renderer
     DirectCommandQueue m_direct_queue{};
     CopyCommandQueue m_copy_queue{};
 };
+
+template <size_t T>
+inline std::array<ConstantBuffer, T> Renderer::create_constant_buffer(const size_t size_in_bytes,
+                                                                      const std::wstring_view buffer_name)
+{
+    std::array<ConstantBuffer, T> constant_buffers{};
+    for (size_t i = 0; i < T; i++)
+    {
+        constant_buffers[i] =
+            internal_create_constant_buffer(size_in_bytes, std::wstring(buffer_name) + std::to_wstring(i));
+    }
+
+    return constant_buffers;
+}

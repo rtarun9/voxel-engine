@@ -222,8 +222,8 @@ ChunkManager::SetupChunkData ChunkManager::internal_mt_setup_chunk(Renderer &ren
                                               sizeof(DirectX::XMFLOAT3), setup_chunk_data.m_chunk_color_data.size(),
                                               std::wstring(L"Chunk color buffer : ") + std::to_wstring(index));
 
-        setup_chunk_data.m_chunk_constant_buffer = renderer.create_constant_buffer(
-            sizeof(ChunkConstantBuffer), std::wstring(L"Chunk constant buffer : ") + std::to_wstring(index));
+        setup_chunk_data.m_chunk_constant_buffer = renderer.create_constant_buffer<1>(
+            sizeof(ChunkConstantBuffer), std::wstring(L"Chunk constant buffer : ") + std::to_wstring(index))[0];
     }
 
     setup_chunk_data.m_chunk.m_chunk_index = index;
@@ -302,13 +302,13 @@ void ChunkManager::transfer_chunks_from_setup_to_loaded_state(const u64 current_
                 const DirectX::XMUINT3 chunk_index_3d =
                     convert_to_3d(chunk_index, ChunkManager::NUMBER_OF_CHUNKS_PER_DIMENSION);
 
-                const DirectX::XMFLOAT3 chunk_offset =
-                    DirectX::XMFLOAT3(chunk_index_3d.x * Voxel::EDGE_LENGTH * Chunk::NUMBER_OF_VOXELS_PER_DIMENSION,
-                                      chunk_index_3d.y * Voxel::EDGE_LENGTH * Chunk::NUMBER_OF_VOXELS_PER_DIMENSION,
-                                      chunk_index_3d.z * Voxel::EDGE_LENGTH * Chunk::NUMBER_OF_VOXELS_PER_DIMENSION);
+                const DirectX::XMUINT3 chunk_offset =
+                    DirectX::XMUINT3(chunk_index_3d.x * Voxel::EDGE_LENGTH * Chunk::NUMBER_OF_VOXELS_PER_DIMENSION,
+                                     chunk_index_3d.y * Voxel::EDGE_LENGTH * Chunk::NUMBER_OF_VOXELS_PER_DIMENSION,
+                                     chunk_index_3d.z * Voxel::EDGE_LENGTH * Chunk::NUMBER_OF_VOXELS_PER_DIMENSION);
 
                 const ChunkConstantBuffer chunk_constant_buffer_data = {
-                    .translation_vector = {chunk_offset.x, chunk_offset.y, chunk_offset.z, 0.0f},
+                    .translation_vector = {chunk_offset.x, chunk_offset.y, chunk_offset.z, 0u},
                     .position_buffer_index = static_cast<u32>(m_shared_chunk_position_buffer.srv_index),
                     .color_buffer_index = static_cast<u32>(m_chunk_color_buffers[chunk_index].srv_index),
                 };

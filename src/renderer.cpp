@@ -376,7 +376,8 @@ StructuredBuffer Renderer::create_structured_buffer(const void *data, const size
     };
 }
 
-ConstantBuffer Renderer::create_constant_buffer(const size_t size_in_bytes, const std::wstring_view buffer_name)
+ConstantBuffer Renderer::internal_create_constant_buffer(const size_t size_in_bytes,
+                                                         const std::wstring_view buffer_name)
 {
     u8 *resource_ptr{};
     Microsoft::WRL::ComPtr<ID3D12Resource> buffer_resource{};

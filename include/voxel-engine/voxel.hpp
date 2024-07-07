@@ -7,7 +7,7 @@
 // position' and has a edge length as specified in the class below.
 struct Voxel
 {
-    static constexpr float EDGE_LENGTH{32.0f};
+    static constexpr u32 EDGE_LENGTH{640u};
     bool m_active{true};
 };
 
@@ -27,7 +27,7 @@ struct Chunk
     static constexpr size_t NUMBER_OF_VOXELS =
         NUMBER_OF_VOXELS_PER_DIMENSION * NUMBER_OF_VOXELS_PER_DIMENSION * NUMBER_OF_VOXELS_PER_DIMENSION;
 
-    static constexpr float CHUNK_LENGTH = Voxel::EDGE_LENGTH * Chunk::NUMBER_OF_VOXELS_PER_DIMENSION;
+    static constexpr u32 CHUNK_LENGTH = Voxel::EDGE_LENGTH * Chunk::NUMBER_OF_VOXELS_PER_DIMENSION;
 
     // A flattened 3d array of Voxels.
     Voxel *m_voxels{};
@@ -72,18 +72,18 @@ struct ChunkManager
 
     void transfer_chunks_from_setup_to_loaded_state(const u64 current_copy_queue_fence_value);
 
-    static constexpr u32 NUMBER_OF_CHUNKS_PER_DIMENSION = 1024u;
+    static constexpr u32 NUMBER_OF_CHUNKS_PER_DIMENSION = 1024u * 2;
     static constexpr size_t NUMBER_OF_CHUNKS =
         NUMBER_OF_CHUNKS_PER_DIMENSION * NUMBER_OF_CHUNKS_PER_DIMENSION * NUMBER_OF_CHUNKS_PER_DIMENSION;
 
     // Determines how many chunks are loaded around the player.
-    static constexpr u32 CHUNK_RENDER_DISTANCE = 32u;
+    static constexpr u32 CHUNK_RENDER_DISTANCE = 16u;
 
     // Chunks to create per frame : How many chunks are setup (i.e the meshing processes occurs).
     static constexpr u32 NUMBER_OF_CHUNKS_TO_CREATE_PER_FRAME = 16u;
 
     // Chunks to load per frame : How many setup chunks are moved into the loaded chunk hash map.
-    static constexpr u32 NUMBER_OF_CHUNKS_TO_LOAD_PER_FRAME = 32u;
+    static constexpr u32 NUMBER_OF_CHUNKS_TO_LOAD_PER_FRAME = 64u;
 
     std::unordered_map<size_t, Chunk> m_loaded_chunks{};
     std::unordered_map<size_t, Chunk> m_unloaded_chunks{};
