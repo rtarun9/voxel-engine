@@ -7,7 +7,7 @@
 // position' and has a edge length as specified in the class below.
 struct Voxel
 {
-    static constexpr u32 EDGE_LENGTH{64 * 32u};
+    static constexpr u32 EDGE_LENGTH{64u};
     bool m_active{true};
 };
 
@@ -23,7 +23,7 @@ struct Chunk
 
     ~Chunk();
 
-    static constexpr u32 NUMBER_OF_VOXELS_PER_DIMENSION = 16u;
+    static constexpr u32 NUMBER_OF_VOXELS_PER_DIMENSION = 8u;
     static constexpr size_t NUMBER_OF_VOXELS =
         NUMBER_OF_VOXELS_PER_DIMENSION * NUMBER_OF_VOXELS_PER_DIMENSION * NUMBER_OF_VOXELS_PER_DIMENSION;
 
@@ -75,7 +75,7 @@ struct ChunkManager
         NUMBER_OF_CHUNKS_PER_DIMENSION * NUMBER_OF_CHUNKS_PER_DIMENSION * NUMBER_OF_CHUNKS_PER_DIMENSION;
 
     // Determines how many chunks are loaded around the player.
-    static constexpr u32 CHUNKS_LOADED_AROUND_PLAYER = 8u;
+    static constexpr u32 CHUNKS_LOADED_AROUND_PLAYER = 6u;
 
     // Determines how many chunks are deleted per frame.
     static constexpr u32 CHUNKS_TO_UNLOAD_PER_FRAME = 64u * 4u;
