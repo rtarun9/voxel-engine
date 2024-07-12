@@ -8,7 +8,7 @@
 // position' and has a edge length as specified in the class below.
 struct Voxel
 {
-    static constexpr u32 EDGE_LENGTH{640 * 3u};
+    static constexpr u32 EDGE_LENGTH{640 * 8u};
     bool m_active{true};
 };
 

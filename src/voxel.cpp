@@ -64,7 +64,7 @@ ChunkManager::ChunkManager(Renderer &renderer)
     renderer.m_copy_queue.flush_queue();
     m_shared_chunk_position_buffer = result.structured_buffer;
 
-    m_thread_pool.reset(2);
+    m_thread_pool.reset(6);
 }
 
 ChunkManager::SetupChunkData ChunkManager::internal_mt_setup_chunk(Renderer &renderer, const size_t index)

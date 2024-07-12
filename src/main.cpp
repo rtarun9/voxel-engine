@@ -450,6 +450,7 @@ int main()
             }
         }
 
+        /*
         size_t unloaded_chunks = 0;
         while (false && !chunks_to_unload.empty() && unloaded_chunks < ChunkManager::CHUNKS_TO_UNLOAD_PER_FRAME)
         {
@@ -469,9 +470,11 @@ int main()
 
             ++unloaded_chunks;
         }
+        */
 
         // Setup indirect command vector.
         indirect_command_vector.clear();
+        indirect_command_vector.reserve(chunk_manager.m_loaded_chunks.size());
         for (const auto &[i, chunk] : chunk_manager.m_loaded_chunks)
         {
             const VoxelRenderResources render_resources = {
@@ -505,6 +508,19 @@ int main()
         // Run the culling compute shader, followed by voxel rendering shader.
         if (!indirect_command_vector.empty())
         {
+            const D3D12_RESOURCE_BARRIER indirect_argument_to_copy_dest_state = {
+                .Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
+                .Flags = D3D12_RESOURCE_BARRIER_FLAGS::D3D12_RESOURCE_BARRIER_FLAG_NONE,
+                .Transition =
+                    D3D12_RESOURCE_TRANSITION_BARRIER{
+                        .pResource = indirect_command_buffer.default_resource.Get(),
+                        .Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+                        .StateBefore = D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT,
+                        .StateAfter = D3D12_RESOURCE_STATE_COPY_DEST,
+                    },
+            };
+            command_list->ResourceBarrier(1u, &indirect_argument_to_copy_dest_state);
+
             memcpy(indirect_command_buffer.upload_resource_mapped_ptr, indirect_command_vector.data(),
                    indirect_command_vector.size() * sizeof(IndirectCommand));
 
@@ -520,19 +536,6 @@ int main()
             command_list->SetPipelineState(gpu_culling_pso.Get());
 
             command_list->SetComputeRoot32BitConstants(0u, 64u, &gpu_cull_render_resources, 0u);
-
-            const D3D12_RESOURCE_BARRIER indirect_argument_to_copy_dest_state = {
-                .Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
-                .Flags = D3D12_RESOURCE_BARRIER_FLAGS::D3D12_RESOURCE_BARRIER_FLAG_NONE,
-                .Transition =
-                    D3D12_RESOURCE_TRANSITION_BARRIER{
-                        .pResource = indirect_command_buffer.default_resource.Get(),
-                        .Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
-                        .StateBefore = D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT,
-                        .StateAfter = D3D12_RESOURCE_STATE_COPY_DEST,
-                    },
-            };
-            command_list->ResourceBarrier(1u, &indirect_argument_to_copy_dest_state);
 
             // Clear the counter associated with UAV.
 
