@@ -608,6 +608,8 @@ int main()
         ImGui::Text("Number of copy alloc / list pairs : %zu",
                     renderer.m_copy_queue.m_command_allocator_list_queue.size());
         ImGui::Text("Voxel edge length : %zu", Voxel::EDGE_LENGTH);
+        ImGui::Text("Number of threads in pool : %zu", chunk_manager.m_thread_pool.get_thread_count());
+        ImGui::Text("Number of queued threads in pool : %zu", chunk_manager.m_thread_pool.get_tasks_queued());
 
         ImGui::ShowMetricsWindow();
         ImGui::End();

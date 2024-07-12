@@ -63,6 +63,8 @@ ChunkManager::ChunkManager(Renderer &renderer)
 
     renderer.m_copy_queue.flush_queue();
     m_shared_chunk_position_buffer = result.structured_buffer;
+
+    m_thread_pool.reset(2);
 }
 
 ChunkManager::SetupChunkData ChunkManager::internal_mt_setup_chunk(Renderer &renderer, const size_t index)
@@ -251,12 +253,12 @@ void ChunkManager::create_chunks_from_setup_stack(Renderer &renderer)
     while (chunks_that_are_setup++ < ChunkManager::NUMBER_OF_CHUNKS_TO_CREATE_PER_FRAME &&
            !m_chunks_to_setup_stack.empty())
     {
-        const auto top = m_chunks_to_setup_stack.top();
+        const size_t top = m_chunks_to_setup_stack.top();
         m_chunks_to_setup_stack.pop();
 
-        m_setup_chunk_futures_queue.emplace(
-            std::pair{renderer.m_copy_queue.m_monotonic_fence_value + 1,
-                      std::async(&ChunkManager::internal_mt_setup_chunk, this, std::ref(renderer), top)});
+        m_setup_chunk_futures_queue.emplace(std::pair{
+            renderer.m_copy_queue.m_monotonic_fence_value + 1,
+            m_thread_pool.submit_task([this, &renderer, top]() { return internal_mt_setup_chunk(renderer, top); })});
     }
 }
 
@@ -268,10 +270,6 @@ void ChunkManager::transfer_chunks_from_setup_to_loaded_state(const u64 current_
     while (!m_setup_chunk_futures_queue.empty() && chunks_loaded < ChunkManager::NUMBER_OF_CHUNKS_TO_LOAD_PER_FRAME)
     {
         auto &setup_chunk_data = m_setup_chunk_futures_queue.front();
-        if (!setup_chunk_data.second.valid())
-        {
-            return;
-        }
 
         switch (std::future_status status = setup_chunk_data.second.wait_for(0s); status)
         {
@@ -289,8 +287,6 @@ void ChunkManager::transfer_chunks_from_setup_to_loaded_state(const u64 current_
 
                 const size_t num_vertices = chunk_to_load.m_chunk_indices_data.size();
                 const size_t chunk_index = chunk_to_load.m_chunk.m_chunk_index;
-
-                m_loaded_chunks[chunk_index] = std::move(chunk_to_load.m_chunk);
 
                 m_chunk_index_buffers[chunk_index] = std::move(chunk_to_load.m_chunk_index_buffer.index_buffer);
                 m_chunk_color_buffers[chunk_index] = std::move(chunk_to_load.m_chunk_color_buffer.structured_buffer);
@@ -315,6 +311,7 @@ void ChunkManager::transfer_chunks_from_setup_to_loaded_state(const u64 current_
                 m_setup_chunk_futures_queue.pop();
 
                 m_chunk_indices_that_are_being_setup.erase(chunk_index);
+                m_loaded_chunks[chunk_index] = std::move(chunk_to_load.m_chunk);
             }
             else
             {

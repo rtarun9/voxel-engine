@@ -1,5 +1,6 @@
 #pragma once
 
+#include "include/BS_thread_pool.hpp"
 #include "voxel-engine/renderer.hpp"
 
 // A voxel is just a value on a regular 3D grid. Think of it as the corners where the cells meet in a 3d grid.
@@ -7,7 +8,7 @@
 // position' and has a edge length as specified in the class below.
 struct Voxel
 {
-    static constexpr u32 EDGE_LENGTH{64u};
+    static constexpr u32 EDGE_LENGTH{640 * 3u};
     bool m_active{true};
 };
 
@@ -65,7 +66,7 @@ struct ChunkManager
     SetupChunkData internal_mt_setup_chunk(Renderer &renderer, const size_t index);
 
   public:
-    void add_chunk_to_setup_stack(const u64 chunk_index);
+    void add_chunk_to_setup_stack(const size_t chunk_index);
     void create_chunks_from_setup_stack(Renderer &renderer);
 
     void transfer_chunks_from_setup_to_loaded_state(const u64 current_copy_queue_fence_value);
@@ -101,7 +102,7 @@ struct ChunkManager
     // Why is there also a stack?
     // Use the stack to store chunk indices that at any given point in time are close to the player.
     // Then, each from from this stack, add elements into the queue.
-    std::stack<u64> m_chunks_to_setup_stack{};
+    std::stack<size_t> m_chunks_to_setup_stack{};
 
     // A unordered set to keep track of chunks that are currently in process of being setup.
     // This is required in case create_chunk is called for a chunk that is being setup but not loaded. We do not want to
@@ -115,4 +116,7 @@ struct ChunkManager
     // All chunks only have a index buffer with them. The indices 'index' into this common shared chunk constant buffer.
     // The data in this buffer is ordered vertex wise, voxel wise.
     StructuredBuffer m_shared_chunk_position_buffer{};
+
+    // Threadpool from which std::futures are obtained.
+    BS::thread_pool m_thread_pool;
 };
