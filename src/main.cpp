@@ -11,10 +11,11 @@
 #include "imgui.h"
 #include "imgui_impl_dx12.h"
 #include "imgui_impl_win32.h"
+#include "voxel-engine/thread_pool.hpp"
 
 int main()
 {
-    printf("%s\n", FileSystem::instance().executable_path().c_str());
+    printf("Executable Path :: %s\n", FileSystem::instance().executable_path().c_str());
 
     const Window window{};
     Renderer renderer(window.get_handle(), window.get_width(), window.get_height());
@@ -611,7 +612,6 @@ int main()
         ImGui::Text("Number of copy alloc / list pairs : %zu",
                     renderer.m_copy_queue.m_command_allocator_list_queue.size());
         ImGui::Text("Voxel edge length : %zu", Voxel::EDGE_LENGTH);
-        ImGui::Text("Number of threads in pool : %zu", chunk_manager.m_thread_pool.get_thread_count());
         ImGui::Text("Number of queued threads in pool : %zu", chunk_manager.m_thread_pool.get_tasks_queued());
 
         ImGui::ShowMetricsWindow();

@@ -1,5 +1,5 @@
-external/DirectXAgilitySDK
-external/DirectXShaderCompiler
+external/agility-sdk
+external/dxc
 agility.zip
 dxc.zip
 build/

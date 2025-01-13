@@ -63,8 +63,6 @@ ChunkManager::ChunkManager(Renderer &renderer)
 
     renderer.m_copy_queue.flush_queue();
     m_shared_chunk_position_buffer = result.structured_buffer;
-
-    m_thread_pool.reset(6);
 }
 
 ChunkManager::SetupChunkData ChunkManager::internal_mt_setup_chunk(Renderer &renderer, const size_t index)
@@ -256,9 +254,10 @@ void ChunkManager::create_chunks_from_setup_stack(Renderer &renderer)
         const size_t top = m_chunks_to_setup_stack.top();
         m_chunks_to_setup_stack.pop();
 
-        m_setup_chunk_futures_queue.emplace(std::pair{
-            renderer.m_copy_queue.m_monotonic_fence_value + 1,
-            m_thread_pool.submit_task([this, &renderer, top]() { return internal_mt_setup_chunk(renderer, top); })});
+        m_setup_chunk_futures_queue.emplace(std::pair{renderer.m_copy_queue.m_monotonic_fence_value + 1,
+                                                      m_thread_pool.add_to_task_queue([this, &renderer, top]() {
+                                                          return internal_mt_setup_chunk(renderer, top);
+                                                      })});
     }
 }
 

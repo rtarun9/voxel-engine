@@ -1,7 +1,7 @@
 #pragma once
 
-#include "include/BS_thread_pool.hpp"
 #include "voxel-engine/renderer.hpp"
+#include "voxel-engine/thread_pool.hpp"
 
 // A voxel is just a value on a regular 3D grid. Think of it as the corners where the cells meet in a 3d grid.
 // For 3d visualization of voxels, A cube is rendered for each voxel where the front lower left corner is the 'voxel
@@ -118,5 +118,5 @@ struct ChunkManager
     StructuredBuffer m_shared_chunk_position_buffer{};
 
     // Threadpool from which std::futures are obtained.
-    BS::thread_pool m_thread_pool;
+    thread_pool_t m_thread_pool{};
 };

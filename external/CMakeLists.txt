@@ -7,13 +7,7 @@ FetchContent_Declare(
     GIT_PROGRESS TRUE
 )
 
-FetchContent_Declare(
-    thread-pool
-    GIT_REPOSITORY https://github.com/bshoshany/thread-pool
-    GIT_PROGRESS TRUE
-)
-
-FetchContent_MakeAvailable(imgui thread-pool)
+FetchContent_MakeAvailable(imgui)
 
 add_library(libimgui
     ${imgui_SOURCE_DIR}/imgui.cpp
@@ -26,12 +20,11 @@ add_library(libimgui
 )
 
 target_include_directories(libimgui PUBLIC 
-${imgui_SOURCE_DIR} 
-${imgui_SOURCE_DIR}/backends
+	${imgui_SOURCE_DIR} 
+	${imgui_SOURCE_DIR}/backends
 )
 
 target_link_libraries(libimgui PUBLIC d3d12 dxguid dxgi)
 
 add_library(external INTERFACE)
 target_link_libraries(external INTERFACE libimgui)
-target_include_directories(external INTERFACE ${thread-pool_SOURCE_DIR})

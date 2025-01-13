@@ -45,3 +45,7 @@ constexpr bool VX_DEBUG_MODE = false;
 // Custom includes.
 #include "common.hpp"
 #include "types.hpp"
+
+// Leak symbols from wrl/client.h to global namespace (so that I don't have to keep doing Microsoft::WRL::ComPtr<T> each
+// time).
+using namespace Microsoft::WRL;

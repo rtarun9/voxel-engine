@@ -10,8 +10,8 @@ set (SRC_FILES
 )
 
 set (HEADER_FILES
-
     ${CMAKE_SOURCE_DIR}/include/voxel-engine/common.hpp
+    ${CMAKE_SOURCE_DIR}/include/voxel-engine/thread_pool.hpp
     ${CMAKE_SOURCE_DIR}/include/voxel-engine/timer.hpp
     ${CMAKE_SOURCE_DIR}/include/voxel-engine/types.hpp
     ${CMAKE_SOURCE_DIR}/include/voxel-engine/window.hpp
@@ -27,7 +27,6 @@ target_link_libraries(voxel-engine PUBLIC d3d12 dxgi dxguid dxcompiler external)
 
 set_property(TARGET voxel-engine PROPERTY COMPILE_WARNING_AS_ERROR ON)
 
-# Setup PCH.
 target_precompile_headers(voxel-engine PUBLIC ${CMAKE_SOURCE_DIR}/include/voxel-engine/pch.hpp)
 
 target_include_directories(voxel-engine PRIVATE ${CMAKE_SOURCE_DIR}/include)
