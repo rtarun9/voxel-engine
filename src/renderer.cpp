@@ -12,22 +12,6 @@ extern "C"
     __declspec(dllexport) extern const char *D3D12SDKPath = ".\\D3D12\\";
 }
 
-D3D12_GPU_DESCRIPTOR_HANDLE renderer_t::descriptor_heap_t::get_gpu_descriptor_handle_at_index(const size_t index) const
-{
-    D3D12_GPU_DESCRIPTOR_HANDLE handle = descriptor_heap->GetGPUDescriptorHandleForHeapStart();
-    handle.ptr += index * descriptor_handle_size;
-
-    return handle;
-}
-
-D3D12_CPU_DESCRIPTOR_HANDLE renderer_t::descriptor_heap_t::get_cpu_descriptor_handle_at_index(const size_t index) const
-{
-    D3D12_CPU_DESCRIPTOR_HANDLE handle = descriptor_heap->GetCPUDescriptorHandleForHeapStart();
-    handle.ptr += index * descriptor_handle_size;
-
-    return handle;
-}
-
 void renderer_t::descriptor_heap_t::offset_current_descriptor_handles()
 {
     current_cpu_descriptor_handle.ptr += descriptor_handle_size;
@@ -36,13 +20,13 @@ void renderer_t::descriptor_heap_t::offset_current_descriptor_handles()
     current_descriptor_handle_index++;
 }
 
-void renderer_t::descriptor_heap_t::create(ID3D12Device *const device, const size_t num_descriptors,
+void renderer_t::descriptor_heap_t::create(ID3D12Device *const device, const u32 num_descriptors,
                                            const D3D12_DESCRIPTOR_HEAP_TYPE descriptor_heap_type,
                                            const D3D12_DESCRIPTOR_HEAP_FLAGS descriptor_heap_flags)
 {
     const D3D12_DESCRIPTOR_HEAP_DESC descriptor_heap_desc = {
         .Type = descriptor_heap_type,
-        .NumDescriptors = static_cast<UINT>(num_descriptors),
+        .NumDescriptors = num_descriptors,
         .Flags = descriptor_heap_flags,
         .NodeMask = 0u,
     };
@@ -151,16 +135,20 @@ renderer_t::renderer_t(const HWND window_handle, const u32 window_width, const u
     }
 
     // Create the render target view for the swapchain back buffer.
+    D3D12_CPU_DESCRIPTOR_HANDLE cpu_rtv_descriptor_handle = m_rtv_descriptor_heap.current_cpu_descriptor_handle;
+
     for (u8 i = 0; i < NUMBER_OF_BACKBUFFERS; i++)
     {
         Microsoft::WRL::ComPtr<ID3D12Resource> swapchain_resource{};
         throw_if_failed(m_swapchain->GetBuffer(i, IID_PPV_ARGS(&swapchain_resource)));
-        m_swapchain_backbuffer_cpu_descriptor_handles[i] = m_rtv_descriptor_heap.get_cpu_descriptor_handle_at_index(i);
+        m_swapchain_backbuffer_cpu_descriptor_handles[i] = cpu_rtv_descriptor_handle;
 
         m_device->CreateRenderTargetView(swapchain_resource.Get(), nullptr,
                                          m_swapchain_backbuffer_cpu_descriptor_handles[i]);
 
         m_swapchain_backbuffer_resources[i] = (std::move(swapchain_resource));
+
+        cpu_rtv_descriptor_handle.ptr += m_rtv_descriptor_heap.descriptor_handle_size;
     }
 
     m_swapchain_backbuffer_index = static_cast<u8>(m_swapchain->GetCurrentBackBufferIndex());
@@ -198,9 +186,8 @@ renderer_t::renderer_t(const HWND window_handle, const u32 window_width, const u
                                                   IID_PPV_ARGS(&m_bindless_root_signature)));
 }
 
-renderer_t::IndexBufferWithIntermediateResource renderer_t::create_index_buffer(const void *data, const size_t stride,
-                                                                                const size_t indices_count,
-                                                                                const std::wstring_view buffer_name)
+renderer_t::index_buffer_with_intermediate_resource_t renderer_t::create_index_buffer(
+    const void *data, const size_t stride, const u32 indices_count, const std::wstring_view buffer_name)
 {
     const size_t size_in_bytes = stride * indices_count;
 
@@ -281,8 +268,8 @@ renderer_t::IndexBufferWithIntermediateResource renderer_t::create_index_buffer(
     };
 }
 
-renderer_t::StucturedBufferWithIntermediateResource renderer_t::create_structured_buffer(
-    const void *data, const size_t stride, const size_t num_elements, const std::wstring_view buffer_name)
+renderer_t::structured_buffer_with_intermediate_resource_t renderer_t::create_structured_buffer(
+    const void *data, const size_t stride, const u32 num_elements, const std::wstring_view buffer_name)
 {
     const size_t size_in_bytes = stride * num_elements;
 
@@ -360,60 +347,8 @@ renderer_t::StucturedBufferWithIntermediateResource renderer_t::create_structure
     };
 }
 
-constant_buffer_t renderer_t::internal_create_constant_buffer(const size_t size_in_bytes,
-                                                              const std::wstring_view buffer_name)
-{
-    u8 *resource_ptr{};
-    Microsoft::WRL::ComPtr<ID3D12Resource> buffer_resource{};
-
-    const D3D12_HEAP_PROPERTIES upload_heap_properties = {
-        .Type = D3D12_HEAP_TYPE_UPLOAD,
-        .CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
-        .MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN,
-        .CreationNodeMask = 0u,
-        .VisibleNodeMask = 0u,
-    };
-
-    const D3D12_RESOURCE_DESC buffer_resource_desc = {
-        .Dimension = D3D12_RESOURCE_DIMENSION_BUFFER,
-        .Alignment = 0u,
-        .Width = size_in_bytes,
-        .Height = 1u,
-        .DepthOrArraySize = 1u,
-        .MipLevels = 1u,
-        .Format = DXGI_FORMAT_UNKNOWN,
-        .SampleDesc = {1u, 0u},
-        .Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
-        .Flags = D3D12_RESOURCE_FLAG_NONE,
-    };
-
-    throw_if_failed(m_device->CreateCommittedResource(
-        &upload_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES | D3D12_HEAP_FLAG_CREATE_NOT_ZEROED,
-        &buffer_resource_desc, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, nullptr,
-        IID_PPV_ARGS(&buffer_resource)));
-
-    // Now that a resource is created, copy CPU data to this upload buffer.
-    const D3D12_RANGE read_range{.Begin = 0u, .End = 0u};
-
-    throw_if_failed(buffer_resource->Map(0u, &read_range, (void **)&resource_ptr));
-
-    std::scoped_lock<std::mutex> scoped_lock(m_resource_mutex);
-
-    name_d3d12_object(buffer_resource.Get(), buffer_name);
-
-    // Create Constant buffer view.
-    size_t cbv_index = create_constant_buffer_view(buffer_resource.Get(), size_in_bytes);
-
-    return constant_buffer_t{
-        .resource = buffer_resource,
-        .cbv_index = (u32)cbv_index,
-        .size_in_bytes = size_in_bytes,
-        .resource_mapped_ptr = resource_ptr,
-    };
-}
-
-CommandBuffer renderer_t::create_command_buffer(const size_t stride, const size_t max_number_of_elements,
-                                                const std::wstring_view buffer_name)
+command_buffer_t renderer_t::create_command_buffer(const size_t stride, const size_t max_number_of_elements,
+                                                   const std::wstring_view buffer_name)
 {
     // Note that counter offset must be multiple of d3d12 uav counter placement alignment.
     size_t counter_offset =
@@ -515,21 +450,21 @@ CommandBuffer renderer_t::create_command_buffer(const size_t stride, const size_
     name_d3d12_object(intermediate_buffer_resource.Get(), std::wstring(buffer_name) + std::wstring(L" [intermediate]"));
 
     // Create the SRV.
-    const size_t upload_resource_srv_index =
+    const u32 upload_resource_srv_index =
         create_shader_resource_view(intermediate_buffer_resource.Get(), stride, max_number_of_elements);
 
     // Create the UAV.
-    const size_t default_resource_uav_index =
+    const u32 default_resource_uav_index =
         create_unordered_access_view(buffer_resource.Get(), stride, max_number_of_elements, true, counter_offset);
 
-    return CommandBuffer{
+    return command_buffer_t{
         .default_resource = buffer_resource,
         .upload_resource = intermediate_buffer_resource,
         .zeroed_counter_buffer_resource = zeroed_counter_buffer_resource,
         .upload_resource_mapped_ptr = resource_ptr,
         .upload_resource_srv_index = upload_resource_srv_index,
         .default_resource_uav_index = default_resource_uav_index,
-        .counter_offset = counter_offset,
+        .counter_offset = (u32)counter_offset,
     };
 }
 

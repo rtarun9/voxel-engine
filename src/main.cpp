@@ -45,9 +45,9 @@ int main()
 
     ChunkManager chunk_manager{renderer};
 
-    SceneConstantBuffer scene_buffer_data{};
-
     // Setup the AABB data for scene buffer.
+    auto scene_buffers = renderer.create_constant_buffers<SceneConstantBuffer, renderer_t::NUMBER_OF_BACKBUFFERS>(
+        L"Scene constant buffer");
 
     // AABB for chunk.
     static constexpr std::array<DirectX::XMFLOAT4, 8> aabb_vertices{
@@ -63,11 +63,12 @@ int main()
 
     for (int i = 0; i < 8; i++)
     {
-        scene_buffer_data.aabb_vertices[i] = aabb_vertices[i];
-    }
+        for (auto &scene_buffer : scene_buffers)
+        {
 
-    auto scene_buffers = renderer.create_constant_buffer<renderer_t::NUMBER_OF_BACKBUFFERS>(sizeof(SceneConstantBuffer),
-                                                                                            L"Scene constant buffer");
+            scene_buffer.data.aabb_vertices[i] = aabb_vertices[i];
+        }
+    }
 
     // Compile the vertex and pixel shader.
     Microsoft::WRL::ComPtr<IDxcBlob> vertex_shader_blob = shader_compiler::compile(
@@ -253,7 +254,7 @@ int main()
     static constexpr size_t MAX_CHUNKS_TO_BE_DRAWN = 10'00'000;
     std::vector<IndirectCommand> indirect_command_vector{};
 
-    CommandBuffer indirect_command_buffer =
+    command_buffer_t indirect_command_buffer =
         renderer.create_command_buffer(sizeof(IndirectCommand), MAX_CHUNKS_TO_BE_DRAWN, L"Indirect Command Buffer");
 
     // Create viewport and scissor.
@@ -391,12 +392,12 @@ int main()
         const DirectX::XMMATRIX projection_matrix = DirectX::XMMatrixSet(
             width, 0.0f, 0.0f, 0.0f, 0.0f, height, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, near_plane, 0.0f);
 
-        scene_buffer_data.view_matrix = camera.update_and_get_view_matrix(delta_time);
-        scene_buffer_data.projection_matrix = projection_matrix;
-        scene_buffer_data.camera_position = camera.m_position;
+        constant_buffer_t<SceneConstantBuffer> &scene_buffer = scene_buffers[renderer.m_swapchain_backbuffer_index];
 
-        constant_buffer_t &scene_buffer = scene_buffers[renderer.m_swapchain_backbuffer_index];
-        scene_buffer.update(&scene_buffer_data);
+        scene_buffer.data.view_matrix = camera.update_and_get_view_matrix(delta_time);
+        scene_buffer.data.projection_matrix = projection_matrix;
+        scene_buffer.data.camera_position = camera.m_position;
+        scene_buffer.update();
 
         const auto &swapchain_index = renderer.m_swapchain_backbuffer_index;
 

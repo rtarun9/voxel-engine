@@ -226,8 +226,8 @@ ChunkManager::SetupChunkData ChunkManager::internal_mt_setup_chunk(renderer_t &r
                                               sizeof(DirectX::XMFLOAT3), setup_chunk_data.m_chunk_color_data.size(),
                                               std::wstring(L"Chunk color buffer : ") + std::to_wstring(index));
 
-        setup_chunk_data.m_chunk_constant_buffer = renderer.create_constant_buffer<1>(
-            sizeof(ChunkConstantBuffer), std::wstring(L"Chunk constant buffer : ") + std::to_wstring(index))[0];
+        setup_chunk_data.m_chunk_constant_buffer = renderer.create_constant_buffer<ChunkConstantBuffer>(
+            std::wstring(L"Chunk constant buffer : ") + std::to_wstring(index));
     }
 
     setup_chunk_data.m_chunk.m_chunk_index = index;
@@ -299,13 +299,13 @@ void ChunkManager::transfer_chunks_from_setup_to_loaded_state(const u64 current_
                                      chunk_index_3d.y * Voxel::EDGE_LENGTH * Chunk::NUMBER_OF_VOXELS_PER_DIMENSION,
                                      chunk_index_3d.z * Voxel::EDGE_LENGTH * Chunk::NUMBER_OF_VOXELS_PER_DIMENSION);
 
-                const ChunkConstantBuffer chunk_constant_buffer_data = {
+                m_chunk_constant_buffers[chunk_index].data = {
                     .translation_vector = {chunk_offset.x, chunk_offset.y, chunk_offset.z, 0u},
                     .position_buffer_index = static_cast<u32>(m_shared_chunk_position_buffer.srv_index),
                     .color_buffer_index = static_cast<u32>(m_chunk_color_buffers[chunk_index].srv_index),
                 };
 
-                m_chunk_constant_buffers[chunk_index].update(&chunk_constant_buffer_data);
+                m_chunk_constant_buffers[chunk_index].update();
 
                 m_setup_chunk_futures_queue.pop();
 

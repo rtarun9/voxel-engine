@@ -1,5 +1,7 @@
 #pragma once
 
+#include "shaders/interop/render_resources.hlsli"
+
 #include "voxel-engine/renderer.hpp"
 #include "voxel-engine/thread_pool.hpp"
 
@@ -49,13 +51,13 @@ struct ChunkManager
     {
         Chunk m_chunk{};
 
-        renderer_t::IndexBufferWithIntermediateResource m_chunk_index_buffer{};
-        renderer_t::StucturedBufferWithIntermediateResource m_chunk_color_buffer{};
+        renderer_t::index_buffer_with_intermediate_resource_t m_chunk_index_buffer{};
+        renderer_t::structured_buffer_with_intermediate_resource_t m_chunk_color_buffer{};
 
         // A strange design decision, but rather than accessing the render resources via root constants, render
         // resources will now be embedded into the chunk constant buffer.
         // This is done to make the indirect rendering & GPU culling process simpler.
-        constant_buffer_t m_chunk_constant_buffer{};
+        constant_buffer_t<ChunkConstantBuffer> m_chunk_constant_buffer{};
 
         std::vector<u16> m_chunk_indices_data{};
         std::vector<DirectX::XMFLOAT3> m_chunk_color_data{};
@@ -111,7 +113,7 @@ struct ChunkManager
 
     std::unordered_map<size_t, index_buffer_t> m_chunk_index_buffers{};
     std::unordered_map<size_t, structured_buffer_t> m_chunk_color_buffers{};
-    std::unordered_map<size_t, constant_buffer_t> m_chunk_constant_buffers{};
+    std::unordered_map<size_t, constant_buffer_t<ChunkConstantBuffer>> m_chunk_constant_buffers{};
 
     // All chunks only have a index buffer with them. The indices 'index' into this common shared chunk constant buffer.
     // The data in this buffer is ordered vertex wise, voxel wise.
