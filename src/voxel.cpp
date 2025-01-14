@@ -30,7 +30,7 @@ Chunk::~Chunk()
     }
 }
 
-ChunkManager::ChunkManager(Renderer &renderer)
+ChunkManager::ChunkManager(renderer_t &renderer)
 {
     // Create the position buffer.
     std::vector<DirectX::XMFLOAT3> chunk_position_data{};
@@ -65,7 +65,7 @@ ChunkManager::ChunkManager(Renderer &renderer)
     m_shared_chunk_position_buffer = result.structured_buffer;
 }
 
-ChunkManager::SetupChunkData ChunkManager::internal_mt_setup_chunk(Renderer &renderer, const size_t index)
+ChunkManager::SetupChunkData ChunkManager::internal_mt_setup_chunk(renderer_t &renderer, const size_t index)
 {
     SetupChunkData setup_chunk_data{};
 
@@ -245,7 +245,7 @@ void ChunkManager::add_chunk_to_setup_stack(const u64 index)
     m_chunks_to_setup_stack.push(index);
 }
 
-void ChunkManager::create_chunks_from_setup_stack(Renderer &renderer)
+void ChunkManager::create_chunks_from_setup_stack(renderer_t &renderer)
 {
     u64 chunks_that_are_setup = 0u;
     while (chunks_that_are_setup++ < ChunkManager::NUMBER_OF_CHUNKS_TO_CREATE_PER_FRAME &&

@@ -8,25 +8,44 @@ class thread_pool_t
         for (size_t i = 0; i < num_threads; i++)
         {
             m_threads.emplace_back([this]() {
-                std::function<void()> curr_func = {};
                 while (!m_stop_processing_tasks)
                 {
-                    curr_func = {};
+                    std::function<void()> curr_func = {};
 
                     std::unique_lock<std::mutex> lock(m_task_queue_mutex);
 
                     // Wait until task queue is not empty.
-                    m_task_queue_cv.wait(lock, [this]() { return !m_task_queue.empty(); });
+                    m_task_queue_cv.wait(lock, [this]() { return !m_task_queue.empty() || m_stop_processing_tasks; });
+                    if (m_stop_processing_tasks)
+                    {
+                        return;
+                    }
+
                     curr_func = std::move(m_task_queue.front());
                     m_task_queue.pop();
 
-                    lock.unlock();
                     m_task_queue_cv.notify_one();
-                }
 
-                curr_func();
+                    curr_func();
+                }
             });
         }
+    }
+
+    ~thread_pool_t()
+    {
+        m_stop_processing_tasks = true;
+        m_task_queue_cv.notify_all();
+
+        for (auto &thread : m_threads)
+        {
+            thread.join();
+        }
+    }
+
+    size_t get_thread_count() const
+    {
+        return m_threads.size();
     }
 
     size_t get_tasks_queued() const
@@ -47,15 +66,22 @@ class thread_pool_t
         std::shared_ptr<std::packaged_task<decltype(func(args...))()>> shared_ptr_of_packaged_task =
             std::make_shared<std::packaged_task<decltype(func(args...))()>>(wrapper_func);
 
+        std::future<decltype(func(args...))> future = shared_ptr_of_packaged_task->get_future();
+
         std::unique_lock<std::mutex> lock(m_task_queue_mutex);
         m_task_queue.push([shared_ptr_of_packaged_task]() { (*shared_ptr_of_packaged_task)(); });
-
-        auto future = shared_ptr_of_packaged_task->get_future();
 
         m_task_queue_cv.notify_one();
 
         return future;
     }
+
+  private:
+    thread_pool_t(const thread_pool_t &other) = delete;
+    thread_pool_t &operator=(const thread_pool_t &other) = delete;
+
+    thread_pool_t(thread_pool_t &&other) = delete;
+    thread_pool_t &operator=(thread_pool_t &&other) = delete;
 
   private:
     std::vector<std::thread> m_threads{};

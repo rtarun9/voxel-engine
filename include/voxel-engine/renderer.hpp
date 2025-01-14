@@ -1,15 +1,15 @@
 #pragma once
 
-struct StructuredBuffer
+struct structured_buffer_t
 {
-    Microsoft::WRL::ComPtr<ID3D12Resource> resource{};
-    size_t srv_index{};
+    ComPtr<ID3D12Resource> resource{};
+    u32 srv_index{};
 };
 
-struct ConstantBuffer
+struct constant_buffer_t
 {
-    Microsoft::WRL::ComPtr<ID3D12Resource> resource{};
-    size_t cbv_index{};
+    ComPtr<ID3D12Resource> resource{};
+    u32 cbv_index{};
     size_t size_in_bytes{};
 
     u8 *resource_mapped_ptr{};
@@ -20,10 +20,10 @@ struct ConstantBuffer
     }
 };
 
-struct IndexBuffer
+struct index_buffer_t
 {
-    Microsoft::WRL::ComPtr<ID3D12Resource> resource{};
-    size_t indices_count{};
+    ComPtr<ID3D12Resource> resource{};
+    u32 indices_count{};
     D3D12_INDEX_BUFFER_VIEW index_buffer_view{};
 };
 
@@ -32,9 +32,9 @@ struct IndexBuffer
 // The command buffer contains its ID3D12Resource directly since the same command buffer is used for the entire engine.
 struct CommandBuffer
 {
-    Microsoft::WRL::ComPtr<ID3D12Resource> default_resource{};
-    Microsoft::WRL::ComPtr<ID3D12Resource> upload_resource{};
-    Microsoft::WRL::ComPtr<ID3D12Resource> zeroed_counter_buffer_resource{};
+    ComPtr<ID3D12Resource> default_resource{};
+    ComPtr<ID3D12Resource> upload_resource{};
+    ComPtr<ID3D12Resource> zeroed_counter_buffer_resource{};
 
     u8 *upload_resource_mapped_ptr{};
     size_t upload_resource_srv_index{};
@@ -43,15 +43,15 @@ struct CommandBuffer
 };
 
 // A simple & straight forward high level renderer abstraction.
-struct Renderer
+struct renderer_t
 {
     // Nested struct definitions.
   private:
     // A simple descriptor heap abstraction.
     // Provides simple methods to offset current descriptor to make creation of resources easier.
-    struct DescriptorHeap
+    struct descriptor_heap_t
     {
-        Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> descriptor_heap{};
+        ComPtr<ID3D12DescriptorHeap> descriptor_heap{};
 
         D3D12_CPU_DESCRIPTOR_HANDLE current_cpu_descriptor_handle{};
         D3D12_GPU_DESCRIPTOR_HANDLE current_gpu_descriptor_handle{};
@@ -71,15 +71,15 @@ struct Renderer
     };
 
   public:
-    explicit Renderer(const HWND window_handle, const u16 window_width, const u16 window_height);
+    explicit renderer_t(const HWND window_handle, const u32 window_width, const u32 window_height);
 
     // Resource creation functions.
     // The functions return a buffer and intermediate resource (which can be discarded once the CopyResource operation
     // is complete).
     struct IndexBufferWithIntermediateResource
     {
-        IndexBuffer index_buffer;
-        Microsoft::WRL::ComPtr<ID3D12Resource> intermediate_resource;
+        index_buffer_t index_buffer{};
+        ComPtr<ID3D12Resource> intermediate_resource{};
     };
 
     IndexBufferWithIntermediateResource create_index_buffer(const void *data, const size_t stride,
@@ -88,8 +88,8 @@ struct Renderer
 
     struct StucturedBufferWithIntermediateResource
     {
-        StructuredBuffer structured_buffer;
-        Microsoft::WRL::ComPtr<ID3D12Resource> intermediate_resource;
+        structured_buffer_t structured_buffer;
+        ComPtr<ID3D12Resource> intermediate_resource;
     };
 
     StucturedBufferWithIntermediateResource create_structured_buffer(const void *data, const size_t stride,
@@ -99,11 +99,11 @@ struct Renderer
     CommandBuffer create_command_buffer(const size_t stride, const size_t max_number_of_elements,
                                         const std::wstring_view buffer_name);
 
-    ConstantBuffer internal_create_constant_buffer(const size_t size_in_bytes, const std::wstring_view buffer_name);
+    constant_buffer_t internal_create_constant_buffer(const size_t size_in_bytes, const std::wstring_view buffer_name);
 
     template <size_t T>
-    std::array<ConstantBuffer, T> create_constant_buffer(const size_t size_in_bytes,
-                                                         const std::wstring_view buffer_name);
+    std::array<constant_buffer_t, T> create_constant_buffer(const size_t size_in_bytes,
+                                                            const std::wstring_view buffer_name);
 
   private:
     // This function automatically offset's the current descriptor handle of descriptor heap.
@@ -122,25 +122,25 @@ struct Renderer
 
   public:
     // Core D3D12 and DXGI objects.
-    Microsoft::WRL::ComPtr<ID3D12Debug> m_debug_device{};
-    Microsoft::WRL::ComPtr<IDXGIFactory6> m_dxgi_factory{};
-    Microsoft::WRL::ComPtr<IDXGIAdapter4> m_dxgi_adapter{};
+    ComPtr<ID3D12Debug> m_debug_device{};
+    ComPtr<IDXGIFactory6> m_dxgi_factory{};
+    ComPtr<IDXGIAdapter4> m_dxgi_adapter{};
 
-    Microsoft::WRL::ComPtr<ID3D12Device2> m_device{};
+    ComPtr<ID3D12Device2> m_device{};
 
-    Microsoft::WRL::ComPtr<IDXGISwapChain4> m_swapchain{};
+    ComPtr<IDXGISwapChain4> m_swapchain{};
 
     std::array<D3D12_CPU_DESCRIPTOR_HANDLE, NUMBER_OF_BACKBUFFERS> m_swapchain_backbuffer_cpu_descriptor_handles{};
-    std::array<Microsoft::WRL::ComPtr<ID3D12Resource>, NUMBER_OF_BACKBUFFERS> m_swapchain_backbuffer_resources{};
+    std::array<ComPtr<ID3D12Resource>, NUMBER_OF_BACKBUFFERS> m_swapchain_backbuffer_resources{};
 
-    DescriptorHeap m_cbv_srv_uav_descriptor_heap{};
-    DescriptorHeap m_rtv_descriptor_heap{};
-    DescriptorHeap m_dsv_descriptor_heap{};
+    descriptor_heap_t m_cbv_srv_uav_descriptor_heap{};
+    descriptor_heap_t m_rtv_descriptor_heap{};
+    descriptor_heap_t m_dsv_descriptor_heap{};
 
     u8 m_swapchain_backbuffer_index{};
 
     // Bindless root signature, that is shared by all pipelines.
-    Microsoft::WRL::ComPtr<ID3D12RootSignature> m_bindless_root_signature{};
+    ComPtr<ID3D12RootSignature> m_bindless_root_signature{};
 
     // Mutex used for resource creation.
     std::mutex m_resource_mutex{};
@@ -150,11 +150,11 @@ struct Renderer
     // sync primitives, while the direct queue is not for now).
     struct DirectCommandQueue
     {
-        std::array<Microsoft::WRL::ComPtr<ID3D12CommandAllocator>, NUMBER_OF_BACKBUFFERS> m_command_allocators{};
-        Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_command_queue{};
-        Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_command_list{};
+        std::array<ComPtr<ID3D12CommandAllocator>, NUMBER_OF_BACKBUFFERS> m_command_allocators{};
+        ComPtr<ID3D12CommandQueue> m_command_queue{};
+        ComPtr<ID3D12GraphicsCommandList> m_command_list{};
 
-        Microsoft::WRL::ComPtr<ID3D12Fence> m_fence{};
+        ComPtr<ID3D12Fence> m_fence{};
         u64 m_monotonic_fence_value{};
         std::array<u64, NUMBER_OF_BACKBUFFERS> m_frame_fence_values{};
 
@@ -172,15 +172,15 @@ struct Renderer
     {
         struct CommandAllocatorListPair
         {
-            Microsoft::WRL::ComPtr<ID3D12CommandAllocator> m_command_allocator{};
-            Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_command_list{};
+            ComPtr<ID3D12CommandAllocator> m_command_allocator{};
+            ComPtr<ID3D12GraphicsCommandList> m_command_list{};
             u64 m_fence_value{};
         };
 
         std::queue<CommandAllocatorListPair> m_command_allocator_list_queue{};
-        Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_command_queue{};
+        ComPtr<ID3D12CommandQueue> m_command_queue{};
 
-        Microsoft::WRL::ComPtr<ID3D12Fence> m_fence{};
+        ComPtr<ID3D12Fence> m_fence{};
         u64 m_monotonic_fence_value{};
 
         void create(ID3D12Device *const device);
@@ -199,10 +199,10 @@ struct Renderer
 };
 
 template <size_t T>
-inline std::array<ConstantBuffer, T> Renderer::create_constant_buffer(const size_t size_in_bytes,
-                                                                      const std::wstring_view buffer_name)
+inline std::array<constant_buffer_t, T> renderer_t::create_constant_buffer(const size_t size_in_bytes,
+                                                                           const std::wstring_view buffer_name)
 {
-    std::array<ConstantBuffer, T> constant_buffers{};
+    std::array<constant_buffer_t, T> constant_buffers{};
     for (size_t i = 0; i < T; i++)
     {
         constant_buffers[i] =

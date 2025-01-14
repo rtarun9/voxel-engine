@@ -1,19 +1,19 @@
 #include "voxel-engine/camera.hpp"
 
-DirectX::XMMATRIX Camera::update_and_get_view_matrix(const float delta_time)
+DirectX::XMMATRIX camera_t::update_and_get_view_matrix(const f32 delta_time)
 {
     // For operator overloads.
     using namespace DirectX;
 
-    const float movement_speed = m_movement_speed * delta_time;
-    const float rotation_speed = m_rotation_speed * delta_time;
+    const f32 movement_speed = m_movement_speed * delta_time;
+    const f32 rotation_speed = m_rotation_speed * delta_time;
 
     // For making the camera 'smooth', the yaw / pitch / position vector values are not set based on the players input
     // at a particular instance. Instead, these values lerp to the new values. The static variables help persist that
     // data between multiple frames / instances.
     static DirectX::XMVECTOR move_to_position_vector = DirectX::XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f);
-    static float pitch_to = 0.0f;
-    static float yaw_to = 0.0f;
+    static f32 pitch_to = 0.0f;
+    static f32 yaw_to = 0.0f;
 
     // First load data into SIMD datatypes.
     DirectX::XMVECTOR position_vector = DirectX::XMLoadFloat4(&m_position);
@@ -68,7 +68,7 @@ DirectX::XMMATRIX Camera::update_and_get_view_matrix(const float delta_time)
     move_to_position_vector =
         DirectX::XMVectorLerp(move_to_position_vector, DirectX::XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f), m_friction);
 
-    position_vector += move_to_position_vector * movement_speed;
+    position_vector += move_to_position_vector;
     m_pitch += pitch_to;
     m_yaw += yaw_to;
 

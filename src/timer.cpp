@@ -1,24 +1,19 @@
 #include "voxel-engine/timer.hpp"
 
-Timer::Timer()
+timer_t::timer_t()
 {
     // Get the performance counter frequency (in seconds).
     QueryPerformanceFrequency(&m_performance_frequency);
 
-    m_seconds_per_count = 1.0f / (float)m_performance_frequency.QuadPart;
+    m_seconds_per_count = 1.0f / (f32)m_performance_frequency.QuadPart;
 }
 
-void Timer::start()
-{
-    QueryPerformanceCounter(&m_start_time);
-}
-
-void Timer::stop()
+f32 timer_t::tick_and_get_delta_time_seconds()
 {
     QueryPerformanceCounter(&m_end_time);
-}
+    f32 delta_time = (m_end_time.QuadPart - m_start_time.QuadPart) * m_seconds_per_count;
 
-float Timer::get_delta_time() const
-{
-    return (m_end_time.QuadPart - m_start_time.QuadPart) * m_seconds_per_count;
+    m_start_time.QuadPart = m_end_time.QuadPart;
+
+    return delta_time;
 }

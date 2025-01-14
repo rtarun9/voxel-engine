@@ -1,9 +1,9 @@
 #pragma once
 
-class Camera
+class camera_t
 {
   public:
-    DirectX::XMMATRIX update_and_get_view_matrix(const float delta_time);
+    DirectX::XMMATRIX update_and_get_view_matrix(const f32 delta_time);
 
   public:
     DirectX::XMFLOAT4 m_position{0.0f, 0.0f, -5.0f, 1.0f};
@@ -12,13 +12,13 @@ class Camera
     DirectX::XMFLOAT4 m_right{1.0f, 0.0f, 0.0f, 0.0f};
     DirectX::XMFLOAT4 m_front{0.0f, 0.0f, 1.0f, 0.0f};
 
-    float m_movement_speed{500.0f};
-    float m_rotation_speed{1.0f};
+    f32 m_movement_speed{500.0f};
+    f32 m_rotation_speed{1.0f};
 
     // Used to determine how 'smooth' the camera behaves.
     // For now, both rotation and movement use the same friction value, purely for simplicity.
-    float m_friction{0.30f};
+    f32 m_friction{0.30f};
 
-    float m_pitch{};
-    float m_yaw{};
+    f32 m_pitch{};
+    f32 m_yaw{};
 };

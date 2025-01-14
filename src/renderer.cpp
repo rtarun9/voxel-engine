@@ -12,7 +12,7 @@ extern "C"
     __declspec(dllexport) extern const char *D3D12SDKPath = ".\\D3D12\\";
 }
 
-D3D12_GPU_DESCRIPTOR_HANDLE Renderer::DescriptorHeap::get_gpu_descriptor_handle_at_index(const size_t index) const
+D3D12_GPU_DESCRIPTOR_HANDLE renderer_t::descriptor_heap_t::get_gpu_descriptor_handle_at_index(const size_t index) const
 {
     D3D12_GPU_DESCRIPTOR_HANDLE handle = descriptor_heap->GetGPUDescriptorHandleForHeapStart();
     handle.ptr += index * descriptor_handle_size;
@@ -20,7 +20,7 @@ D3D12_GPU_DESCRIPTOR_HANDLE Renderer::DescriptorHeap::get_gpu_descriptor_handle_
     return handle;
 }
 
-D3D12_CPU_DESCRIPTOR_HANDLE Renderer::DescriptorHeap::get_cpu_descriptor_handle_at_index(const size_t index) const
+D3D12_CPU_DESCRIPTOR_HANDLE renderer_t::descriptor_heap_t::get_cpu_descriptor_handle_at_index(const size_t index) const
 {
     D3D12_CPU_DESCRIPTOR_HANDLE handle = descriptor_heap->GetCPUDescriptorHandleForHeapStart();
     handle.ptr += index * descriptor_handle_size;
@@ -28,7 +28,7 @@ D3D12_CPU_DESCRIPTOR_HANDLE Renderer::DescriptorHeap::get_cpu_descriptor_handle_
     return handle;
 }
 
-void Renderer::DescriptorHeap::offset_current_descriptor_handles()
+void renderer_t::descriptor_heap_t::offset_current_descriptor_handles()
 {
     current_cpu_descriptor_handle.ptr += descriptor_handle_size;
     current_gpu_descriptor_handle.ptr += descriptor_handle_size;
@@ -36,9 +36,9 @@ void Renderer::DescriptorHeap::offset_current_descriptor_handles()
     current_descriptor_handle_index++;
 }
 
-void Renderer::DescriptorHeap::create(ID3D12Device *const device, const size_t num_descriptors,
-                                      const D3D12_DESCRIPTOR_HEAP_TYPE descriptor_heap_type,
-                                      const D3D12_DESCRIPTOR_HEAP_FLAGS descriptor_heap_flags)
+void renderer_t::descriptor_heap_t::create(ID3D12Device *const device, const size_t num_descriptors,
+                                           const D3D12_DESCRIPTOR_HEAP_TYPE descriptor_heap_type,
+                                           const D3D12_DESCRIPTOR_HEAP_FLAGS descriptor_heap_flags)
 {
     const D3D12_DESCRIPTOR_HEAP_DESC descriptor_heap_desc = {
         .Type = descriptor_heap_type,
@@ -61,7 +61,7 @@ void Renderer::DescriptorHeap::create(ID3D12Device *const device, const size_t n
     descriptor_handle_size = device->GetDescriptorHandleIncrementSize(descriptor_heap_type);
 }
 
-Renderer::Renderer(const HWND window_handle, const u16 window_width, const u16 window_height)
+renderer_t::renderer_t(const HWND window_handle, const u32 window_width, const u32 window_height)
 {
     // Enable the debug layer in debug mode.
     if constexpr (VX_DEBUG_MODE)
@@ -187,8 +187,7 @@ Renderer::Renderer(const HWND window_handle, const u16 window_width, const u16 w
                 .pParameters = &shader_constant_root_parameter,
                 .NumStaticSamplers = 0u,
                 .pStaticSamplers = nullptr,
-                .Flags = D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED |
-                         D3D12_ROOT_SIGNATURE_FLAG_SAMPLER_HEAP_DIRECTLY_INDEXED,
+                .Flags = D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED,
             },
     };
 
@@ -199,9 +198,9 @@ Renderer::Renderer(const HWND window_handle, const u16 window_width, const u16 w
                                                   IID_PPV_ARGS(&m_bindless_root_signature)));
 }
 
-Renderer::IndexBufferWithIntermediateResource Renderer::create_index_buffer(const void *data, const size_t stride,
-                                                                            const size_t indices_count,
-                                                                            const std::wstring_view buffer_name)
+renderer_t::IndexBufferWithIntermediateResource renderer_t::create_index_buffer(const void *data, const size_t stride,
+                                                                                const size_t indices_count,
+                                                                                const std::wstring_view buffer_name)
 {
     const size_t size_in_bytes = stride * indices_count;
 
@@ -273,16 +272,16 @@ Renderer::IndexBufferWithIntermediateResource Renderer::create_index_buffer(cons
     };
 
     return {
-        IndexBuffer{
+        index_buffer_t{
             .resource = buffer_resource,
-            .indices_count = indices_count,
+            .indices_count = (u32)indices_count,
             .index_buffer_view = index_buffer_view,
         },
         intermediate_buffer_resource,
     };
 }
 
-Renderer::StucturedBufferWithIntermediateResource Renderer::create_structured_buffer(
+renderer_t::StucturedBufferWithIntermediateResource renderer_t::create_structured_buffer(
     const void *data, const size_t stride, const size_t num_elements, const std::wstring_view buffer_name)
 {
     const size_t size_in_bytes = stride * num_elements;
@@ -353,16 +352,16 @@ Renderer::StucturedBufferWithIntermediateResource Renderer::create_structured_bu
     size_t srv_index = create_shader_resource_view(buffer_resource.Get(), stride, num_elements);
 
     return {
-        StructuredBuffer{
+        structured_buffer_t{
             .resource = buffer_resource,
-            .srv_index = srv_index,
+            .srv_index = (u32)srv_index,
         },
         intermediate_buffer_resource,
     };
 }
 
-ConstantBuffer Renderer::internal_create_constant_buffer(const size_t size_in_bytes,
-                                                         const std::wstring_view buffer_name)
+constant_buffer_t renderer_t::internal_create_constant_buffer(const size_t size_in_bytes,
+                                                              const std::wstring_view buffer_name)
 {
     u8 *resource_ptr{};
     Microsoft::WRL::ComPtr<ID3D12Resource> buffer_resource{};
@@ -405,16 +404,16 @@ ConstantBuffer Renderer::internal_create_constant_buffer(const size_t size_in_by
     // Create Constant buffer view.
     size_t cbv_index = create_constant_buffer_view(buffer_resource.Get(), size_in_bytes);
 
-    return ConstantBuffer{
+    return constant_buffer_t{
         .resource = buffer_resource,
-        .cbv_index = cbv_index,
+        .cbv_index = (u32)cbv_index,
         .size_in_bytes = size_in_bytes,
         .resource_mapped_ptr = resource_ptr,
     };
 }
 
-CommandBuffer Renderer::create_command_buffer(const size_t stride, const size_t max_number_of_elements,
-                                              const std::wstring_view buffer_name)
+CommandBuffer renderer_t::create_command_buffer(const size_t stride, const size_t max_number_of_elements,
+                                                const std::wstring_view buffer_name)
 {
     // Note that counter offset must be multiple of d3d12 uav counter placement alignment.
     size_t counter_offset =
@@ -534,7 +533,7 @@ CommandBuffer Renderer::create_command_buffer(const size_t stride, const size_t 
     };
 }
 
-size_t Renderer::create_constant_buffer_view(ID3D12Resource *const resource, const size_t size)
+size_t renderer_t::create_constant_buffer_view(ID3D12Resource *const resource, const size_t size)
 {
     const D3D12_CPU_DESCRIPTOR_HANDLE handle = m_cbv_srv_uav_descriptor_heap.current_cpu_descriptor_handle;
 
@@ -552,8 +551,8 @@ size_t Renderer::create_constant_buffer_view(ID3D12Resource *const resource, con
     return cbv_index;
 }
 
-size_t Renderer::create_shader_resource_view(ID3D12Resource *const resource, const size_t stride,
-                                             const size_t num_elements)
+size_t renderer_t::create_shader_resource_view(ID3D12Resource *const resource, const size_t stride,
+                                               const size_t num_elements)
 {
     const D3D12_CPU_DESCRIPTOR_HANDLE handle = m_cbv_srv_uav_descriptor_heap.current_cpu_descriptor_handle;
 
@@ -577,9 +576,9 @@ size_t Renderer::create_shader_resource_view(ID3D12Resource *const resource, con
     return srv_index;
 }
 
-size_t Renderer::create_unordered_access_view(ID3D12Resource *const resource, const size_t stride,
-                                              const size_t num_elements, const bool use_counter,
-                                              const size_t counter_offset)
+size_t renderer_t::create_unordered_access_view(ID3D12Resource *const resource, const size_t stride,
+                                                const size_t num_elements, const bool use_counter,
+                                                const size_t counter_offset)
 {
     const D3D12_CPU_DESCRIPTOR_HANDLE handle = m_cbv_srv_uav_descriptor_heap.current_cpu_descriptor_handle;
 
@@ -612,7 +611,7 @@ size_t Renderer::create_unordered_access_view(ID3D12Resource *const resource, co
     return uav_index;
 }
 
-void Renderer::DirectCommandQueue::create(ID3D12Device *const device)
+void renderer_t::DirectCommandQueue::create(ID3D12Device *const device)
 {
     const D3D12_COMMAND_QUEUE_DESC command_queue_desc = {
         .Type = D3D12_COMMAND_LIST_TYPE_DIRECT,
@@ -638,7 +637,7 @@ void Renderer::DirectCommandQueue::create(ID3D12Device *const device)
     throw_if_failed(device->CreateFence(0u, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence)));
 }
 
-void Renderer::DirectCommandQueue::reset(const u8 index) const
+void renderer_t::DirectCommandQueue::reset(const u8 index) const
 {
     const auto &allocator = m_command_allocators[index];
     const auto &command_list = m_command_list;
@@ -648,7 +647,7 @@ void Renderer::DirectCommandQueue::reset(const u8 index) const
     throw_if_failed(command_list->Reset(allocator.Get(), nullptr));
 }
 
-void Renderer::DirectCommandQueue::execute_command_list() const
+void renderer_t::DirectCommandQueue::execute_command_list() const
 {
 
     throw_if_failed(m_command_list->Close());
@@ -658,7 +657,7 @@ void Renderer::DirectCommandQueue::execute_command_list() const
     m_command_queue->ExecuteCommandLists(1u, command_lists_to_execute);
 }
 
-void Renderer::DirectCommandQueue::wait_for_fence_value_at_index(const u8 index)
+void renderer_t::DirectCommandQueue::wait_for_fence_value_at_index(const u8 index)
 {
     if (m_fence->GetCompletedValue() >= m_frame_fence_values[index])
     {
@@ -670,13 +669,13 @@ void Renderer::DirectCommandQueue::wait_for_fence_value_at_index(const u8 index)
     }
 }
 
-void Renderer::DirectCommandQueue::signal_fence(const u8 index)
+void renderer_t::DirectCommandQueue::signal_fence(const u8 index)
 {
     throw_if_failed(m_command_queue->Signal(m_fence.Get(), ++m_monotonic_fence_value));
     m_frame_fence_values[index] = m_monotonic_fence_value;
 }
 
-void Renderer::DirectCommandQueue::flush_queue()
+void renderer_t::DirectCommandQueue::flush_queue()
 {
 
     signal_fence(0);
@@ -689,7 +688,7 @@ void Renderer::DirectCommandQueue::flush_queue()
     wait_for_fence_value_at_index(0);
 }
 
-void Renderer::CopyCommandQueue::create(ID3D12Device *const device)
+void renderer_t::CopyCommandQueue::create(ID3D12Device *const device)
 {
     const D3D12_COMMAND_QUEUE_DESC command_queue_desc = {
         .Type = D3D12_COMMAND_LIST_TYPE_COPY,
@@ -703,7 +702,7 @@ void Renderer::CopyCommandQueue::create(ID3D12Device *const device)
     throw_if_failed(device->CreateFence(0u, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence)));
 }
 
-Renderer::CopyCommandQueue::CommandAllocatorListPair Renderer::CopyCommandQueue::get_command_allocator_list_pair(
+renderer_t::CopyCommandQueue::CommandAllocatorListPair renderer_t::CopyCommandQueue::get_command_allocator_list_pair(
     ID3D12Device *const device)
 {
     if (!m_command_allocator_list_queue.empty() &&
@@ -731,7 +730,7 @@ Renderer::CopyCommandQueue::CommandAllocatorListPair Renderer::CopyCommandQueue:
     }
 }
 
-void Renderer::CopyCommandQueue::execute_command_list(CommandAllocatorListPair &&alloc_list_pair)
+void renderer_t::CopyCommandQueue::execute_command_list(CommandAllocatorListPair &&alloc_list_pair)
 {
 
     throw_if_failed(alloc_list_pair.m_command_list->Close());
@@ -747,7 +746,7 @@ void Renderer::CopyCommandQueue::execute_command_list(CommandAllocatorListPair &
     m_command_allocator_list_queue.push(alloc_list_pair);
 }
 
-void Renderer::CopyCommandQueue::flush_queue()
+void renderer_t::CopyCommandQueue::flush_queue()
 {
     throw_if_failed(m_command_queue->Signal(m_fence.Get(), ++m_monotonic_fence_value));
     throw_if_failed(m_fence->SetEventOnCompletion(m_monotonic_fence_value, nullptr));

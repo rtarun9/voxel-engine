@@ -6,19 +6,20 @@
 #include "voxel-engine/voxel.hpp"
 #include "voxel-engine/window.hpp"
 
+#include "voxel-engine/thread_pool.hpp"
+
 #include "shaders/interop/render_resources.hlsli"
 
 #include "imgui.h"
 #include "imgui_impl_dx12.h"
 #include "imgui_impl_win32.h"
-#include "voxel-engine/thread_pool.hpp"
 
 int main()
 {
     printf("Executable Path :: %s\n", FileSystem::instance().executable_path().c_str());
 
-    const Window window{};
-    Renderer renderer(window.get_handle(), window.get_width(), window.get_height());
+    const window_t window{};
+    renderer_t renderer(window.get_handle(), window.get_width(), window.get_height());
 
     // Setup imgui.
     {
@@ -37,7 +38,7 @@ int main()
 
         // Setup platform / renderer backend.
         ImGui_ImplWin32_Init(window.get_handle());
-        ImGui_ImplDX12_Init(renderer.m_device.Get(), Renderer::NUMBER_OF_BACKBUFFERS, Renderer::BACKBUFFER_FORMAT,
+        ImGui_ImplDX12_Init(renderer.m_device.Get(), renderer_t::NUMBER_OF_BACKBUFFERS, renderer_t::BACKBUFFER_FORMAT,
                             renderer.m_cbv_srv_uav_descriptor_heap.descriptor_heap.Get(), cpu_descriptor_handle,
                             gpu_descriptor_handle);
     }
@@ -65,14 +66,14 @@ int main()
         scene_buffer_data.aabb_vertices[i] = aabb_vertices[i];
     }
 
-    auto scene_buffers = renderer.create_constant_buffer<Renderer::NUMBER_OF_BACKBUFFERS>(sizeof(SceneConstantBuffer),
-                                                                                          L"Scene constant buffer");
+    auto scene_buffers = renderer.create_constant_buffer<renderer_t::NUMBER_OF_BACKBUFFERS>(sizeof(SceneConstantBuffer),
+                                                                                            L"Scene constant buffer");
 
     // Compile the vertex and pixel shader.
-    Microsoft::WRL::ComPtr<IDxcBlob> vertex_shader_blob = ShaderCompiler::compile(
+    Microsoft::WRL::ComPtr<IDxcBlob> vertex_shader_blob = shader_compiler::compile(
         FileSystem::instance().get_relative_path_wstr(L"shaders/voxel_shader.hlsl").c_str(), L"vs_main", L"vs_6_6");
 
-    Microsoft::WRL::ComPtr<IDxcBlob> pixel_shader_blob = ShaderCompiler::compile(
+    Microsoft::WRL::ComPtr<IDxcBlob> pixel_shader_blob = shader_compiler::compile(
         FileSystem::instance().get_relative_path_wstr(L"shaders/voxel_shader.hlsl").c_str(), L"ps_main", L"ps_6_6");
 
     // Setup depth buffer.
@@ -174,7 +175,7 @@ int main()
         .NumRenderTargets = 1u,
         .RTVFormats =
             {
-                Renderer::BACKBUFFER_FORMAT,
+                renderer_t::BACKBUFFER_FORMAT,
             },
         .DSVFormat = DXGI_FORMAT_D32_FLOAT,
         .SampleDesc =
@@ -187,7 +188,7 @@ int main()
     throw_if_failed(renderer.m_device->CreateGraphicsPipelineState(&graphics_pso_desc, IID_PPV_ARGS(&pso)));
 
     // Setup the gpu culling compute shader.
-    Microsoft::WRL::ComPtr<IDxcBlob> gpu_culling_compute_shader_blob = ShaderCompiler::compile(
+    Microsoft::WRL::ComPtr<IDxcBlob> gpu_culling_compute_shader_blob = shader_compiler::compile(
         FileSystem::instance().get_relative_path_wstr(L"shaders/gpu_culling_shader.hlsl").c_str(), L"cs_main",
         L"cs_6_6");
 
@@ -307,13 +308,13 @@ int main()
                   return a.x * a.x + a.y * a.y + a.z * a.z < b.x * b.x + b.y * b.y + b.z * b.z;
               });
 
-    Camera camera{};
+    camera_t camera{};
     const u64 chunk_grid_middle = Chunk::CHUNK_LENGTH * ChunkManager::NUMBER_OF_CHUNKS_PER_DIMENSION / 2u;
     camera.m_position = {chunk_grid_middle, chunk_grid_middle, chunk_grid_middle, 1.0f};
 
     std::queue<u64> chunks_to_unload{};
 
-    Timer timer{};
+    timer_t timer{};
     float delta_time = 0.0f;
 
     bool setup_chunks{false};
@@ -356,8 +357,6 @@ int main()
 
         chunk_manager.create_chunks_from_setup_stack(renderer);
 
-        timer.start();
-
         MSG message = {};
         if (PeekMessageA(&message, NULL, 0u, 0u, PM_REMOVE))
         {
@@ -396,7 +395,7 @@ int main()
         scene_buffer_data.projection_matrix = projection_matrix;
         scene_buffer_data.camera_position = camera.m_position;
 
-        ConstantBuffer &scene_buffer = scene_buffers[renderer.m_swapchain_backbuffer_index];
+        constant_buffer_t &scene_buffer = scene_buffers[renderer.m_swapchain_backbuffer_index];
         scene_buffer.update(&scene_buffer_data);
 
         const auto &swapchain_index = renderer.m_swapchain_backbuffer_index;
@@ -595,7 +594,7 @@ int main()
         ImGui::NewFrame();
 
         ImGui::Begin("Debug Controller");
-        ImGui::SliderFloat("movement_speed", &camera.m_movement_speed, 0.0f, 5000.0f);
+        ImGui::SliderFloat("movement_speed", &camera.m_movement_speed, 0.0f, 500000.0f);
         ImGui::SliderFloat("rotation_speed", &camera.m_rotation_speed, 0.0f, 10.0f);
         ImGui::SliderFloat("friction", &camera.m_friction, 0.0f, 1.0f);
         ImGui::SliderFloat("near plane", &near_plane, 0.1f, 1.0f);
@@ -612,6 +611,7 @@ int main()
         ImGui::Text("Number of copy alloc / list pairs : %zu",
                     renderer.m_copy_queue.m_command_allocator_list_queue.size());
         ImGui::Text("Voxel edge length : %zu", Voxel::EDGE_LENGTH);
+        ImGui::Text("Number of threads in pool : %zu", chunk_manager.m_thread_pool.get_thread_count());
         ImGui::Text("Number of queued threads in pool : %zu", chunk_manager.m_thread_pool.get_tasks_queued());
 
         ImGui::ShowMetricsWindow();
@@ -651,8 +651,7 @@ int main()
 
         ++frame_count;
 
-        timer.stop();
-        delta_time = timer.get_delta_time();
+        delta_time = timer.tick_and_get_delta_time_seconds();
     }
 
     // Cleanup
