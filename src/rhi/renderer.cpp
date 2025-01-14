@@ -1,4 +1,4 @@
-#include "voxel-engine/renderer.hpp"
+#include "voxel-engine/rhi/renderer.hpp"
 
 // Agility SDK setup.
 // Setting the Agility SDK parameters.
@@ -12,39 +12,8 @@ extern "C"
     __declspec(dllexport) extern const char *D3D12SDKPath = ".\\D3D12\\";
 }
 
-void renderer_t::descriptor_heap_t::offset_current_descriptor_handles()
+namespace rhi
 {
-    current_cpu_descriptor_handle.ptr += descriptor_handle_size;
-    current_gpu_descriptor_handle.ptr += descriptor_handle_size;
-
-    current_descriptor_handle_index++;
-}
-
-void renderer_t::descriptor_heap_t::create(ID3D12Device *const device, const u32 num_descriptors,
-                                           const D3D12_DESCRIPTOR_HEAP_TYPE descriptor_heap_type,
-                                           const D3D12_DESCRIPTOR_HEAP_FLAGS descriptor_heap_flags)
-{
-    const D3D12_DESCRIPTOR_HEAP_DESC descriptor_heap_desc = {
-        .Type = descriptor_heap_type,
-        .NumDescriptors = num_descriptors,
-        .Flags = descriptor_heap_flags,
-        .NodeMask = 0u,
-    };
-
-    throw_if_failed(device->CreateDescriptorHeap(&descriptor_heap_desc, IID_PPV_ARGS(&descriptor_heap)));
-
-    current_cpu_descriptor_handle = descriptor_heap->GetCPUDescriptorHandleForHeapStart();
-
-    if (descriptor_heap_flags == D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE)
-    {
-        current_gpu_descriptor_handle = descriptor_heap->GetGPUDescriptorHandleForHeapStart();
-    }
-
-    current_descriptor_handle_index = 0u;
-
-    descriptor_handle_size = device->GetDescriptorHandleIncrementSize(descriptor_heap_type);
-}
-
 renderer_t::renderer_t(const HWND window_handle, const u32 window_width, const u32 window_height)
 {
     // Enable the debug layer in debug mode.
@@ -141,12 +110,12 @@ renderer_t::renderer_t(const HWND window_handle, const u32 window_width, const u
     {
         Microsoft::WRL::ComPtr<ID3D12Resource> swapchain_resource{};
         throw_if_failed(m_swapchain->GetBuffer(i, IID_PPV_ARGS(&swapchain_resource)));
-        m_swapchain_backbuffer_cpu_descriptor_handles[i] = cpu_rtv_descriptor_handle;
+        m_swapchain_backbuffers[i].cpu_descriptor_handle = cpu_rtv_descriptor_handle;
 
         m_device->CreateRenderTargetView(swapchain_resource.Get(), nullptr,
-                                         m_swapchain_backbuffer_cpu_descriptor_handles[i]);
+                                         m_swapchain_backbuffers[i].cpu_descriptor_handle);
 
-        m_swapchain_backbuffer_resources[i] = (std::move(swapchain_resource));
+        m_swapchain_backbuffers[i].resource = (std::move(swapchain_resource));
 
         cpu_rtv_descriptor_handle.ptr += m_rtv_descriptor_heap.descriptor_handle_size;
     }
@@ -468,7 +437,7 @@ command_buffer_t renderer_t::create_command_buffer(const size_t stride, const si
     };
 }
 
-size_t renderer_t::create_constant_buffer_view(ID3D12Resource *const resource, const size_t size)
+u32 renderer_t::create_constant_buffer_view(ID3D12Resource *const resource, const size_t size)
 {
     const D3D12_CPU_DESCRIPTOR_HANDLE handle = m_cbv_srv_uav_descriptor_heap.current_cpu_descriptor_handle;
 
@@ -486,8 +455,8 @@ size_t renderer_t::create_constant_buffer_view(ID3D12Resource *const resource, c
     return cbv_index;
 }
 
-size_t renderer_t::create_shader_resource_view(ID3D12Resource *const resource, const size_t stride,
-                                               const size_t num_elements)
+u32 renderer_t::create_shader_resource_view(ID3D12Resource *const resource, const size_t stride,
+                                            const size_t num_elements)
 {
     const D3D12_CPU_DESCRIPTOR_HANDLE handle = m_cbv_srv_uav_descriptor_heap.current_cpu_descriptor_handle;
 
@@ -511,9 +480,9 @@ size_t renderer_t::create_shader_resource_view(ID3D12Resource *const resource, c
     return srv_index;
 }
 
-size_t renderer_t::create_unordered_access_view(ID3D12Resource *const resource, const size_t stride,
-                                                const size_t num_elements, const bool use_counter,
-                                                const size_t counter_offset)
+u32 renderer_t::create_unordered_access_view(ID3D12Resource *const resource, const size_t stride,
+                                             const size_t num_elements, const bool use_counter,
+                                             const size_t counter_offset)
 {
     const D3D12_CPU_DESCRIPTOR_HANDLE handle = m_cbv_srv_uav_descriptor_heap.current_cpu_descriptor_handle;
 
@@ -546,143 +515,4 @@ size_t renderer_t::create_unordered_access_view(ID3D12Resource *const resource, 
     return uav_index;
 }
 
-void renderer_t::DirectCommandQueue::create(ID3D12Device *const device)
-{
-    const D3D12_COMMAND_QUEUE_DESC command_queue_desc = {
-        .Type = D3D12_COMMAND_LIST_TYPE_DIRECT,
-        .Priority = D3D12_COMMAND_QUEUE_PRIORITY_NORMAL,
-        .Flags = D3D12_COMMAND_QUEUE_FLAG_NONE,
-        .NodeMask = 0u,
-    };
-    throw_if_failed(device->CreateCommandQueue(&command_queue_desc, IID_PPV_ARGS(&m_command_queue)));
-
-    // Create the command allocator (the underlying allocation where gpu commands will be stored after being
-    // recorded by command list). Each frame has its own command allocator.
-    for (u8 i = 0; i < NUMBER_OF_BACKBUFFERS; i++)
-    {
-        throw_if_failed(
-            device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_command_allocators[i])));
-    }
-
-    // Create the graphics command list.
-    throw_if_failed(device->CreateCommandList(0u, D3D12_COMMAND_LIST_TYPE_DIRECT, m_command_allocators[0].Get(),
-                                              nullptr, IID_PPV_ARGS(&m_command_list)));
-
-    // Create a fence for CPU GPU synchronization.
-    throw_if_failed(device->CreateFence(0u, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence)));
-}
-
-void renderer_t::DirectCommandQueue::reset(const u8 index) const
-{
-    const auto &allocator = m_command_allocators[index];
-    const auto &command_list = m_command_list;
-
-    // Reset command allocator and command list.
-    throw_if_failed(allocator->Reset());
-    throw_if_failed(command_list->Reset(allocator.Get(), nullptr));
-}
-
-void renderer_t::DirectCommandQueue::execute_command_list() const
-{
-
-    throw_if_failed(m_command_list->Close());
-
-    ID3D12CommandList *const command_lists_to_execute[1] = {m_command_list.Get()};
-
-    m_command_queue->ExecuteCommandLists(1u, command_lists_to_execute);
-}
-
-void renderer_t::DirectCommandQueue::wait_for_fence_value_at_index(const u8 index)
-{
-    if (m_fence->GetCompletedValue() >= m_frame_fence_values[index])
-    {
-        return;
-    }
-    else
-    {
-        throw_if_failed(m_fence->SetEventOnCompletion(m_frame_fence_values[index], nullptr));
-    }
-}
-
-void renderer_t::DirectCommandQueue::signal_fence(const u8 index)
-{
-    throw_if_failed(m_command_queue->Signal(m_fence.Get(), ++m_monotonic_fence_value));
-    m_frame_fence_values[index] = m_monotonic_fence_value;
-}
-
-void renderer_t::DirectCommandQueue::flush_queue()
-{
-
-    signal_fence(0);
-
-    for (u32 i = 0; i < NUMBER_OF_BACKBUFFERS; i++)
-    {
-        m_frame_fence_values[i] = m_monotonic_fence_value;
-    }
-
-    wait_for_fence_value_at_index(0);
-}
-
-void renderer_t::CopyCommandQueue::create(ID3D12Device *const device)
-{
-    const D3D12_COMMAND_QUEUE_DESC command_queue_desc = {
-        .Type = D3D12_COMMAND_LIST_TYPE_COPY,
-        .Priority = D3D12_COMMAND_QUEUE_PRIORITY_NORMAL,
-        .Flags = D3D12_COMMAND_QUEUE_FLAG_NONE,
-        .NodeMask = 0u,
-    };
-    throw_if_failed(device->CreateCommandQueue(&command_queue_desc, IID_PPV_ARGS(&m_command_queue)));
-
-    // Create a fence for CPU GPU synchronization.
-    throw_if_failed(device->CreateFence(0u, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence)));
-}
-
-renderer_t::CopyCommandQueue::CommandAllocatorListPair renderer_t::CopyCommandQueue::get_command_allocator_list_pair(
-    ID3D12Device *const device)
-{
-    if (!m_command_allocator_list_queue.empty() &&
-        m_command_allocator_list_queue.front().m_fence_value <= m_fence->GetCompletedValue())
-    {
-        const auto front = m_command_allocator_list_queue.front();
-        m_command_allocator_list_queue.pop();
-
-        // Reset list and allocator.
-        throw_if_failed(front.m_command_allocator->Reset());
-        throw_if_failed(front.m_command_list->Reset(front.m_command_allocator.Get(), nullptr));
-
-        return front;
-    }
-    else
-    {
-        CommandAllocatorListPair command_allocator_list_pair{};
-        throw_if_failed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COPY,
-                                                       IID_PPV_ARGS(&command_allocator_list_pair.m_command_allocator)));
-        throw_if_failed(device->CreateCommandList(0u, D3D12_COMMAND_LIST_TYPE_COPY,
-                                                  command_allocator_list_pair.m_command_allocator.Get(), nullptr,
-                                                  IID_PPV_ARGS(&command_allocator_list_pair.m_command_list)));
-
-        return command_allocator_list_pair;
-    }
-}
-
-void renderer_t::CopyCommandQueue::execute_command_list(CommandAllocatorListPair &&alloc_list_pair)
-{
-
-    throw_if_failed(alloc_list_pair.m_command_list->Close());
-
-    ID3D12CommandList *const command_lists_to_execute[1] = {alloc_list_pair.m_command_list.Get()};
-
-    m_command_queue->ExecuteCommandLists(1u, command_lists_to_execute);
-
-    throw_if_failed(m_command_queue->Signal(m_fence.Get(), ++m_monotonic_fence_value));
-
-    alloc_list_pair.m_fence_value = m_monotonic_fence_value;
-
-    m_command_allocator_list_queue.push(alloc_list_pair);
-}
-
-void renderer_t::CopyCommandQueue::flush_queue()
-{
-    throw_if_failed(m_command_queue->Signal(m_fence.Get(), ++m_monotonic_fence_value));
-    throw_if_failed(m_fence->SetEventOnCompletion(m_monotonic_fence_value, nullptr));
-}
+} // namespace rhi

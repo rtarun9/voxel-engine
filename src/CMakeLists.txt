@@ -4,7 +4,9 @@ set (SRC_FILES
     "timer.cpp"
     "filesystem.cpp"
     "camera.cpp"
-    "renderer.cpp"
+    "rhi/renderer.cpp"
+    "rhi/descriptor_heap.cpp"
+    "rhi/command_queue.cpp"
     "shader_compiler.cpp"
     "voxel.cpp"
 )
@@ -15,7 +17,10 @@ set (HEADER_FILES
     ${CMAKE_SOURCE_DIR}/include/voxel-engine/timer.hpp
     ${CMAKE_SOURCE_DIR}/include/voxel-engine/types.hpp
     ${CMAKE_SOURCE_DIR}/include/voxel-engine/window.hpp
-    ${CMAKE_SOURCE_DIR}/include/voxel-engine/renderer.hpp
+    ${CMAKE_SOURCE_DIR}/include/voxel-engine/rhi/renderer.hpp
+    ${CMAKE_SOURCE_DIR}/include/voxel-engine/rhi/descriptor_heap.hpp
+    ${CMAKE_SOURCE_DIR}/include/voxel-engine/rhi/buffers.hpp
+    ${CMAKE_SOURCE_DIR}/include/voxel-engine/rhi/command_queue.hpp
     ${CMAKE_SOURCE_DIR}/include/voxel-engine/filesystem.hpp
     ${CMAKE_SOURCE_DIR}/include/voxel-engine/camera.hpp
     ${CMAKE_SOURCE_DIR}/include/voxel-engine/shader_compiler.hpp

@@ -6,6 +6,20 @@ constexpr bool VX_DEBUG_MODE = true;
 constexpr bool VX_DEBUG_MODE = false;
 #endif
 
+// Handy assert function.
+#ifdef _DEBUG
+#define ASSERT(x)                                                                                                      \
+    if (!(x))                                                                                                          \
+    {                                                                                                                  \
+        int *ptr = NULL;                                                                                               \
+        *ptr = 0;                                                                                                      \
+    }
+
+#else
+
+#define ASSERT(x)
+#endif
+
 // Windows includes.
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>

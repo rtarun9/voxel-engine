@@ -1,6 +1,6 @@
 #include "voxel-engine/camera.hpp"
 
-DirectX::XMMATRIX camera_t::update_and_get_view_matrix(const f32 delta_time)
+DirectX::XMMATRIX camera_t::update_and_get_view_matrix(const u8 *const keyboard_state, const f32 delta_time)
 {
     // For operator overloads.
     using namespace DirectX;
@@ -22,41 +22,40 @@ DirectX::XMMATRIX camera_t::update_and_get_view_matrix(const f32 delta_time)
     DirectX::XMVECTOR right_vector = DirectX::XMLoadFloat4(&m_right);
 
     // Index is the virutal key code.
-    // If higher order bit is 1 (0x8000), the key is down.
-    if (GetKeyState((int)'A') & 0x8000)
+    if (keyboard_state['A'])
     {
         move_to_position_vector -= right_vector * movement_speed;
     }
 
-    if (GetKeyState((int)'D') & 0x8000)
+    if (keyboard_state['D'])
     {
         move_to_position_vector += right_vector * movement_speed;
     }
 
-    if (GetKeyState((int)'W') & 0x8000)
+    if (keyboard_state['W'])
     {
         move_to_position_vector += front_vector * movement_speed;
     }
 
-    if (GetKeyState((int)'S') & 0x8000)
+    if (keyboard_state['S'])
     {
         move_to_position_vector -= front_vector * movement_speed;
     }
 
-    if (GetKeyState(VK_UP) & 0x8000)
+    if (keyboard_state[VK_UP])
     {
         pitch_to -= rotation_speed;
     }
-    else if (GetKeyState(VK_DOWN) & 0x8000)
+    else if (keyboard_state[VK_DOWN])
     {
         pitch_to += rotation_speed;
     }
 
-    if (GetKeyState(VK_LEFT) & 0x8000)
+    if (keyboard_state[VK_LEFT])
     {
         yaw_to -= rotation_speed;
     }
-    else if (GetKeyState(VK_RIGHT) & 0x8000)
+    else if (keyboard_state[VK_RIGHT])
     {
         yaw_to += rotation_speed;
     }

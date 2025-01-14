@@ -3,7 +3,7 @@
 class camera_t
 {
   public:
-    DirectX::XMMATRIX update_and_get_view_matrix(const f32 delta_time);
+    DirectX::XMMATRIX update_and_get_view_matrix(const u8 *const keyboard_state, const f32 delta_time);
 
   public:
     DirectX::XMFLOAT4 m_position{0.0f, 0.0f, -5.0f, 1.0f};

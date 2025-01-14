@@ -1,6 +1,6 @@
 #include "voxel-engine/filesystem.hpp"
 
-FileSystem::FileSystem()
+file_system_t::file_system_t()
 {
     // Start from the executable directory, and keep moving up until you find the project root directory.
     std::filesystem::path current_path = std::filesystem::current_path();

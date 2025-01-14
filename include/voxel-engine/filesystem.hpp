@@ -3,12 +3,12 @@
 // A simple class that can get the relative path of a file / folder with respect to the executable.
 // NOTE : Makes the assumption that between the executable and the project root directory, there is NO OTHER folder with
 // the name "voxel-engine".
-class FileSystem
+class file_system_t
 {
   public:
-    static FileSystem &instance()
+    static file_system_t &instance()
     {
-        static FileSystem fs{};
+        static file_system_t fs{};
         return fs;
     }
 
@@ -28,7 +28,7 @@ class FileSystem
     }
 
   private:
-    explicit FileSystem();
+    explicit file_system_t();
 
   private:
     std::string m_root_directory{};

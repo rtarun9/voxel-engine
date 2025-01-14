@@ -2,7 +2,7 @@
 
 #include "shaders/interop/render_resources.hlsli"
 
-#include "voxel-engine/renderer.hpp"
+#include "voxel-engine/rhi/renderer.hpp"
 #include "voxel-engine/thread_pool.hpp"
 
 // A voxel is just a value on a regular 3D grid. Think of it as the corners where the cells meet in a 3d grid.
@@ -45,19 +45,19 @@ struct Chunk
 struct ChunkManager
 {
     // Constructor creates the shared position buffer.
-    explicit ChunkManager(renderer_t &renderer);
+    explicit ChunkManager(rhi::renderer_t &renderer);
 
     struct SetupChunkData
     {
         Chunk m_chunk{};
 
-        renderer_t::index_buffer_with_intermediate_resource_t m_chunk_index_buffer{};
-        renderer_t::structured_buffer_with_intermediate_resource_t m_chunk_color_buffer{};
+        rhi::renderer_t::index_buffer_with_intermediate_resource_t m_chunk_index_buffer{};
+        rhi::renderer_t::structured_buffer_with_intermediate_resource_t m_chunk_color_buffer{};
 
         // A strange design decision, but rather than accessing the render resources via root constants, render
         // resources will now be embedded into the chunk constant buffer.
         // This is done to make the indirect rendering & GPU culling process simpler.
-        constant_buffer_t<ChunkConstantBuffer> m_chunk_constant_buffer{};
+        rhi::constant_buffer_t<ChunkConstantBuffer> m_chunk_constant_buffer{};
 
         std::vector<u16> m_chunk_indices_data{};
         std::vector<DirectX::XMFLOAT3> m_chunk_color_data{};
@@ -65,11 +65,11 @@ struct ChunkManager
 
   private:
     // internal_mt : Internal multithreaded.
-    SetupChunkData internal_mt_setup_chunk(renderer_t &renderer, const size_t index);
+    SetupChunkData internal_mt_setup_chunk(rhi::renderer_t &renderer, const size_t index);
 
   public:
     void add_chunk_to_setup_stack(const size_t chunk_index);
-    void create_chunks_from_setup_stack(renderer_t &renderer);
+    void create_chunks_from_setup_stack(rhi::renderer_t &renderer);
 
     void transfer_chunks_from_setup_to_loaded_state(const u64 current_copy_queue_fence_value);
 
@@ -111,13 +111,13 @@ struct ChunkManager
     // load this chunk again.
     std::unordered_set<size_t> m_chunk_indices_that_are_being_setup{};
 
-    std::unordered_map<size_t, index_buffer_t> m_chunk_index_buffers{};
-    std::unordered_map<size_t, structured_buffer_t> m_chunk_color_buffers{};
-    std::unordered_map<size_t, constant_buffer_t<ChunkConstantBuffer>> m_chunk_constant_buffers{};
+    std::unordered_map<size_t, rhi::index_buffer_t> m_chunk_index_buffers{};
+    std::unordered_map<size_t, rhi::structured_buffer_t> m_chunk_color_buffers{};
+    std::unordered_map<size_t, rhi::constant_buffer_t<ChunkConstantBuffer>> m_chunk_constant_buffers{};
 
     // All chunks only have a index buffer with them. The indices 'index' into this common shared chunk constant buffer.
     // The data in this buffer is ordered vertex wise, voxel wise.
-    structured_buffer_t m_shared_chunk_position_buffer{};
+    rhi::structured_buffer_t m_shared_chunk_position_buffer{};
 
     // Threadpool from which std::futures are obtained.
     thread_pool_t m_thread_pool{1};

@@ -1,6 +1,6 @@
 #include "voxel-engine/camera.hpp"
 #include "voxel-engine/filesystem.hpp"
-#include "voxel-engine/renderer.hpp"
+#include "voxel-engine/rhi/renderer.hpp"
 #include "voxel-engine/shader_compiler.hpp"
 #include "voxel-engine/timer.hpp"
 #include "voxel-engine/voxel.hpp"
@@ -16,10 +16,10 @@
 
 int main()
 {
-    printf("Executable Path :: %s\n", FileSystem::instance().executable_path().c_str());
+    printf("Executable Path :: %s\n", file_system_t::instance().executable_path().c_str());
 
     const window_t window{};
-    renderer_t renderer(window.get_handle(), window.get_width(), window.get_height());
+    rhi::renderer_t renderer(window.get_handle(), window.get_width(), window.get_height());
 
     // Setup imgui.
     {
@@ -38,7 +38,7 @@ int main()
 
         // Setup platform / renderer backend.
         ImGui_ImplWin32_Init(window.get_handle());
-        ImGui_ImplDX12_Init(renderer.m_device.Get(), renderer_t::NUMBER_OF_BACKBUFFERS, renderer_t::BACKBUFFER_FORMAT,
+        ImGui_ImplDX12_Init(renderer.m_device.Get(), rhi::NUMBER_OF_BACKBUFFERS, rhi::BACKBUFFER_FORMAT,
                             renderer.m_cbv_srv_uav_descriptor_heap.descriptor_heap.Get(), cpu_descriptor_handle,
                             gpu_descriptor_handle);
     }
@@ -46,8 +46,8 @@ int main()
     ChunkManager chunk_manager{renderer};
 
     // Setup the AABB data for scene buffer.
-    auto scene_buffers = renderer.create_constant_buffers<SceneConstantBuffer, renderer_t::NUMBER_OF_BACKBUFFERS>(
-        L"Scene constant buffer");
+    auto scene_buffers =
+        renderer.create_constant_buffers<SceneConstantBuffer, rhi::NUMBER_OF_BACKBUFFERS>(L"Scene constant buffer");
 
     // AABB for chunk.
     static constexpr std::array<DirectX::XMFLOAT4, 8> aabb_vertices{
@@ -72,10 +72,10 @@ int main()
 
     // Compile the vertex and pixel shader.
     Microsoft::WRL::ComPtr<IDxcBlob> vertex_shader_blob = shader_compiler::compile(
-        FileSystem::instance().get_relative_path_wstr(L"shaders/voxel_shader.hlsl").c_str(), L"vs_main", L"vs_6_6");
+        file_system_t::instance().get_relative_path_wstr(L"shaders/voxel_shader.hlsl").c_str(), L"vs_main", L"vs_6_6");
 
     Microsoft::WRL::ComPtr<IDxcBlob> pixel_shader_blob = shader_compiler::compile(
-        FileSystem::instance().get_relative_path_wstr(L"shaders/voxel_shader.hlsl").c_str(), L"ps_main", L"ps_6_6");
+        file_system_t::instance().get_relative_path_wstr(L"shaders/voxel_shader.hlsl").c_str(), L"ps_main", L"ps_6_6");
 
     // Setup depth buffer.
     Microsoft::WRL::ComPtr<ID3D12Resource> depth_buffer_resource{};
@@ -176,7 +176,7 @@ int main()
         .NumRenderTargets = 1u,
         .RTVFormats =
             {
-                renderer_t::BACKBUFFER_FORMAT,
+                rhi::BACKBUFFER_FORMAT,
             },
         .DSVFormat = DXGI_FORMAT_D32_FLOAT,
         .SampleDesc =
@@ -190,7 +190,7 @@ int main()
 
     // Setup the gpu culling compute shader.
     Microsoft::WRL::ComPtr<IDxcBlob> gpu_culling_compute_shader_blob = shader_compiler::compile(
-        FileSystem::instance().get_relative_path_wstr(L"shaders/gpu_culling_shader.hlsl").c_str(), L"cs_main",
+        file_system_t::instance().get_relative_path_wstr(L"shaders/gpu_culling_shader.hlsl").c_str(), L"cs_main",
         L"cs_6_6");
 
     Microsoft::WRL::ComPtr<ID3D12PipelineState> gpu_culling_pso{};
@@ -254,7 +254,7 @@ int main()
     static constexpr size_t MAX_CHUNKS_TO_BE_DRAWN = 10'00'000;
     std::vector<IndirectCommand> indirect_command_vector{};
 
-    command_buffer_t indirect_command_buffer =
+    rhi::command_buffer_t indirect_command_buffer =
         renderer.create_command_buffer(sizeof(IndirectCommand), MAX_CHUNKS_TO_BE_DRAWN, L"Indirect Command Buffer");
 
     // Create viewport and scissor.
@@ -358,6 +358,8 @@ int main()
 
         chunk_manager.create_chunks_from_setup_stack(renderer);
 
+        u8 keyboard_state[256] = {};
+
         MSG message = {};
         if (PeekMessageA(&message, NULL, 0u, 0u, PM_REMOVE))
         {
@@ -369,6 +371,8 @@ int main()
         {
             quit = true;
         }
+
+        ASSERT((GetKeyboardState(keyboard_state) == TRUE));
 
         chunk_manager.transfer_chunks_from_setup_to_loaded_state(renderer.m_copy_queue.m_fence->GetCompletedValue());
 
@@ -392,9 +396,10 @@ int main()
         const DirectX::XMMATRIX projection_matrix = DirectX::XMMatrixSet(
             width, 0.0f, 0.0f, 0.0f, 0.0f, height, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, near_plane, 0.0f);
 
-        constant_buffer_t<SceneConstantBuffer> &scene_buffer = scene_buffers[renderer.m_swapchain_backbuffer_index];
+        rhi::constant_buffer_t<SceneConstantBuffer> &scene_buffer =
+            scene_buffers[renderer.m_swapchain_backbuffer_index];
 
-        scene_buffer.data.view_matrix = camera.update_and_get_view_matrix(delta_time);
+        scene_buffer.data.view_matrix = camera.update_and_get_view_matrix(keyboard_state, delta_time);
         scene_buffer.data.projection_matrix = projection_matrix;
         scene_buffer.data.camera_position = camera.m_position;
         scene_buffer.update();
@@ -406,9 +411,9 @@ int main()
 
         const auto &command_list = renderer.m_direct_queue.m_command_list;
 
-        const auto &rtv_handle = renderer.m_swapchain_backbuffer_cpu_descriptor_handles[swapchain_index];
-        const Microsoft::WRL::ComPtr<ID3D12Resource> swapchain_resource =
-            renderer.m_swapchain_backbuffer_resources[swapchain_index];
+        const auto &swapchain_backbuffer = renderer.m_swapchain_backbuffers[swapchain_index];
+
+        const Microsoft::WRL::ComPtr<ID3D12Resource> swapchain_resource = swapchain_backbuffer.resource;
 
         // Transition the backbuffer from presentation mode to render target mode.
         const D3D12_RESOURCE_BARRIER presentation_to_render_target_barrier = {
@@ -427,7 +432,7 @@ int main()
 
         // Now, clear the RTV and DSV.
         const float clear_color[4] = {0.1f, 0.1f, 0.1f, 1.0f};
-        command_list->ClearRenderTargetView(rtv_handle, clear_color, 0u, nullptr);
+        command_list->ClearRenderTargetView(swapchain_backbuffer.cpu_descriptor_handle, clear_color, 0u, nullptr);
         command_list->ClearDepthStencilView(dsv_handle, D3D12_CLEAR_FLAG_DEPTH, 0.0f, 0u, 0u, nullptr);
 
         // Set viewport.
@@ -504,7 +509,7 @@ int main()
         command_list->SetDescriptorHeaps(1u, shader_visible_descriptor_heaps);
 
         // Prepare rendering commands.
-        command_list->OMSetRenderTargets(1u, &rtv_handle, FALSE, &dsv_handle);
+        command_list->OMSetRenderTargets(1u, &swapchain_backbuffer.cpu_descriptor_handle, FALSE, &dsv_handle);
 
         // Run the culling compute shader, followed by voxel rendering shader.
         if (!indirect_command_vector.empty())
