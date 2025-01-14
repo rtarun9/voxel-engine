@@ -16,10 +16,12 @@ struct renderer_t
     // Resource creation functions.
     // The functions return a buffer and intermediate resource (which can be discarded once the CopyResource operation
     // is complete).
+    // This is done because creation of index / other structured buffers requires a copy resource operation, which is
+    // done on the async copy queue. Slightly inconvinient abstraction, but a required one :)
     struct index_buffer_with_intermediate_resource_t
     {
-        index_buffer_t index_buffer{};
-        ComPtr<ID3D12Resource> intermediate_resource{};
+        index_buffer_t m_index_buffer{};
+        ComPtr<ID3D12Resource> m_intermediate_resource{};
     };
 
     index_buffer_with_intermediate_resource_t create_index_buffer(const void *data, const size_t stride,
@@ -28,8 +30,8 @@ struct renderer_t
 
     struct structured_buffer_with_intermediate_resource_t
     {
-        structured_buffer_t structured_buffer{};
-        ComPtr<ID3D12Resource> intermediate_resource{};
+        structured_buffer_t m_structured_buffer{};
+        ComPtr<ID3D12Resource> m_intermediate_resource{};
     };
 
     structured_buffer_with_intermediate_resource_t create_structured_buffer(const void *data, const size_t stride,
@@ -46,7 +48,10 @@ struct renderer_t
 
   private:
     // This function automatically offset's the current descriptor handle of descriptor heap.
+    // NOTE: constant buffer creation function does not use a lock. Assumption is that multiple threads will NOT use /
+    // update constant buffer.
     u32 create_constant_buffer_view(ID3D12Resource *const resource, size_t size);
+
     u32 create_shader_resource_view(ID3D12Resource *const resource, const size_t stride, const size_t num_elements);
     u32 create_unordered_access_view(ID3D12Resource *const resource, const size_t stride, const size_t num_elements,
                                      const bool use_counter = false,
@@ -109,14 +114,12 @@ inline constant_buffer_t<T> renderer_t::create_constant_buffer(const std::wstrin
     throw_if_failed(m_device->CreateCommittedResource(
         &upload_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES | D3D12_HEAP_FLAG_CREATE_NOT_ZEROED,
         &buffer_resource_desc, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, nullptr,
-        IID_PPV_ARGS(&constant_buffer.resource)));
+        IID_PPV_ARGS(&constant_buffer.m_resource)));
 
     // Now that a resource is created, copy CPU data to this upload buffer.
     const D3D12_RANGE read_range{.Begin = 0u, .End = 0u};
 
-    throw_if_failed(constant_buffer.resource->Map(0u, &read_range, (void **)&constant_buffer.resource_mapped_ptr));
-
-    std::scoped_lock<std::mutex> scoped_lock(m_resource_mutex);
+    throw_if_failed(constant_buffer.m_resource->Map(0u, &read_range, (void **)&constant_buffer.m_resource_mapped_ptr));
 
     name_d3d12_object(constant_buffer.resource.Get(), buffer_name);
 

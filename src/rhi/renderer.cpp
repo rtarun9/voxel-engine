@@ -22,7 +22,7 @@ renderer_t::renderer_t(const HWND window_handle, const u32 window_width, const u
         throw_if_failed(D3D12GetDebugInterface(IID_PPV_ARGS(&m_debug_device)));
         m_debug_device->EnableDebugLayer();
 
-        Microsoft::WRL::ComPtr<ID3D12Debug1> debug_1{};
+        ComPtr<ID3D12Debug1> debug_1{};
         throw_if_failed(m_debug_device->QueryInterface(IID_PPV_ARGS(&debug_1)));
         debug_1->SetEnableSynchronizedCommandQueueValidation(TRUE);
 
@@ -55,10 +55,11 @@ renderer_t::renderer_t(const HWND window_handle, const u32 window_width, const u
 
     // Create the d3d12 device (logical adapter : All d3d objects require d3d12 device for creation).
     throw_if_failed(D3D12CreateDevice(m_dxgi_adapter.Get(), D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&m_device)));
+    name_d3d12_object(m_device.Get(), L"D3D12 device");
 
     // In debug mode, setup the info queue so breakpoint is placed whenever a error / warning occurs that is d3d
     // related.
-    Microsoft::WRL::ComPtr<ID3D12InfoQueue> info_queue{};
+    ComPtr<ID3D12InfoQueue> info_queue{};
     if constexpr (VX_DEBUG_MODE)
     {
         throw_if_failed(m_device.As(&info_queue));
@@ -75,55 +76,55 @@ renderer_t::renderer_t(const HWND window_handle, const u32 window_width, const u
     // Create descriptor heaps.
     m_cbv_srv_uav_descriptor_heap.create(m_device.Get(), D3D12_MAX_SHADER_VISIBLE_DESCRIPTOR_HEAP_SIZE_TIER_1,
                                          D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
-                                         D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
+                                         D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, L"CBV SRV UAV Descriptor Heap");
 
-    m_rtv_descriptor_heap.create(m_device.Get(), 10u, D3D12_DESCRIPTOR_HEAP_TYPE_RTV, D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
+    m_rtv_descriptor_heap.create(m_device.Get(), 10u, D3D12_DESCRIPTOR_HEAP_TYPE_RTV, D3D12_DESCRIPTOR_HEAP_FLAG_NONE,
+                                 L"RTV Descriptor Heap");
 
-    m_dsv_descriptor_heap.create(m_device.Get(), 1u, D3D12_DESCRIPTOR_HEAP_TYPE_DSV, D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
+    m_dsv_descriptor_heap.create(m_device.Get(), 1u, D3D12_DESCRIPTOR_HEAP_TYPE_DSV, D3D12_DESCRIPTOR_HEAP_FLAG_NONE,
+                                 L"DSV Descriptor Heap");
 
     // Create the dxgi swapchain.
-    {
-        Microsoft::WRL::ComPtr<IDXGISwapChain1> swapchain_1{};
-        const DXGI_SWAP_CHAIN_DESC1 swapchain_desc = {
-            .Width = static_cast<UINT>(window_width),
-            .Height = static_cast<UINT>(window_height),
-            .Format = BACKBUFFER_FORMAT,
-            .Stereo = FALSE,
-            .SampleDesc = {1, 0},
-            .BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT,
-            .BufferCount = NUMBER_OF_BACKBUFFERS,
-            .Scaling = DXGI_SCALING_NONE,
-            .SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD,
-            .AlphaMode = DXGI_ALPHA_MODE_IGNORE,
-            .Flags = 0u,
-        };
-        throw_if_failed(m_dxgi_factory->CreateSwapChainForHwnd(m_direct_queue.m_command_queue.Get(), window_handle,
-                                                               &swapchain_desc, nullptr, nullptr, &swapchain_1));
+    ComPtr<IDXGISwapChain1> swapchain_1{};
+    const DXGI_SWAP_CHAIN_DESC1 swapchain_desc = {
+        .Width = static_cast<UINT>(window_width),
+        .Height = static_cast<UINT>(window_height),
+        .Format = BACKBUFFER_FORMAT,
+        .Stereo = FALSE,
+        .SampleDesc = {1, 0},
+        .BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT,
+        .BufferCount = NUMBER_OF_BACKBUFFERS,
+        .Scaling = DXGI_SCALING_NONE,
+        .SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD,
+        .AlphaMode = DXGI_ALPHA_MODE_IGNORE,
+        .Flags = 0u,
+    };
+    throw_if_failed(m_dxgi_factory->CreateSwapChainForHwnd(m_direct_queue.m_command_queue.Get(), window_handle,
+                                                           &swapchain_desc, nullptr, nullptr, &swapchain_1));
 
-        throw_if_failed(swapchain_1.As(&m_swapchain));
-    }
+    throw_if_failed(swapchain_1.As(&m_swapchain));
 
     // Create the render target view for the swapchain back buffer.
-    D3D12_CPU_DESCRIPTOR_HANDLE cpu_rtv_descriptor_handle = m_rtv_descriptor_heap.current_cpu_descriptor_handle;
 
     for (u8 i = 0; i < NUMBER_OF_BACKBUFFERS; i++)
     {
-        Microsoft::WRL::ComPtr<ID3D12Resource> swapchain_resource{};
+        descriptor_handle_t rtv_descriptor_handle = m_rtv_descriptor_heap.m_current_descriptor_handle;
+
+        ComPtr<ID3D12Resource> swapchain_resource{};
         throw_if_failed(m_swapchain->GetBuffer(i, IID_PPV_ARGS(&swapchain_resource)));
-        m_swapchain_backbuffers[i].cpu_descriptor_handle = cpu_rtv_descriptor_handle;
+        m_swapchain_backbuffers[i].m_rtv_cpu_descriptor_handle = rtv_descriptor_handle.m_cpu_descriptor_handle;
 
         m_device->CreateRenderTargetView(swapchain_resource.Get(), nullptr,
-                                         m_swapchain_backbuffers[i].cpu_descriptor_handle);
+                                         m_swapchain_backbuffers[i].m_rtv_cpu_descriptor_handle);
 
-        m_swapchain_backbuffers[i].resource = (std::move(swapchain_resource));
+        m_swapchain_backbuffers[i].m_resource = (std::move(swapchain_resource));
 
-        cpu_rtv_descriptor_handle.ptr += m_rtv_descriptor_heap.descriptor_handle_size;
+        m_rtv_descriptor_heap.offset_current_descriptor_handle();
     }
 
     m_swapchain_backbuffer_index = static_cast<u8>(m_swapchain->GetCurrentBackBufferIndex());
 
     // Create and setup the bindless root signature that is shared by all pipelines.
-
     const D3D12_ROOT_PARAMETER1 shader_constant_root_parameter = {
         .ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
         .Constants =
@@ -135,7 +136,7 @@ renderer_t::renderer_t(const HWND window_handle, const u32 window_width, const u
         .ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL,
     };
 
-    Microsoft::WRL::ComPtr<ID3DBlob> bindless_root_signature_blob{};
+    ComPtr<ID3DBlob> bindless_root_signature_blob{};
     const D3D12_VERSIONED_ROOT_SIGNATURE_DESC root_signature_desc = {
         .Version = D3D_ROOT_SIGNATURE_VERSION_1_1,
         .Desc_1_1 =
@@ -153,16 +154,15 @@ renderer_t::renderer_t(const HWND window_handle, const u32 window_width, const u
     throw_if_failed(m_device->CreateRootSignature(0u, bindless_root_signature_blob->GetBufferPointer(),
                                                   bindless_root_signature_blob->GetBufferSize(),
                                                   IID_PPV_ARGS(&m_bindless_root_signature)));
+    name_d3d12_object(m_bindless_root_signature.Get(), L"D3D12 bindless root signature");
 }
 
 renderer_t::index_buffer_with_intermediate_resource_t renderer_t::create_index_buffer(
     const void *data, const size_t stride, const u32 indices_count, const std::wstring_view buffer_name)
 {
-    const size_t size_in_bytes = stride * indices_count;
+    index_buffer_with_intermediate_resource_t result = {};
 
-    u8 *resource_ptr{};
-    Microsoft::WRL::ComPtr<ID3D12Resource> buffer_resource{};
-    Microsoft::WRL::ComPtr<ID3D12Resource> intermediate_buffer_resource{};
+    const size_t size_in_bytes = stride * indices_count;
 
     // First, create a upload buffer (that is placed in memory accesible by both GPU and CPU).
     // Then create a GPU only buffer, and copy data from the previous buffer to GPU only one.
@@ -188,12 +188,14 @@ renderer_t::index_buffer_with_intermediate_resource_t renderer_t::create_index_b
 
     throw_if_failed(m_device->CreateCommittedResource(
         &upload_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES, &buffer_resource_desc,
-        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, nullptr, IID_PPV_ARGS(&intermediate_buffer_resource)));
+        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, nullptr, IID_PPV_ARGS(&result.m_intermediate_resource)));
 
     // Now that a resource is created, copy CPU data to this upload buffer.
     const D3D12_RANGE read_range{.Begin = 0u, .End = 0u};
 
-    throw_if_failed(intermediate_buffer_resource->Map(0u, &read_range, (void **)&resource_ptr));
+    u8 *resource_ptr{};
+
+    throw_if_failed(result.m_intermediate_resource->Map(0u, &read_range, (void **)&resource_ptr));
 
     memcpy(resource_ptr, data, size_in_bytes);
 
@@ -209,32 +211,29 @@ renderer_t::index_buffer_with_intermediate_resource_t renderer_t::create_index_b
 
     throw_if_failed(m_device->CreateCommittedResource(
         &default_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES, &buffer_resource_desc,
-        D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&buffer_resource)));
+        D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&result.m_index_buffer.m_resource)));
 
     std::scoped_lock<std::mutex> scoped_lock(m_resource_mutex);
 
-    name_d3d12_object(buffer_resource.Get(), buffer_name);
-    name_d3d12_object(intermediate_buffer_resource.Get(), std::wstring(buffer_name) + std::wstring(L" [intermediate]"));
+    name_d3d12_object(result.m_index_buffer.m_resource.Get(), buffer_name);
+    name_d3d12_object(result.m_intermediate_resource.Get(),
+                      std::wstring(buffer_name) + std::wstring(L" [intermediate]"));
 
     auto command_allocator_list_pair = m_copy_queue.get_command_allocator_list_pair(m_device.Get());
 
-    command_allocator_list_pair.m_command_list->CopyResource(buffer_resource.Get(), intermediate_buffer_resource.Get());
+    command_allocator_list_pair.m_command_list->CopyResource(result.m_index_buffer.m_resource.Get(),
+                                                             result.m_intermediate_resource.Get());
     m_copy_queue.execute_command_list(std::move(command_allocator_list_pair));
 
-    const D3D12_INDEX_BUFFER_VIEW index_buffer_view = {
-        .BufferLocation = buffer_resource->GetGPUVirtualAddress(),
+    result.m_index_buffer.m_index_buffer_view = {
+        .BufferLocation = result.m_index_buffer.m_resource->GetGPUVirtualAddress(),
         .SizeInBytes = static_cast<UINT>(size_in_bytes),
         .Format = DXGI_FORMAT_R16_UINT,
     };
 
-    return {
-        index_buffer_t{
-            .resource = buffer_resource,
-            .indices_count = (u32)indices_count,
-            .index_buffer_view = index_buffer_view,
-        },
-        intermediate_buffer_resource,
-    };
+    result.m_index_buffer.m_indices_count = indices_count;
+
+    return result;
 }
 
 renderer_t::structured_buffer_with_intermediate_resource_t renderer_t::create_structured_buffer(
@@ -243,8 +242,8 @@ renderer_t::structured_buffer_with_intermediate_resource_t renderer_t::create_st
     const size_t size_in_bytes = stride * num_elements;
 
     u8 *resource_ptr{};
-    Microsoft::WRL::ComPtr<ID3D12Resource> buffer_resource{};
-    Microsoft::WRL::ComPtr<ID3D12Resource> intermediate_buffer_resource{};
+    ComPtr<ID3D12Resource> buffer_resource{};
+    ComPtr<ID3D12Resource> intermediate_buffer_resource{};
 
     // First, create a upload buffer (that is placed in memory accesible by both GPU and CPU).
     // Then create a GPU only buffer, and copy data from the previous buffer to GPU only one.
@@ -309,8 +308,8 @@ renderer_t::structured_buffer_with_intermediate_resource_t renderer_t::create_st
 
     return {
         structured_buffer_t{
-            .resource = buffer_resource,
-            .srv_index = (u32)srv_index,
+            .m_resource = buffer_resource,
+            .m_srv_index = (u32)srv_index,
         },
         intermediate_buffer_resource,
     };
@@ -325,9 +324,9 @@ command_buffer_t renderer_t::create_command_buffer(const size_t stride, const si
     const size_t size_in_bytes = counter_offset + 4u;
 
     u8 *resource_ptr{};
-    Microsoft::WRL::ComPtr<ID3D12Resource> buffer_resource{};
-    Microsoft::WRL::ComPtr<ID3D12Resource> intermediate_buffer_resource{};
-    Microsoft::WRL::ComPtr<ID3D12Resource> zeroed_counter_buffer_resource{};
+    ComPtr<ID3D12Resource> buffer_resource{};
+    ComPtr<ID3D12Resource> intermediate_buffer_resource{};
+    ComPtr<ID3D12Resource> zeroed_counter_buffer_resource{};
 
     // First, create a upload buffer (that is placed in memory accesible by both GPU and CPU).
     // Then create a GPU only buffer, and copy data from the previous buffer to GPU only one.
@@ -427,19 +426,20 @@ command_buffer_t renderer_t::create_command_buffer(const size_t stride, const si
         create_unordered_access_view(buffer_resource.Get(), stride, max_number_of_elements, true, counter_offset);
 
     return command_buffer_t{
-        .default_resource = buffer_resource,
-        .upload_resource = intermediate_buffer_resource,
-        .zeroed_counter_buffer_resource = zeroed_counter_buffer_resource,
-        .upload_resource_mapped_ptr = resource_ptr,
-        .upload_resource_srv_index = upload_resource_srv_index,
-        .default_resource_uav_index = default_resource_uav_index,
-        .counter_offset = (u32)counter_offset,
+        .m_default_resource = buffer_resource,
+        .m_upload_resource = intermediate_buffer_resource,
+        .m_zeroed_counter_buffer_resource = zeroed_counter_buffer_resource,
+        .m_upload_resource_mapped_ptr = resource_ptr,
+        .m_upload_resource_srv_index = upload_resource_srv_index,
+        .m_default_resource_uav_index = default_resource_uav_index,
+        .m_counter_offset = (u32)counter_offset,
     };
 }
 
 u32 renderer_t::create_constant_buffer_view(ID3D12Resource *const resource, const size_t size)
 {
-    const D3D12_CPU_DESCRIPTOR_HANDLE handle = m_cbv_srv_uav_descriptor_heap.current_cpu_descriptor_handle;
+    const D3D12_CPU_DESCRIPTOR_HANDLE handle =
+        m_cbv_srv_uav_descriptor_heap.m_current_descriptor_handle.m_cpu_descriptor_handle;
 
     const D3D12_CONSTANT_BUFFER_VIEW_DESC cbv_desc = {
         .BufferLocation = resource->GetGPUVirtualAddress(),
@@ -448,7 +448,7 @@ u32 renderer_t::create_constant_buffer_view(ID3D12Resource *const resource, cons
 
     m_device->CreateConstantBufferView(&cbv_desc, handle);
 
-    const size_t cbv_index = m_cbv_srv_uav_descriptor_heap.current_descriptor_handle_index;
+    const size_t cbv_index = m_cbv_srv_uav_descriptor_heap.m_current_descriptor_handle.m_index;
 
     m_cbv_srv_uav_descriptor_heap.offset_current_descriptor_handles();
 
@@ -458,7 +458,8 @@ u32 renderer_t::create_constant_buffer_view(ID3D12Resource *const resource, cons
 u32 renderer_t::create_shader_resource_view(ID3D12Resource *const resource, const size_t stride,
                                             const size_t num_elements)
 {
-    const D3D12_CPU_DESCRIPTOR_HANDLE handle = m_cbv_srv_uav_descriptor_heap.current_cpu_descriptor_handle;
+    const D3D12_CPU_DESCRIPTOR_HANDLE handle =
+        m_cbv_srv_uav_descriptor_heap.m_current_descriptor_handle.m_cpu_descriptor_handle;
 
     const D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {
         .Format = DXGI_FORMAT_UNKNOWN,
@@ -473,7 +474,7 @@ u32 renderer_t::create_shader_resource_view(ID3D12Resource *const resource, cons
 
     m_device->CreateShaderResourceView(resource, &srv_desc, handle);
 
-    const size_t srv_index = m_cbv_srv_uav_descriptor_heap.current_descriptor_handle_index;
+    const size_t srv_index = m_cbv_srv_uav_descriptor_heap.m_current_descriptor_handle.m_index;
 
     m_cbv_srv_uav_descriptor_heap.offset_current_descriptor_handles();
 
@@ -484,7 +485,8 @@ u32 renderer_t::create_unordered_access_view(ID3D12Resource *const resource, con
                                              const size_t num_elements, const bool use_counter,
                                              const size_t counter_offset)
 {
-    const D3D12_CPU_DESCRIPTOR_HANDLE handle = m_cbv_srv_uav_descriptor_heap.current_cpu_descriptor_handle;
+    const D3D12_CPU_DESCRIPTOR_HANDLE handle =
+        m_cbv_srv_uav_descriptor_heap.m_current_descriptor_handle.m_cpu_descriptor_handle;
 
     D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {
         .Format = DXGI_FORMAT_UNKNOWN,
@@ -508,7 +510,7 @@ u32 renderer_t::create_unordered_access_view(ID3D12Resource *const resource, con
         m_device->CreateUnorderedAccessView(resource, resource, &uav_desc, handle);
     }
 
-    const size_t uav_index = m_cbv_srv_uav_descriptor_heap.current_descriptor_handle_index;
+    const size_t uav_index = m_cbv_srv_uav_descriptor_heap.m_current_descriptor_handle.m_index;
 
     m_cbv_srv_uav_descriptor_heap.offset_current_descriptor_handles();
 

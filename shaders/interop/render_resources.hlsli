@@ -42,6 +42,8 @@ SceneConstantBuffer
     float4 camera_position;
 };
 
+// TODO: Remove this. constant buffer per chunk is overkill.
+// Have a fixed set of chunks that can be loaded, and just have a large constant buffer shared by all those chunks!!!!
 ConstantBufferStruct
 ChunkConstantBuffer
 {
