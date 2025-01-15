@@ -20,38 +20,32 @@
 // clang-format off
 namespace interop
 {
-#define MAX_CHUNKS_IN_WORLD 
-
 #define NUMBER_OF_VOXELS_PER_DIMENSION_IN_CHUNK  8u
 #define NUMBER_OF_VOXELS_PER_CHUNK (NUMBER_OF_VOXELS_PER_DIMENSION_IN_CHUNK * NUMBER_OF_VOXELS_PER_DIMENSION_IN_CHUNK * NUMBER_OF_VOXELS_PER_DIMENSION_IN_CHUNK)
-
-#define NUMBER_OF_CHUNKS_PER_DIMENSION_IN_WORLD 12
-#define NUMBER_OF_CHUNKS_IN_WORLD (NUMBER_OF_CHUNKS_PER_DIMENSION_IN_WORLD * NUMBER_OF_CHUNKS_PER_DIMENSION_IN_WORLD * NUMBER_OF_CHUNKS_PER_DIMENSION_IN_WORLD)
 
 // NOTE: These variables define how many chunks can be loaded at a given particular instant.
 // If a new chunk is being added, it will replace an older chunk.
 #define NUMER_OF_LOADED_CHUNKS_PER_DIMENSION 6
 #define NUMBER_OF_LOADED_CHUNKS_IN_WORLD (NUMBER_OF_LOADED_CHUNKS_PER_DIMENSION_IN_WORLD * NUMBER_OF_LOADED_CHUNKS_PER_DIMENSION_IN_WORLD * NUMBER_OF_LOADED_CHUNKS_PER_DIMENSION_IN_WORLD)
     
-    struct TriangleRenderResources
+    struct triangle_render_resources_t
     {
         uint position_buffer_index;
         uint color_buffer_index;
     };
 
-    struct VoxelRenderResources
+    struct voxel_render_resources_t
     {
         uint scene_constant_buffer_index;
-        uint chunk_constant_buffer_index;
     };
 
 ConstantBufferStruct
-SceneConstantBuffer
+scene_constant_buffer_t
     {
         float4x4 view_matrix;
         float4x4 projection_matrix;
 
-    // note(rtarun9) : Putting this here because scene depends on chunk edge length, which determines the AABB vertices.
+        // note(rtarun9) : Putting this here because scene depends on chunk edge length, which determines the AABB vertices.
         float4 aabb_vertices[8];
         float4 camera_position;
     };
@@ -67,7 +61,7 @@ chunk_manager_constant_buffer_t
     };
 
 // D3D12_DRAW_INDEXED_ARGUMENTS has 5 32 bit members, which is why draw arguments is split into a uint4 and uint.
-    struct GPUIndirectCommand
+    struct gpu_indirect_command_t
     {
         VoxelRenderResources voxel_render_resources;
         uint4 index_buffer_view;
@@ -76,7 +70,7 @@ chunk_manager_constant_buffer_t
         uint padding;
     };
 
-    struct GPUCullRenderResources
+    struct gpu_cull_render_resources_t
     {
         uint number_of_chunks;
         uint indirect_command_srv_index;

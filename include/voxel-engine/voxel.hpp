@@ -25,7 +25,7 @@ struct voxel_chunk_position_t
 // A shared / common position buffer is used, that is created and handled by chunk manager class.
 struct voxel_chunk_t
 {
-    explicit voxel_chunk_t() = default;
+    explicit voxel_chunk_t();
 
     voxel_chunk_t(const voxel_chunk_t &other) = delete;
     voxel_chunk_t &operator=(voxel_chunk_t &other) = delete;
@@ -37,8 +37,8 @@ struct voxel_chunk_t
 
     static constexpr u32 CHUNK_LENGTH = voxel_t::EDGE_LENGTH * NUMBER_OF_VOXELS_PER_DIMENSION_IN_CHUNK;
 
-    // A flattened 3d array of Voxels.
-    std::array<voxel_t, NUMBER_OF_VOXELS_PER_CHUNK> m_voxels{};
+    // A flattened 1d array of Voxels.
+    std::unique_ptr<voxel_t[]> m_voxels{};
 
     rhi::index_buffer_t m_index_buffer{};
     rhi::structured_buffer_t m_color_buffer{};
@@ -51,6 +51,7 @@ struct voxel_chunk_t
 // (i) Loaded -> Ready to be rendered.
 // (ii) Setup -> Chunk mesh is ready, but associated buffers may or maynot be ready. Once the buffers are ready, these
 // chunks are moved into the loaded chunks hashmap.
+// The class contains several hashmaps, for which the chunk position acts as a index.
 struct voxel_chunk_manager_t
 {
     // Constructor creates the shared position buffer.
@@ -68,14 +69,8 @@ struct voxel_chunk_manager_t
         rhi::renderer_t::structured_buffer_with_intermediate_resource_t m_chunk_color_buffer{};
     };
 
-  private:
-    // internal_mt : Internal multithreaded.
-    // Whenever a voxel chunk wants to be created, this function is to be called (which internally uses MT + Async copy
-    // queues to do the required operations).
-    voxel_chunk_manager_t internal_mt_setup_chunk(rhi::renderer_t &renderer, const voxel_chunk_position_t index);
-
   public:
-    void add_chunk_to_setup_stack(const voxel_chunk_position_t index);
+    void add_chunk_to_setup_stack(const voxel_chunk_position_t chunk_position);
     void create_chunks_from_setup_stack(rhi::renderer_t &renderer);
 
     void transfer_chunks_from_setup_to_loaded_state(const u64 current_copy_queue_fence_value);

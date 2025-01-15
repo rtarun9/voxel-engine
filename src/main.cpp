@@ -40,11 +40,11 @@ int main()
                             cbv_srv_uav_descriptor_handle.m_gpu_descriptor_handle);
     }
 
-    ChunkManager chunk_manager{renderer};
+    voxel_chunk_manager_t chunk_manager{renderer};
 
     // Setup the AABB data for scene buffer.
-    auto scene_buffers =
-        renderer.create_constant_buffers<SceneConstantBuffer, rhi::NUMBER_OF_BACKBUFFERS>(L"Scene constant buffer");
+    auto scene_buffers = renderer.create_constant_buffers<interop::scene_constant_buffer_t, rhi::NUMBER_OF_BACKBUFFERS>(
+        L"Scene constant buffer");
 
     // AABB for chunk.
     static constexpr std::array<DirectX::XMFLOAT4, 8> aabb_vertices{
