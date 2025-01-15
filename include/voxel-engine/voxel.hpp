@@ -10,7 +10,7 @@
 // position' and has a edge length as specified in the class below.
 struct Voxel
 {
-    static constexpr u32 EDGE_LENGTH{640 * 8u};
+    static constexpr u32 EDGE_LENGTH{1u};
     bool m_active{true};
 };
 
@@ -120,5 +120,5 @@ struct ChunkManager
     rhi::structured_buffer_t m_shared_chunk_position_buffer{};
 
     // Threadpool from which std::futures are obtained.
-    thread_pool_t m_thread_pool{1};
+    thread_pool_t m_thread_pool{6u};
 };

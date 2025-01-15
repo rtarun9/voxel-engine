@@ -22,40 +22,40 @@ DirectX::XMMATRIX camera_t::update_and_get_view_matrix(const u8 *const keyboard_
     DirectX::XMVECTOR right_vector = DirectX::XMLoadFloat4(&m_right);
 
     // Index is the virutal key code.
-    if (keyboard_state['A'])
+    if (keyboard_state['A'] & 0b1000'0000)
     {
         move_to_position_vector -= right_vector * movement_speed;
     }
 
-    if (keyboard_state['D'])
+    if (keyboard_state['D'] & 0b1000'0000)
     {
         move_to_position_vector += right_vector * movement_speed;
     }
 
-    if (keyboard_state['W'])
+    if (keyboard_state['W'] & 0b1000'0000)
     {
         move_to_position_vector += front_vector * movement_speed;
     }
 
-    if (keyboard_state['S'])
+    if (keyboard_state['S'] & 0b1000'0000)
     {
         move_to_position_vector -= front_vector * movement_speed;
     }
 
-    if (keyboard_state[VK_UP])
+    if (keyboard_state[VK_UP] & 0b1000'0000)
     {
         pitch_to -= rotation_speed;
     }
-    else if (keyboard_state[VK_DOWN])
+    else if (keyboard_state[VK_DOWN] & 0b1000'0000)
     {
         pitch_to += rotation_speed;
     }
 
-    if (keyboard_state[VK_LEFT])
+    if (keyboard_state[VK_LEFT] & 0b1000'0000)
     {
         yaw_to -= rotation_speed;
     }
-    else if (keyboard_state[VK_RIGHT])
+    else if (keyboard_state[VK_RIGHT] & 0b1000'0000)
     {
         yaw_to += rotation_speed;
     }

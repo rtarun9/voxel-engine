@@ -121,10 +121,10 @@ inline constant_buffer_t<T> renderer_t::create_constant_buffer(const std::wstrin
 
     throw_if_failed(constant_buffer.m_resource->Map(0u, &read_range, (void **)&constant_buffer.m_resource_mapped_ptr));
 
-    name_d3d12_object(constant_buffer.resource.Get(), buffer_name);
+    name_d3d12_object(constant_buffer.m_resource.Get(), buffer_name);
 
     // Create Constant buffer view.
-    constant_buffer.cbv_index = create_constant_buffer_view(constant_buffer.resource.Get(), sizeof(T));
+    constant_buffer.m_cbv_index = create_constant_buffer_view(constant_buffer.m_resource.Get(), sizeof(T));
 
     return constant_buffer;
 }

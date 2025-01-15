@@ -1,12 +1,11 @@
 #include "voxel-engine/camera.hpp"
 #include "voxel-engine/filesystem.hpp"
+#include "voxel-engine/rhi/common.hpp"
 #include "voxel-engine/rhi/renderer.hpp"
 #include "voxel-engine/shader_compiler.hpp"
 #include "voxel-engine/timer.hpp"
 #include "voxel-engine/voxel.hpp"
 #include "voxel-engine/window.hpp"
-
-#include "voxel-engine/thread_pool.hpp"
 
 #include "shaders/interop/render_resources.hlsli"
 
@@ -28,19 +27,17 @@ int main()
 
         ImGui::StyleColorsDark();
 
-        D3D12_CPU_DESCRIPTOR_HANDLE cpu_descriptor_handle =
-            renderer.m_cbv_srv_uav_descriptor_heap.current_cpu_descriptor_handle;
+        rhi::descriptor_handle_t cbv_srv_uav_descriptor_handle =
+            renderer.m_cbv_srv_uav_descriptor_heap.m_current_descriptor_handle;
 
-        D3D12_GPU_DESCRIPTOR_HANDLE gpu_descriptor_handle =
-            renderer.m_cbv_srv_uav_descriptor_heap.current_gpu_descriptor_handle;
-
-        renderer.m_cbv_srv_uav_descriptor_heap.offset_current_descriptor_handles();
+        renderer.m_cbv_srv_uav_descriptor_heap.offset_current_descriptor_handle();
 
         // Setup platform / renderer backend.
         ImGui_ImplWin32_Init(window.get_handle());
         ImGui_ImplDX12_Init(renderer.m_device.Get(), rhi::NUMBER_OF_BACKBUFFERS, rhi::BACKBUFFER_FORMAT,
-                            renderer.m_cbv_srv_uav_descriptor_heap.descriptor_heap.Get(), cpu_descriptor_handle,
-                            gpu_descriptor_handle);
+                            renderer.m_cbv_srv_uav_descriptor_heap.m_descriptor_heap.Get(),
+                            cbv_srv_uav_descriptor_handle.m_cpu_descriptor_handle,
+                            cbv_srv_uav_descriptor_handle.m_gpu_descriptor_handle);
     }
 
     ChunkManager chunk_manager{renderer};
@@ -66,7 +63,7 @@ int main()
         for (auto &scene_buffer : scene_buffers)
         {
 
-            scene_buffer.data.aabb_vertices[i] = aabb_vertices[i];
+            scene_buffer.m_data.aabb_vertices[i] = aabb_vertices[i];
         }
     }
 
@@ -109,7 +106,8 @@ int main()
         D3D12_RESOURCE_STATE_DEPTH_WRITE, &depth_buffer_optimized_clear_value, IID_PPV_ARGS(&depth_buffer_resource)));
 
     // Create DSV.
-    D3D12_CPU_DESCRIPTOR_HANDLE dsv_handle = renderer.m_dsv_descriptor_heap.current_cpu_descriptor_handle;
+    D3D12_CPU_DESCRIPTOR_HANDLE dsv_handle =
+        renderer.m_dsv_descriptor_heap.m_current_descriptor_handle.m_cpu_descriptor_handle;
     {
         const D3D12_DEPTH_STENCIL_VIEW_DESC dsv_desc = {
             .Format = DXGI_FORMAT_D32_FLOAT,
@@ -122,7 +120,7 @@ int main()
                 },
         };
 
-        renderer.m_dsv_descriptor_heap.offset_current_descriptor_handles();
+        renderer.m_dsv_descriptor_heap.offset_current_descriptor_handle();
 
         renderer.m_device->CreateDepthStencilView(depth_buffer_resource.Get(), &dsv_desc, dsv_handle);
     }
@@ -399,9 +397,9 @@ int main()
         rhi::constant_buffer_t<SceneConstantBuffer> &scene_buffer =
             scene_buffers[renderer.m_swapchain_backbuffer_index];
 
-        scene_buffer.data.view_matrix = camera.update_and_get_view_matrix(keyboard_state, delta_time);
-        scene_buffer.data.projection_matrix = projection_matrix;
-        scene_buffer.data.camera_position = camera.m_position;
+        scene_buffer.m_data.view_matrix = camera.update_and_get_view_matrix(keyboard_state, delta_time);
+        scene_buffer.m_data.projection_matrix = projection_matrix;
+        scene_buffer.m_data.camera_position = camera.m_position;
         scene_buffer.update();
 
         const auto &swapchain_index = renderer.m_swapchain_backbuffer_index;
@@ -413,7 +411,7 @@ int main()
 
         const auto &swapchain_backbuffer = renderer.m_swapchain_backbuffers[swapchain_index];
 
-        const Microsoft::WRL::ComPtr<ID3D12Resource> swapchain_resource = swapchain_backbuffer.resource;
+        const Microsoft::WRL::ComPtr<ID3D12Resource> swapchain_resource = swapchain_backbuffer.m_resource;
 
         // Transition the backbuffer from presentation mode to render target mode.
         const D3D12_RESOURCE_BARRIER presentation_to_render_target_barrier = {
@@ -432,7 +430,7 @@ int main()
 
         // Now, clear the RTV and DSV.
         const float clear_color[4] = {0.1f, 0.1f, 0.1f, 1.0f};
-        command_list->ClearRenderTargetView(swapchain_backbuffer.cpu_descriptor_handle, clear_color, 0u, nullptr);
+        command_list->ClearRenderTargetView(swapchain_backbuffer.m_rtv_cpu_descriptor_handle, clear_color, 0u, nullptr);
         command_list->ClearDepthStencilView(dsv_handle, D3D12_CLEAR_FLAG_DEPTH, 0.0f, 0u, 0u, nullptr);
 
         // Set viewport.
@@ -484,16 +482,16 @@ int main()
         for (const auto &[i, chunk] : chunk_manager.m_loaded_chunks)
         {
             const VoxelRenderResources render_resources = {
-                .scene_constant_buffer_index = static_cast<u32>(scene_buffer.cbv_index),
-                .chunk_constant_buffer_index = static_cast<u32>(chunk_manager.m_chunk_constant_buffers[i].cbv_index),
+                .scene_constant_buffer_index = static_cast<u32>(scene_buffer.m_cbv_index),
+                .chunk_constant_buffer_index = static_cast<u32>(chunk_manager.m_chunk_constant_buffers[i].m_cbv_index),
             };
 
             indirect_command_vector.emplace_back(IndirectCommand{
                 .render_resources = render_resources,
-                .index_buffer_view = chunk_manager.m_chunk_index_buffers[i].index_buffer_view,
+                .index_buffer_view = chunk_manager.m_chunk_index_buffers[i].m_index_buffer_view,
                 .draw_arguments =
                     D3D12_DRAW_INDEXED_ARGUMENTS{
-                        .IndexCountPerInstance = (u32)chunk_manager.m_chunk_index_buffers[i].indices_count,
+                        .IndexCountPerInstance = (u32)chunk_manager.m_chunk_index_buffers[i].m_indices_count,
                         .InstanceCount = 1u,
                         .StartIndexLocation = 0u,
                         .BaseVertexLocation = 0u,
@@ -503,13 +501,13 @@ int main()
         }
 
         ID3D12DescriptorHeap *const *shader_visible_descriptor_heaps = {
-            renderer.m_cbv_srv_uav_descriptor_heap.descriptor_heap.GetAddressOf(),
+            renderer.m_cbv_srv_uav_descriptor_heap.m_descriptor_heap.GetAddressOf(),
         };
 
         command_list->SetDescriptorHeaps(1u, shader_visible_descriptor_heaps);
 
         // Prepare rendering commands.
-        command_list->OMSetRenderTargets(1u, &swapchain_backbuffer.cpu_descriptor_handle, FALSE, &dsv_handle);
+        command_list->OMSetRenderTargets(1u, &swapchain_backbuffer.m_rtv_cpu_descriptor_handle, FALSE, &dsv_handle);
 
         // Run the culling compute shader, followed by voxel rendering shader.
         if (!indirect_command_vector.empty())
@@ -519,7 +517,7 @@ int main()
                 .Flags = D3D12_RESOURCE_BARRIER_FLAGS::D3D12_RESOURCE_BARRIER_FLAG_NONE,
                 .Transition =
                     D3D12_RESOURCE_TRANSITION_BARRIER{
-                        .pResource = indirect_command_buffer.default_resource.Get(),
+                        .pResource = indirect_command_buffer.m_default_resource.Get(),
                         .Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
                         .StateBefore = D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT,
                         .StateAfter = D3D12_RESOURCE_STATE_COPY_DEST,
@@ -527,14 +525,14 @@ int main()
             };
             command_list->ResourceBarrier(1u, &indirect_argument_to_copy_dest_state);
 
-            memcpy(indirect_command_buffer.upload_resource_mapped_ptr, indirect_command_vector.data(),
+            memcpy(indirect_command_buffer.m_upload_resource_mapped_ptr, indirect_command_vector.data(),
                    indirect_command_vector.size() * sizeof(IndirectCommand));
 
             GPUCullRenderResources gpu_cull_render_resources = {
                 .number_of_chunks = static_cast<u32>(indirect_command_vector.size()),
-                .indirect_command_srv_index = static_cast<u32>(indirect_command_buffer.upload_resource_srv_index),
-                .output_command_uav_index = static_cast<u32>(indirect_command_buffer.default_resource_uav_index),
-                .scene_constant_buffer_index = static_cast<u32>(scene_buffer.cbv_index),
+                .indirect_command_srv_index = static_cast<u32>(indirect_command_buffer.m_upload_resource_srv_index),
+                .output_command_uav_index = static_cast<u32>(indirect_command_buffer.m_default_resource_uav_index),
+                .scene_constant_buffer_index = static_cast<u32>(scene_buffer.m_cbv_index),
             };
 
             command_list->SetDescriptorHeaps(1u, shader_visible_descriptor_heaps);
@@ -545,16 +543,16 @@ int main()
 
             // Clear the counter associated with UAV.
 
-            command_list->CopyBufferRegion(indirect_command_buffer.default_resource.Get(),
-                                           indirect_command_buffer.counter_offset,
-                                           indirect_command_buffer.zeroed_counter_buffer_resource.Get(), 0u, 4u);
+            command_list->CopyBufferRegion(indirect_command_buffer.m_default_resource.Get(),
+                                           indirect_command_buffer.m_counter_offset,
+                                           indirect_command_buffer.m_zeroed_counter_buffer_resource.Get(), 0u, 4u);
 
             const D3D12_RESOURCE_BARRIER copy_dest_to_unordered_access_state = {
                 .Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
                 .Flags = D3D12_RESOURCE_BARRIER_FLAGS::D3D12_RESOURCE_BARRIER_FLAG_NONE,
                 .Transition =
                     D3D12_RESOURCE_TRANSITION_BARRIER{
-                        .pResource = indirect_command_buffer.default_resource.Get(),
+                        .pResource = indirect_command_buffer.m_default_resource.Get(),
                         .Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
                         .StateBefore = D3D12_RESOURCE_STATE_COPY_DEST,
                         .StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
@@ -571,7 +569,7 @@ int main()
                 .Flags = D3D12_RESOURCE_BARRIER_FLAGS::D3D12_RESOURCE_BARRIER_FLAG_NONE,
                 .Transition =
                     D3D12_RESOURCE_TRANSITION_BARRIER{
-                        .pResource = indirect_command_buffer.default_resource.Get(),
+                        .pResource = indirect_command_buffer.m_default_resource.Get(),
                         .Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
                         .StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
                         .StateAfter = D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT,
@@ -588,8 +586,8 @@ int main()
             command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
             command_list->ExecuteIndirect(
-                command_signature.Get(), MAX_CHUNKS_TO_BE_DRAWN, indirect_command_buffer.default_resource.Get(), 0u,
-                indirect_command_buffer.default_resource.Get(), indirect_command_buffer.counter_offset);
+                command_signature.Get(), MAX_CHUNKS_TO_BE_DRAWN, indirect_command_buffer.m_default_resource.Get(), 0u,
+                indirect_command_buffer.m_default_resource.Get(), indirect_command_buffer.m_counter_offset);
         }
 
         // Render UI.

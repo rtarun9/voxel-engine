@@ -62,7 +62,7 @@ ChunkManager::ChunkManager(rhi::renderer_t &renderer)
                                                           chunk_position_data.size(), L"shared chunk position buffer");
 
     renderer.m_copy_queue.flush_queue();
-    m_shared_chunk_position_buffer = result.structured_buffer;
+    m_shared_chunk_position_buffer = result.m_structured_buffer;
 }
 
 ChunkManager::SetupChunkData ChunkManager::internal_mt_setup_chunk(rhi::renderer_t &renderer, const size_t index)
@@ -287,8 +287,8 @@ void ChunkManager::transfer_chunks_from_setup_to_loaded_state(const u64 current_
                 const size_t num_vertices = chunk_to_load.m_chunk_indices_data.size();
                 const size_t chunk_index = chunk_to_load.m_chunk.m_chunk_index;
 
-                m_chunk_index_buffers[chunk_index] = std::move(chunk_to_load.m_chunk_index_buffer.index_buffer);
-                m_chunk_color_buffers[chunk_index] = std::move(chunk_to_load.m_chunk_color_buffer.structured_buffer);
+                m_chunk_index_buffers[chunk_index] = std::move(chunk_to_load.m_chunk_index_buffer.m_index_buffer);
+                m_chunk_color_buffers[chunk_index] = std::move(chunk_to_load.m_chunk_color_buffer.m_structured_buffer);
                 m_chunk_constant_buffers[chunk_index] = std::move(chunk_to_load.m_chunk_constant_buffer);
 
                 const DirectX::XMUINT3 chunk_index_3d =
@@ -299,10 +299,10 @@ void ChunkManager::transfer_chunks_from_setup_to_loaded_state(const u64 current_
                                      chunk_index_3d.y * Voxel::EDGE_LENGTH * Chunk::NUMBER_OF_VOXELS_PER_DIMENSION,
                                      chunk_index_3d.z * Voxel::EDGE_LENGTH * Chunk::NUMBER_OF_VOXELS_PER_DIMENSION);
 
-                m_chunk_constant_buffers[chunk_index].data = {
+                m_chunk_constant_buffers[chunk_index].m_data = {
                     .translation_vector = {chunk_offset.x, chunk_offset.y, chunk_offset.z, 0u},
-                    .position_buffer_index = static_cast<u32>(m_shared_chunk_position_buffer.srv_index),
-                    .color_buffer_index = static_cast<u32>(m_chunk_color_buffers[chunk_index].srv_index),
+                    .position_buffer_index = static_cast<u32>(m_shared_chunk_position_buffer.m_srv_index),
+                    .color_buffer_index = static_cast<u32>(m_chunk_color_buffers[chunk_index].m_srv_index),
                 };
 
                 m_chunk_constant_buffers[chunk_index].update();
