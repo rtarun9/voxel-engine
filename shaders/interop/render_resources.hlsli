@@ -18,58 +18,71 @@
 #endif
 
 // clang-format off
-
-struct TriangleRenderResources
+namespace interop
 {
-    uint position_buffer_index;
-    uint color_buffer_index;
-};
+#define MAX_CHUNKS_IN_WORLD 
 
-struct VoxelRenderResources
-{
-    uint scene_constant_buffer_index;
-    uint chunk_constant_buffer_index;
-};
+#define NUMBER_OF_VOXELS_PER_DIMENSION_IN_CHUNK  8u
+#define NUMBER_OF_VOXELS_PER_CHUNK (NUMBER_OF_VOXELS_PER_DIMENSION_IN_CHUNK * NUMBER_OF_VOXELS_PER_DIMENSION_IN_CHUNK * NUMBER_OF_VOXELS_PER_DIMENSION_IN_CHUNK)
+
+#define NUMBER_OF_CHUNKS_PER_DIMENSION_IN_WORLD 12
+#define NUMBER_OF_CHUNKS_IN_WORLD (NUMBER_OF_CHUNKS_PER_DIMENSION_IN_WORLD * NUMBER_OF_CHUNKS_PER_DIMENSION_IN_WORLD * NUMBER_OF_CHUNKS_PER_DIMENSION_IN_WORLD)
+
+// NOTE: These variables define how many chunks can be loaded at a given particular instant.
+// If a new chunk is being added, it will replace an older chunk.
+#define NUMER_OF_LOADED_CHUNKS_PER_DIMENSION 6
+#define NUMBER_OF_LOADED_CHUNKS_IN_WORLD (NUMBER_OF_LOADED_CHUNKS_PER_DIMENSION_IN_WORLD * NUMBER_OF_LOADED_CHUNKS_PER_DIMENSION_IN_WORLD * NUMBER_OF_LOADED_CHUNKS_PER_DIMENSION_IN_WORLD)
+    
+    struct TriangleRenderResources
+    {
+        uint position_buffer_index;
+        uint color_buffer_index;
+    };
+
+    struct VoxelRenderResources
+    {
+        uint scene_constant_buffer_index;
+        uint chunk_constant_buffer_index;
+    };
 
 ConstantBufferStruct
 SceneConstantBuffer
-{
-    float4x4 view_matrix;
-    float4x4 projection_matrix;
+    {
+        float4x4 view_matrix;
+        float4x4 projection_matrix;
 
     // note(rtarun9) : Putting this here because scene depends on chunk edge length, which determines the AABB vertices.
-    float4 aabb_vertices[8];
-    float4 camera_position;
-};
+        float4 aabb_vertices[8];
+        float4 camera_position;
+    };
 
-// TODO: Remove this. constant buffer per chunk is overkill.
-// Have a fixed set of chunks that can be loaded, and just have a large constant buffer shared by all those chunks!!!!
 ConstantBufferStruct
-ChunkConstantBuffer
-{
-    uint4 translation_vector;
+chunk_manager_constant_buffer_t
+    {
+        uint4 translation_vector;
 
-    uint position_buffer_index;
+        uint position_buffer_index;
 
-    uint color_buffer_index;
-};
+        uint color_buffer_index;
+    };
 
 // D3D12_DRAW_INDEXED_ARGUMENTS has 5 32 bit members, which is why draw arguments is split into a uint4 and uint.
-struct GPUIndirectCommand
-{
-    VoxelRenderResources voxel_render_resources;
-    uint4 index_buffer_view;
-    uint4 draw_arguments_1;
-    uint draw_arguments_2;
-    uint padding;
-};
+    struct GPUIndirectCommand
+    {
+        VoxelRenderResources voxel_render_resources;
+        uint4 index_buffer_view;
+        uint4 draw_arguments_1;
+        uint draw_arguments_2;
+        uint padding;
+    };
 
-struct GPUCullRenderResources
-{
-    uint number_of_chunks;
-    uint indirect_command_srv_index;
-    uint output_command_uav_index;
-    uint scene_constant_buffer_index;
-};
+    struct GPUCullRenderResources
+    {
+        uint number_of_chunks;
+        uint indirect_command_srv_index;
+        uint output_command_uav_index;
+        uint scene_constant_buffer_index;
+    };
 
+}
 #endif
