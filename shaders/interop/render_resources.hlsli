@@ -3,6 +3,7 @@
 
 #ifdef __cplusplus
 
+#define int3 DirectX::XMFLOAT3
 #define float4x4 DirectX::XMMATRIX
 #define float4 DirectX::XMFLOAT4
 #define float3 DirectX::XMFLOAT3
@@ -25,9 +26,9 @@ namespace interop
 
 // NOTE: These variables define how many chunks can be loaded at a given particular instant.
 // If a new chunk is being added, it will replace an older chunk.
-#define NUMER_OF_LOADED_CHUNKS_PER_DIMENSION 6
-#define NUMBER_OF_LOADED_CHUNKS_IN_WORLD (NUMBER_OF_LOADED_CHUNKS_PER_DIMENSION_IN_WORLD * NUMBER_OF_LOADED_CHUNKS_PER_DIMENSION_IN_WORLD * NUMBER_OF_LOADED_CHUNKS_PER_DIMENSION_IN_WORLD)
+#define CHUNK_RENDER_DISTANCE_PER_DIMENSION 6
     
+    // NOTE: Until it becomes a necessity, I will be storing non-indices in render resources for testing purposes. This is simply because to prevent creation of 'micro' constant buffers.
     struct triangle_render_resources_t
     {
         uint position_buffer_index;
@@ -37,6 +38,9 @@ namespace interop
     struct voxel_render_resources_t
     {
         uint scene_constant_buffer_index;
+        uint shared_chunk_position_buffer_index;
+        uint color_buffer_index;
+        int3 chunk_offset;
     };
 
 ConstantBufferStruct
@@ -63,7 +67,7 @@ chunk_manager_constant_buffer_t
 // D3D12_DRAW_INDEXED_ARGUMENTS has 5 32 bit members, which is why draw arguments is split into a uint4 and uint.
     struct gpu_indirect_command_t
     {
-        VoxelRenderResources voxel_render_resources;
+        voxel_render_resources_t voxel_render_resources;
         uint4 index_buffer_view;
         uint4 draw_arguments_1;
         uint draw_arguments_2;

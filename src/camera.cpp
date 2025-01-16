@@ -92,6 +92,5 @@ DirectX::XMMATRIX camera_t::update_and_get_view_matrix(const u8 *const keyboard_
     // The 'camera position' in the view matrix is a zero vector. In the shader, the vertex position subtracts the
     // position vector so that the camera is ALWAYS at the origin.
     // This should help a lot with precision.
-    return DirectX::XMMatrixLookAtLH(DirectX::XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f),
-                                     DirectX::XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f) + front_vector, up_vector);
+    return DirectX::XMMatrixLookAtLH(position_vector, position_vector + front_vector, up_vector);
 }

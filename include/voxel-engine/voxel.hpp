@@ -19,7 +19,25 @@ struct voxel_chunk_position_t
     i32 x{};
     i32 y{};
     i32 z{};
+
+    b32 operator==(const voxel_chunk_position_t &other) const
+    {
+        return x == other.x && y == other.y && z == other.z;
+    }
 };
+
+// Specializing std::hash for voxel_chunk_position_t
+namespace std
+{
+template <> struct hash<voxel_chunk_position_t>
+{
+    size_t operator()(const voxel_chunk_position_t &pos) const
+    {
+        // Combine the hash of each member
+        return (hash<int>()(pos.x) ^ (hash<int>()(pos.y) << 1)) ^ (hash<int>()(pos.z) << 2);
+    }
+};
+} // namespace std
 
 // Each chunk has a index buffer and color buffer. This is because during rendering entire chunks are rendered at once.
 // A shared / common position buffer is used, that is created and handled by chunk manager class.
@@ -65,6 +83,7 @@ struct voxel_chunk_manager_t
     {
         voxel_chunk_t m_chunk{};
 
+        // NOTE: When the copy operation is done, take the resource from the below structs and add them to m_chunk.
         rhi::renderer_t::index_buffer_with_intermediate_resource_t m_chunk_index_buffer{};
         rhi::renderer_t::structured_buffer_with_intermediate_resource_t m_chunk_color_buffer{};
     };

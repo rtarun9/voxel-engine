@@ -115,7 +115,7 @@ void voxel_chunk_manager_t::create_chunks_from_setup_stack(rhi::renderer_t &rend
                         {
                             const DirectX::XMUINT3 index_3d = {x, y, z};
 
-                            const size_t i = convert_to_1d(index_3d, NUMBER_OF_VOXELS_PER_CHUNK);
+                            const size_t i = convert_to_1d(index_3d, NUMBER_OF_VOXELS_PER_DIMENSION_IN_CHUNK);
 
                             if (!setup_chunk_data.m_chunk.m_voxels[i].m_active)
                             {
@@ -295,7 +295,10 @@ void voxel_chunk_manager_t::transfer_chunks_from_setup_to_loaded_state(const u64
                 const auto chunk_index = chunk_to_load.m_chunk.m_chunk_position;
 
                 m_chunk_indices_that_are_being_setup.erase(chunk_index);
-                m_loaded_chunks[chunk_index] = std::move(chunk_to_load.m_chunk);
+                m_loaded_chunks[chunk_index].m_chunk_position = chunk_to_load.m_chunk.m_chunk_position;
+                m_loaded_chunks[chunk_index].m_index_buffer = chunk_to_load.m_chunk_index_buffer.m_index_buffer;
+                m_loaded_chunks[chunk_index].m_color_buffer = chunk_to_load.m_chunk_color_buffer.m_structured_buffer;
+                m_loaded_chunks[chunk_index].m_voxels = std::move(chunk_to_load.m_chunk.m_voxels);
             }
             else
             {

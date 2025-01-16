@@ -49,33 +49,32 @@ int main()
     // AABB for chunk.
     static constexpr std::array<DirectX::XMFLOAT4, 8> aabb_vertices{
         DirectX::XMFLOAT4(0.0f, 0.0f, 0.0f, 1.0f),
-        DirectX::XMFLOAT4(0.0f, Chunk::CHUNK_LENGTH, 0.0f, 1.0f),
-        DirectX::XMFLOAT4(Chunk::CHUNK_LENGTH, Chunk::CHUNK_LENGTH, 0.0f, 1.0f),
-        DirectX::XMFLOAT4(Chunk::CHUNK_LENGTH, 0.0f, 0.0f, 1.0f),
-        DirectX::XMFLOAT4(0.0f, 0.0f, Chunk::CHUNK_LENGTH, 1.0f),
-        DirectX::XMFLOAT4(0.0f, Chunk::CHUNK_LENGTH, Chunk::CHUNK_LENGTH, 1.0f),
-        DirectX::XMFLOAT4(Chunk::CHUNK_LENGTH, Chunk::CHUNK_LENGTH, Chunk::CHUNK_LENGTH, 1.0f),
-        DirectX::XMFLOAT4(Chunk::CHUNK_LENGTH, 0.0f, Chunk::CHUNK_LENGTH, 1.0f),
+        DirectX::XMFLOAT4(0.0f, voxel_chunk_t::CHUNK_LENGTH, 0.0f, 1.0f),
+        DirectX::XMFLOAT4(voxel_chunk_t::CHUNK_LENGTH, voxel_chunk_t::CHUNK_LENGTH, 0.0f, 1.0f),
+        DirectX::XMFLOAT4(voxel_chunk_t::CHUNK_LENGTH, 0.0f, 0.0f, 1.0f),
+        DirectX::XMFLOAT4(0.0f, 0.0f, voxel_chunk_t::CHUNK_LENGTH, 1.0f),
+        DirectX::XMFLOAT4(0.0f, voxel_chunk_t::CHUNK_LENGTH, voxel_chunk_t::CHUNK_LENGTH, 1.0f),
+        DirectX::XMFLOAT4(voxel_chunk_t::CHUNK_LENGTH, voxel_chunk_t::CHUNK_LENGTH, voxel_chunk_t::CHUNK_LENGTH, 1.0f),
+        DirectX::XMFLOAT4(voxel_chunk_t::CHUNK_LENGTH, 0.0f, voxel_chunk_t::CHUNK_LENGTH, 1.0f),
     };
 
     for (int i = 0; i < 8; i++)
     {
         for (auto &scene_buffer : scene_buffers)
         {
-
             scene_buffer.m_data.aabb_vertices[i] = aabb_vertices[i];
         }
     }
 
     // Compile the vertex and pixel shader.
-    Microsoft::WRL::ComPtr<IDxcBlob> vertex_shader_blob = shader_compiler::compile(
+    ComPtr<IDxcBlob> vertex_shader_blob = shader_compiler::compile(
         file_system_t::instance().get_relative_path_wstr(L"shaders/voxel_shader.hlsl").c_str(), L"vs_main", L"vs_6_6");
 
-    Microsoft::WRL::ComPtr<IDxcBlob> pixel_shader_blob = shader_compiler::compile(
+    ComPtr<IDxcBlob> pixel_shader_blob = shader_compiler::compile(
         file_system_t::instance().get_relative_path_wstr(L"shaders/voxel_shader.hlsl").c_str(), L"ps_main", L"ps_6_6");
 
     // Setup depth buffer.
-    Microsoft::WRL::ComPtr<ID3D12Resource> depth_buffer_resource{};
+    ComPtr<ID3D12Resource> depth_buffer_resource{};
     const D3D12_RESOURCE_DESC depth_buffer_resource_desc = {
         .Dimension = D3D12_RESOURCE_DIMENSION::D3D12_RESOURCE_DIMENSION_TEXTURE2D,
         .Width = window.get_width(),
@@ -98,12 +97,13 @@ int main()
 
     const D3D12_CLEAR_VALUE depth_buffer_optimized_clear_value = {
         .Format = DXGI_FORMAT_D32_FLOAT,
-        .DepthStencil = {.Depth = 0.0f, .Stencil = 0u},
+        .DepthStencil = {.Depth = 1.0f, .Stencil = 0u},
     };
 
     throw_if_failed(renderer.m_device->CreateCommittedResource(
         &depth_buffer_heap_properties, D3D12_HEAP_FLAG_NONE, &depth_buffer_resource_desc,
         D3D12_RESOURCE_STATE_DEPTH_WRITE, &depth_buffer_optimized_clear_value, IID_PPV_ARGS(&depth_buffer_resource)));
+    name_d3d12_object(depth_buffer_resource.Get(), L"Depth buffer resource");
 
     // Create DSV.
     D3D12_CPU_DESCRIPTOR_HANDLE dsv_handle =
@@ -126,7 +126,7 @@ int main()
     }
 
     // Create the PSO.
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> pso{};
+    ComPtr<ID3D12PipelineState> pso{};
     const D3D12_GRAPHICS_PIPELINE_STATE_DESC graphics_pso_desc = {
         .pRootSignature = renderer.m_bindless_root_signature.Get(),
         .VS =
@@ -163,7 +163,7 @@ int main()
             {
                 .DepthEnable = TRUE,
                 .DepthWriteMask = D3D12_DEPTH_WRITE_MASK::D3D12_DEPTH_WRITE_MASK_ALL,
-                .DepthFunc = D3D12_COMPARISON_FUNC_GREATER,
+                .DepthFunc = D3D12_COMPARISON_FUNC_LESS,
                 .StencilEnable = FALSE,
             },
         .InputLayout =
@@ -185,13 +185,14 @@ int main()
         .NodeMask = 0u,
     };
     throw_if_failed(renderer.m_device->CreateGraphicsPipelineState(&graphics_pso_desc, IID_PPV_ARGS(&pso)));
+    name_d3d12_object(pso.Get(), L"Voxel PSO");
 
     // Setup the gpu culling compute shader.
-    Microsoft::WRL::ComPtr<IDxcBlob> gpu_culling_compute_shader_blob = shader_compiler::compile(
+    ComPtr<IDxcBlob> gpu_culling_compute_shader_blob = shader_compiler::compile(
         file_system_t::instance().get_relative_path_wstr(L"shaders/gpu_culling_shader.hlsl").c_str(), L"cs_main",
         L"cs_6_6");
 
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> gpu_culling_pso{};
+    ComPtr<ID3D12PipelineState> gpu_culling_pso{};
     const D3D12_COMPUTE_PIPELINE_STATE_DESC gpu_culling_compute_pso_desc = {
         .pRootSignature = renderer.m_bindless_root_signature.Get(),
         .CS =
@@ -204,19 +205,18 @@ int main()
     };
     throw_if_failed(
         renderer.m_device->CreateComputePipelineState(&gpu_culling_compute_pso_desc, IID_PPV_ARGS(&gpu_culling_pso)));
+    name_d3d12_object(gpu_culling_pso.Get(), L"Gpu culling PSO");
 
     // Indirect command struct : command signature must match this struct.
     // Each chunk will have its own IndirectCommand, with 3 arguments. The render resources struct root constants, index
     // buffer view and a draw call.
     struct IndirectCommand
     {
-        VoxelRenderResources render_resources{};
+        interop::voxel_render_resources_t render_resources{};
         D3D12_INDEX_BUFFER_VIEW index_buffer_view{};
         D3D12_DRAW_INDEXED_ARGUMENTS draw_arguments{};
-        float padding;
+        f32 padding;
     };
-
-    printf("Size of indirect command : %zd\n", sizeof(IndirectCommand));
 
     // Create the command signature, which tells the GPU how to interpret the data passed in the ExecuteIndirect call.
     const std::array<D3D12_INDIRECT_ARGUMENT_DESC, 3u> argument_descs = {
@@ -226,7 +226,7 @@ int main()
                 {
                     .RootParameterIndex = 0u,
                     .DestOffsetIn32BitValues = 0u,
-                    .Num32BitValuesToSet = sizeof(VoxelRenderResources) / sizeof(u32),
+                    .Num32BitValuesToSet = sizeof(interop::voxel_render_resources_t) / sizeof(u32),
                 },
         },
         D3D12_INDIRECT_ARGUMENT_DESC{
@@ -237,7 +237,7 @@ int main()
         },
     };
 
-    Microsoft::WRL::ComPtr<ID3D12CommandSignature> command_signature{};
+    ComPtr<ID3D12CommandSignature> command_signature{};
     const D3D12_COMMAND_SIGNATURE_DESC command_signature_desc = {
         .ByteStride = sizeof(IndirectCommand),
         .NumArgumentDescs = argument_descs.size(),
@@ -247,6 +247,7 @@ int main()
 
     throw_if_failed(renderer.m_device->CreateCommandSignature(
         &command_signature_desc, renderer.m_bindless_root_signature.Get(), IID_PPV_ARGS(&command_signature)));
+    name_d3d12_object(command_signature.Get(), L"Command signature");
 
     // Command buffer that will be used to store the indirect command args.
     static constexpr size_t MAX_CHUNKS_TO_BE_DRAWN = 10'00'000;
@@ -282,20 +283,18 @@ int main()
     // Precompute the offset to a chunk index X, using which we can load chunks within the CHUNK_RENDER_DISTANCE volume
     // around the player at any given moment.
     // For precomputation, X is assumed to be zero. These values will be added to the current chunk index.
-    // NOTE : The current player chunk is loaded first, then the chunks 1 distance away, then 2 distance away, etc.
-    // note(rtarun9) : Make this more efficient?
     std::vector<DirectX::XMINT3> chunk_render_distance_offsets = {};
     chunk_render_distance_offsets.push_back(DirectX::XMINT3{0, 0, 0});
 
-    for (i32 z = -1 * ChunkManager::CHUNK_RENDER_DISTANCE; z <= (i32)ChunkManager::CHUNK_RENDER_DISTANCE; z++)
+    for (i32 z = -1 * CHUNK_RENDER_DISTANCE_PER_DIMENSION; z <= (i32)CHUNK_RENDER_DISTANCE_PER_DIMENSION; z++)
     {
-        for (i32 y = -ChunkManager::CHUNK_RENDER_DISTANCE; y <= (i32)ChunkManager::CHUNK_RENDER_DISTANCE; y++)
+        for (i32 y = -CHUNK_RENDER_DISTANCE_PER_DIMENSION; y <= (i32)CHUNK_RENDER_DISTANCE_PER_DIMENSION; y++)
         {
-            for (i32 x = -ChunkManager::CHUNK_RENDER_DISTANCE; x <= (i32)ChunkManager::CHUNK_RENDER_DISTANCE; x++)
+            for (i32 x = -CHUNK_RENDER_DISTANCE_PER_DIMENSION; x <= (i32)CHUNK_RENDER_DISTANCE_PER_DIMENSION; x++)
             {
-                if ((z == -ChunkManager::CHUNK_RENDER_DISTANCE || z == ChunkManager::CHUNK_RENDER_DISTANCE) ||
-                    (y == -ChunkManager::CHUNK_RENDER_DISTANCE || y == ChunkManager::CHUNK_RENDER_DISTANCE) ||
-                    (x == -ChunkManager::CHUNK_RENDER_DISTANCE || x == ChunkManager::CHUNK_RENDER_DISTANCE))
+                if ((z == -CHUNK_RENDER_DISTANCE_PER_DIMENSION || z == CHUNK_RENDER_DISTANCE_PER_DIMENSION) ||
+                    (y == -CHUNK_RENDER_DISTANCE_PER_DIMENSION || y == CHUNK_RENDER_DISTANCE_PER_DIMENSION) ||
+                    (x == -CHUNK_RENDER_DISTANCE_PER_DIMENSION || x == CHUNK_RENDER_DISTANCE_PER_DIMENSION))
                 {
                     chunk_render_distance_offsets.emplace_back(DirectX::XMINT3{x, y, z});
                 }
@@ -308,34 +307,28 @@ int main()
               });
 
     camera_t camera{};
-    const u64 chunk_grid_middle = Chunk::CHUNK_LENGTH * ChunkManager::NUMBER_OF_CHUNKS_PER_DIMENSION / 2u;
-    camera.m_position = {chunk_grid_middle, chunk_grid_middle, chunk_grid_middle, 1.0f};
-
-    std::queue<u64> chunks_to_unload{};
 
     timer_t timer{};
-    float delta_time = 0.0f;
+    f32 delta_time = 0.0f;
 
-    bool setup_chunks{false};
+    b32 setup_chunks{false};
 
     u64 frame_count = 0;
 
-    bool quit{false};
+    b32 quit{false};
     while (!quit)
     {
-        static float near_plane = 1.0f;
-        static float far_plane = 1000000.0f;
+        static f32 near_plane = 1.0f;
+        static f32 far_plane = 10.0f;
 
         // Get the player's current chunk index.
-
-        const DirectX::XMUINT3 current_chunk_3d_index = {
-            (u32)(floor((camera.m_position.x) / Chunk::CHUNK_LENGTH)),
-            (u32)(floor((camera.m_position.y) / Chunk::CHUNK_LENGTH)),
-            (u32)(floor((camera.m_position.z) / Chunk::CHUNK_LENGTH)),
+        const voxel_chunk_position_t current_chunk_3d_index = {
+            (i32)(floor((camera.m_position.x) / voxel_chunk_t::CHUNK_LENGTH)),
+            (i32)(floor((camera.m_position.y) / voxel_chunk_t::CHUNK_LENGTH)),
+            (i32)(floor((camera.m_position.z) / voxel_chunk_t::CHUNK_LENGTH)),
         };
 
-        const u64 current_chunk_index =
-            convert_to_1d(current_chunk_3d_index, ChunkManager::NUMBER_OF_CHUNKS_PER_DIMENSION);
+        chunk_manager.add_chunk_to_setup_stack({0, 0, 0});
 
         if (setup_chunks)
         {
@@ -343,14 +336,13 @@ int main()
             // chunks to load.
             for (const auto &offset : chunk_render_distance_offsets)
             {
-                const DirectX::XMUINT3 chunk_3d_index = {
+                const voxel_chunk_position_t chunk_3d_index = {
                     current_chunk_3d_index.x + offset.x,
                     current_chunk_3d_index.y + offset.y,
                     current_chunk_3d_index.z + offset.z,
                 };
 
-                chunk_manager.add_chunk_to_setup_stack(
-                    convert_to_1d(chunk_3d_index, ChunkManager::NUMBER_OF_CHUNKS_PER_DIMENSION));
+                chunk_manager.add_chunk_to_setup_stack(chunk_3d_index);
             }
         }
 
@@ -391,14 +383,15 @@ int main()
         float height = cos_fov / sin_fov;
         float width = height / window_aspect_ratio;
 
-        const DirectX::XMMATRIX projection_matrix = DirectX::XMMatrixSet(
-            width, 0.0f, 0.0f, 0.0f, 0.0f, height, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, near_plane, 0.0f);
+        // const DirectX::XMMATRIX projection_matrix = DirectX::XMMatrixSet(
+        // width, 0.0f, 0.0f, 0.0f, 0.0f, height, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, near_plane, 0.0f);
 
-        rhi::constant_buffer_t<SceneConstantBuffer> &scene_buffer =
+        rhi::constant_buffer_t<interop::scene_constant_buffer_t> &scene_buffer =
             scene_buffers[renderer.m_swapchain_backbuffer_index];
 
         scene_buffer.m_data.view_matrix = camera.update_and_get_view_matrix(keyboard_state, delta_time);
-        scene_buffer.m_data.projection_matrix = projection_matrix;
+        scene_buffer.m_data.projection_matrix =
+            DirectX::XMMatrixPerspectiveFovLH(DirectX::XMConvertToRadians(45.0f), window_aspect_ratio, 0.1f, 100.0f);
         scene_buffer.m_data.camera_position = camera.m_position;
         scene_buffer.update();
 
@@ -411,7 +404,7 @@ int main()
 
         const auto &swapchain_backbuffer = renderer.m_swapchain_backbuffers[swapchain_index];
 
-        const Microsoft::WRL::ComPtr<ID3D12Resource> swapchain_resource = swapchain_backbuffer.m_resource;
+        const ComPtr<ID3D12Resource> swapchain_resource = swapchain_backbuffer.m_resource;
 
         // Transition the backbuffer from presentation mode to render target mode.
         const D3D12_RESOURCE_BARRIER presentation_to_render_target_barrier = {
@@ -431,28 +424,29 @@ int main()
         // Now, clear the RTV and DSV.
         const float clear_color[4] = {0.1f, 0.1f, 0.1f, 1.0f};
         command_list->ClearRenderTargetView(swapchain_backbuffer.m_rtv_cpu_descriptor_handle, clear_color, 0u, nullptr);
-        command_list->ClearDepthStencilView(dsv_handle, D3D12_CLEAR_FLAG_DEPTH, 0.0f, 0u, 0u, nullptr);
+        command_list->ClearDepthStencilView(dsv_handle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0u, 0u, nullptr);
 
         // Set viewport.
         command_list->RSSetViewports(1u, &viewport);
         command_list->RSSetScissorRects(1u, &scissor_rect);
 
+        /*
         // Evict the chunks that are out of range of render distance.
         // Because evicting chunks seems to have such a high overhead (more specifically freeing allocated id3d12
         // resources) each frame only a certain number of chunks are unloaded.
-        for (const auto &[i, chunk] : chunk_manager.m_loaded_chunks)
+        for (const auto &[chunk_position, chunk] : chunk_manager.m_loaded_chunks)
         {
-            const DirectX::XMUINT3 chunk_index_3d = convert_to_3d(i, ChunkManager::NUMBER_OF_CHUNKS_PER_DIMENSION);
-            if (std::abs((i32)chunk_index_3d.x - (i32)current_chunk_3d_index.x) >
-                    ChunkManager::CHUNK_RENDER_DISTANCE * 8 ||
-                std::abs((i32)chunk_index_3d.y - (i32)current_chunk_3d_index.y) >
-                    ChunkManager::CHUNK_RENDER_DISTANCE * 8 ||
-                std::abs((i32)chunk_index_3d.z - (i32)current_chunk_3d_index.z) >
-                    ChunkManager::CHUNK_RENDER_DISTANCE * 8)
+            if (std::abs((i32)chunk_position.x - (i32)current_chunk_3d_index.x) >
+                    CHUNK_RENDER_DISTANCE_PER_DIMENSION * 8 ||
+                std::abs((i32)chunk_position.y - (i32)current_chunk_3d_index.y) >
+                    CHUNK_RENDER_DISTANCE_PER_DIMENSION * 8 ||
+                std::abs((i32)chunk_position.z - (i32)current_chunk_3d_index.z) >
+                    CHUNK_RENDER_DISTANCE_PER_DIMENSION * 8)
             {
-                chunks_to_unload.push(i);
+                chunks_to_unload.push(chunk_position);
             }
         }
+        */
 
         /*
         size_t unloaded_chunks = 0;
@@ -479,19 +473,21 @@ int main()
         // Setup indirect command vector.
         indirect_command_vector.clear();
         indirect_command_vector.reserve(chunk_manager.m_loaded_chunks.size());
-        for (const auto &[i, chunk] : chunk_manager.m_loaded_chunks)
+        for (const auto &[chunk_position, chunk] : chunk_manager.m_loaded_chunks)
         {
-            const VoxelRenderResources render_resources = {
+            const interop::voxel_render_resources_t render_resources = {
                 .scene_constant_buffer_index = static_cast<u32>(scene_buffer.m_cbv_index),
-                .chunk_constant_buffer_index = static_cast<u32>(chunk_manager.m_chunk_constant_buffers[i].m_cbv_index),
+                .shared_chunk_position_buffer_index = chunk_manager.m_shared_chunk_position_buffer.m_srv_index,
+                .color_buffer_index = chunk.m_color_buffer.m_srv_index,
+                .chunk_offset = {(f32)chunk_position.x, (f32)chunk_position.y, (f32)chunk_position.z},
             };
 
             indirect_command_vector.emplace_back(IndirectCommand{
                 .render_resources = render_resources,
-                .index_buffer_view = chunk_manager.m_chunk_index_buffers[i].m_index_buffer_view,
+                .index_buffer_view = chunk.m_index_buffer.m_index_buffer_view,
                 .draw_arguments =
                     D3D12_DRAW_INDEXED_ARGUMENTS{
-                        .IndexCountPerInstance = (u32)chunk_manager.m_chunk_index_buffers[i].m_indices_count,
+                        .IndexCountPerInstance = (u32)chunk.m_index_buffer.m_indices_count,
                         .InstanceCount = 1u,
                         .StartIndexLocation = 0u,
                         .BaseVertexLocation = 0u,
@@ -528,7 +524,7 @@ int main()
             memcpy(indirect_command_buffer.m_upload_resource_mapped_ptr, indirect_command_vector.data(),
                    indirect_command_vector.size() * sizeof(IndirectCommand));
 
-            GPUCullRenderResources gpu_cull_render_resources = {
+            interop::gpu_cull_render_resources_t gpu_cull_render_resources = {
                 .number_of_chunks = static_cast<u32>(indirect_command_vector.size()),
                 .indirect_command_srv_index = static_cast<u32>(indirect_command_buffer.m_upload_resource_srv_index),
                 .output_command_uav_index = static_cast<u32>(indirect_command_buffer.m_default_resource_uav_index),
@@ -607,14 +603,13 @@ int main()
         ImGui::Text("Delta Time: %f", delta_time);
         ImGui::Text("Camera Position : %f %f %f", camera.m_position.x, camera.m_position.y, camera.m_position.z);
         ImGui::Text("Pitch and Yaw: %f %f", camera.m_pitch, camera.m_yaw);
-        ImGui::Text("Current Index: %zu", current_chunk_index);
         ImGui::Text("Current 3D Index: %zu, %zu, %zu", current_chunk_3d_index.x, current_chunk_3d_index.y,
                     current_chunk_3d_index.z);
         ImGui::Text("Number of loaded chunks: %zu", chunk_manager.m_loaded_chunks.size());
         ImGui::Text("Number of rendered chunks: %zu", indirect_command_vector.size());
         ImGui::Text("Number of copy alloc / list pairs : %zu",
                     renderer.m_copy_queue.m_command_allocator_list_queue.size());
-        ImGui::Text("Voxel edge length : %zu", Voxel::EDGE_LENGTH);
+        ImGui::Text("Voxel edge length : %zu", voxel_t::EDGE_LENGTH);
         ImGui::Text("Number of threads in pool : %zu", chunk_manager.m_thread_pool.get_thread_count());
         ImGui::Text("Number of queued threads in pool : %zu", chunk_manager.m_thread_pool.get_tasks_queued());
 
