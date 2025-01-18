@@ -17,7 +17,7 @@ constexpr bool VX_DEBUG_MODE = false;
 
 #else
 
-#define ASSERT(x)
+#define ASSERT(x) x
 #endif
 
 // Windows includes.

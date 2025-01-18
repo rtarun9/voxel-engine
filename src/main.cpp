@@ -9,9 +9,11 @@
 
 #include "shaders/interop/render_resources.hlsli"
 
+/*
 #include "imgui.h"
 #include "imgui_impl_dx12.h"
 #include "imgui_impl_win32.h"
+*/
 
 int main()
 {
@@ -20,6 +22,7 @@ int main()
     const window_t window{};
     rhi::renderer_t renderer(window.get_handle(), window.get_width(), window.get_height());
 
+    /*
     // Setup imgui.
     {
         IMGUI_CHECKVERSION();
@@ -39,6 +42,7 @@ int main()
                             cbv_srv_uav_descriptor_handle.m_cpu_descriptor_handle,
                             cbv_srv_uav_descriptor_handle.m_gpu_descriptor_handle);
     }
+    */
 
     voxel_chunk_manager_t chunk_manager{renderer};
 
@@ -600,6 +604,7 @@ int main()
         // Render UI.
         // Start the Dear ImGui frame
 
+        /*
         ImGui_ImplDX12_NewFrame();
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
@@ -625,7 +630,6 @@ int main()
         ImGui::Text("Number of queued threads in pool : %zu", chunk_manager.m_thread_pool.get_tasks_queued());
         ImGui::Text("[TEMP] %d", keyboard_state['W'] & 0b1000'0000);
         ImGui::Text("[TEMP] %d", keyboard_state['W']);
-        printf("%d ", keyboard_state['W']);
 
         ImGui::ShowMetricsWindow();
         ImGui::End();
@@ -633,6 +637,7 @@ int main()
         command_list->SetDescriptorHeaps(1u, shader_visible_descriptor_heaps);
         ImGui::Render();
         ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), command_list.Get());
+        */
 
         // Now, transition back to presentation mode.
         const D3D12_RESOURCE_BARRIER render_target_to_presentation_barrier = {
@@ -668,10 +673,6 @@ int main()
     }
 
     // Cleanup
-    ImGui_ImplDX12_Shutdown();
-    ImGui_ImplWin32_Shutdown();
-    ImGui::DestroyContext();
-
     renderer.m_direct_queue.flush_queue();
     renderer.m_copy_queue.flush_queue();
 
