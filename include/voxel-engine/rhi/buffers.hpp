@@ -35,9 +35,6 @@ struct index_buffer_t
     D3D12_INDEX_BUFFER_VIEW m_index_buffer_view{};
 };
 
-// The command buffer is a bit different. It internally has two resources, a default and upload heap.
-// the update function is not similar to constant buffer, as here data is copied from the upload to default resource.
-// The command buffer contains its ID3D12Resource directly since the same command buffer is used for the entire engine.
 struct command_buffer_t
 {
     ComPtr<ID3D12Resource> m_default_resource{};

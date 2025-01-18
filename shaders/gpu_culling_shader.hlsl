@@ -21,7 +21,9 @@ ConstantBuffer<interop::gpu_cull_render_resources_t> render_resources : register
         {
             float4 clip_space_coords =
                 mul(scene_constant_buffer.aabb_vertices[i] +
-                        float4(indirect_command[dispatch_thread_id].voxel_render_resources.chunk_offset, 1.0f),
+                        float4(indirect_command[dispatch_thread_id].voxel_render_resources.chunk_position *
+                                   scene_constant_buffer.voxel_chunk_length,
+                               1.0f),
                     mul(scene_constant_buffer.view_matrix, scene_constant_buffer.projection_matrix));
 
             clip_space_coords.x /= clip_space_coords.w;

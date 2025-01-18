@@ -33,6 +33,7 @@ static LRESULT CALLBACK window_proc(HWND window_handle, UINT message, WPARAM w_p
             PostQuitMessage(0);
             return 0;
         }
+        auto x = 3;
     }
     break;
     }

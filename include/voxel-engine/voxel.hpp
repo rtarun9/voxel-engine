@@ -10,7 +10,7 @@
 // position' and has a edge length as specified in the class below.
 struct voxel_t
 {
-    static constexpr u32 EDGE_LENGTH{1u};
+    static constexpr u32 EDGE_LENGTH{64u};
     b32 m_active : 1 = 1;
 };
 
@@ -23,6 +23,11 @@ struct voxel_chunk_position_t
     b32 operator==(const voxel_chunk_position_t &other) const
     {
         return x == other.x && y == other.y && z == other.z;
+    }
+
+    std::wstring to_wstring() const
+    {
+        return std::to_wstring(x) + L"," + std::to_wstring(y) + L"," + std::to_wstring(z);
     }
 };
 

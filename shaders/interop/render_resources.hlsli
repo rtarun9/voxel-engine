@@ -3,7 +3,7 @@
 
 #ifdef __cplusplus
 
-#define int3 DirectX::XMFLOAT3
+#define int3 DirectX::XMINT3
 #define float4x4 DirectX::XMMATRIX
 #define float4 DirectX::XMFLOAT4
 #define float3 DirectX::XMFLOAT3
@@ -21,7 +21,7 @@
 // clang-format off
 namespace interop
 {
-#define NUMBER_OF_VOXELS_PER_DIMENSION_IN_CHUNK  8u
+#define NUMBER_OF_VOXELS_PER_DIMENSION_IN_CHUNK  1u
 #define NUMBER_OF_VOXELS_PER_CHUNK (NUMBER_OF_VOXELS_PER_DIMENSION_IN_CHUNK * NUMBER_OF_VOXELS_PER_DIMENSION_IN_CHUNK * NUMBER_OF_VOXELS_PER_DIMENSION_IN_CHUNK)
 
 // NOTE: These variables define how many chunks can be loaded at a given particular instant.
@@ -40,7 +40,7 @@ namespace interop
         uint scene_constant_buffer_index;
         uint shared_chunk_position_buffer_index;
         uint color_buffer_index;
-        int3 chunk_offset;
+        int3 chunk_position;
     };
 
 ConstantBufferStruct
@@ -52,6 +52,7 @@ scene_constant_buffer_t
         // note(rtarun9) : Putting this here because scene depends on chunk edge length, which determines the AABB vertices.
         float4 aabb_vertices[8];
         float4 camera_position;
+        float voxel_chunk_length;
     };
 
 ConstantBufferStruct

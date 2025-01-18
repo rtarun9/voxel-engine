@@ -306,6 +306,11 @@ int main()
                   return a.x * a.x + a.y * a.y + a.z * a.z < b.x * b.x + b.y * b.y + b.z * b.z;
               });
 
+    for (i32 z = -5; z <= 5; ++z)
+    {
+
+        chunk_manager.add_chunk_to_setup_stack({0, 0, z});
+    }
     camera_t camera{};
 
     timer_t timer{};
@@ -328,12 +333,9 @@ int main()
             (i32)(floor((camera.m_position.z) / voxel_chunk_t::CHUNK_LENGTH)),
         };
 
-        chunk_manager.add_chunk_to_setup_stack({0, 0, 0});
-
         if (setup_chunks)
         {
-            // Load chunks around the player (ChunkManager::CHUNK_RENDER_DISTANCE) determines how many of these
-            // chunks to load.
+            // Load chunks around the player.
             for (const auto &offset : chunk_render_distance_offsets)
             {
                 const voxel_chunk_position_t chunk_3d_index = {
@@ -342,7 +344,7 @@ int main()
                     current_chunk_3d_index.z + offset.z,
                 };
 
-                chunk_manager.add_chunk_to_setup_stack(chunk_3d_index);
+                // chunk_manager.add_chunk_to_setup_stack(current_chunk_3d_index);
             }
         }
 
@@ -357,6 +359,14 @@ int main()
             DispatchMessageA(&message);
         }
 
+        if (message.message == WM_KEYDOWN)
+        {
+            // TODO: HUH?
+            if (message.wParam == 'W')
+            {
+                auto x = 3;
+            }
+        }
         if (message.message == WM_QUIT)
         {
             quit = true;
@@ -391,8 +401,9 @@ int main()
 
         scene_buffer.m_data.view_matrix = camera.update_and_get_view_matrix(keyboard_state, delta_time);
         scene_buffer.m_data.projection_matrix =
-            DirectX::XMMatrixPerspectiveFovLH(DirectX::XMConvertToRadians(45.0f), window_aspect_ratio, 0.1f, 100.0f);
+            DirectX::XMMatrixPerspectiveFovLH(DirectX::XMConvertToRadians(45.0f), window_aspect_ratio, 0.1f, 10000.0f);
         scene_buffer.m_data.camera_position = camera.m_position;
+        scene_buffer.m_data.voxel_chunk_length = voxel_chunk_t::CHUNK_LENGTH;
         scene_buffer.update();
 
         const auto &swapchain_index = renderer.m_swapchain_backbuffer_index;
@@ -476,10 +487,10 @@ int main()
         for (const auto &[chunk_position, chunk] : chunk_manager.m_loaded_chunks)
         {
             const interop::voxel_render_resources_t render_resources = {
-                .scene_constant_buffer_index = static_cast<u32>(scene_buffer.m_cbv_index),
+                .scene_constant_buffer_index = scene_buffer.m_cbv_index,
                 .shared_chunk_position_buffer_index = chunk_manager.m_shared_chunk_position_buffer.m_srv_index,
                 .color_buffer_index = chunk.m_color_buffer.m_srv_index,
-                .chunk_offset = {(f32)chunk_position.x, (f32)chunk_position.y, (f32)chunk_position.z},
+                .chunk_position = {chunk_position.x, chunk_position.y, chunk_position.z},
             };
 
             indirect_command_vector.emplace_back(IndirectCommand{
@@ -603,7 +614,7 @@ int main()
         ImGui::Text("Delta Time: %f", delta_time);
         ImGui::Text("Camera Position : %f %f %f", camera.m_position.x, camera.m_position.y, camera.m_position.z);
         ImGui::Text("Pitch and Yaw: %f %f", camera.m_pitch, camera.m_yaw);
-        ImGui::Text("Current 3D Index: %zu, %zu, %zu", current_chunk_3d_index.x, current_chunk_3d_index.y,
+        ImGui::Text("Current 3D Index: %d, %d, %d", current_chunk_3d_index.x, current_chunk_3d_index.y,
                     current_chunk_3d_index.z);
         ImGui::Text("Number of loaded chunks: %zu", chunk_manager.m_loaded_chunks.size());
         ImGui::Text("Number of rendered chunks: %zu", indirect_command_vector.size());
@@ -612,6 +623,9 @@ int main()
         ImGui::Text("Voxel edge length : %zu", voxel_t::EDGE_LENGTH);
         ImGui::Text("Number of threads in pool : %zu", chunk_manager.m_thread_pool.get_thread_count());
         ImGui::Text("Number of queued threads in pool : %zu", chunk_manager.m_thread_pool.get_tasks_queued());
+        ImGui::Text("[TEMP] %d", keyboard_state['W'] & 0b1000'0000);
+        ImGui::Text("[TEMP] %d", keyboard_state['W']);
+        printf("%d ", keyboard_state['W']);
 
         ImGui::ShowMetricsWindow();
         ImGui::End();
