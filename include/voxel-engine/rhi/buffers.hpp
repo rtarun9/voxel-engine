@@ -29,6 +29,22 @@ template <typename T> struct constant_buffer_t
     }
 };
 
+struct upload_structured_buffer_t
+{
+    structured_buffer_t m_structured_buffer{};
+
+    ComPtr<ID3D12Resource> m_upload_resource{};
+    u8 *m_upload_resource_mapped_ptr{};
+
+    // TODO: Do the copy resource here?
+    inline void update(const void *data, const size_t size_in_bytes, const size_t offset_in_bytes,
+                       ID3D12GraphicsCommandList *const command_list) const
+    {
+        assert(m_upload_resource_mapped_ptr != nullptr);
+        memcpy((void *)((u8 *)m_upload_resource_mapped_ptr + offset_in_bytes), (void *)(data), size_in_bytes);
+    }
+};
+
 struct index_buffer_t
 {
     ComPtr<ID3D12Resource> m_resource{};

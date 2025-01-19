@@ -292,15 +292,20 @@ int main()
     std::vector<DirectX::XMINT3> chunk_render_distance_offsets = {};
     chunk_render_distance_offsets.push_back(DirectX::XMINT3{0, 0, 0});
 
-    for (i32 z = -1 * CHUNK_RENDER_DISTANCE_PER_DIMENSION; z <= (i32)CHUNK_RENDER_DISTANCE_PER_DIMENSION; z++)
+    for (i32 z = -1 * CHUNK_RENDER_DISTANCE_PER_DIMENSION_EXTENT; z <= (i32)CHUNK_RENDER_DISTANCE_PER_DIMENSION_EXTENT;
+         z++)
     {
-        for (i32 y = -CHUNK_RENDER_DISTANCE_PER_DIMENSION; y <= (i32)CHUNK_RENDER_DISTANCE_PER_DIMENSION; y++)
+        for (i32 y = -CHUNK_RENDER_DISTANCE_PER_DIMENSION_EXTENT; y <= (i32)CHUNK_RENDER_DISTANCE_PER_DIMENSION_EXTENT;
+             y++)
         {
-            for (i32 x = -CHUNK_RENDER_DISTANCE_PER_DIMENSION; x <= (i32)CHUNK_RENDER_DISTANCE_PER_DIMENSION; x++)
+            for (i32 x = -CHUNK_RENDER_DISTANCE_PER_DIMENSION_EXTENT;
+                 x <= (i32)CHUNK_RENDER_DISTANCE_PER_DIMENSION_EXTENT; x++)
             {
-                if ((z == -CHUNK_RENDER_DISTANCE_PER_DIMENSION || z == CHUNK_RENDER_DISTANCE_PER_DIMENSION) ||
-                    (y == -CHUNK_RENDER_DISTANCE_PER_DIMENSION || y == CHUNK_RENDER_DISTANCE_PER_DIMENSION) ||
-                    (x == -CHUNK_RENDER_DISTANCE_PER_DIMENSION || x == CHUNK_RENDER_DISTANCE_PER_DIMENSION))
+                if ((z == -CHUNK_RENDER_DISTANCE_PER_DIMENSION_EXTENT ||
+                     z == CHUNK_RENDER_DISTANCE_PER_DIMENSION_EXTENT) ||
+                    (y == -CHUNK_RENDER_DISTANCE_PER_DIMENSION_EXTENT ||
+                     y == CHUNK_RENDER_DISTANCE_PER_DIMENSION_EXTENT) ||
+                    (x == -CHUNK_RENDER_DISTANCE_PER_DIMENSION_EXTENT || x == CHUNK_RENDER_DISTANCE_PER_DIMENSION))
                 {
                     chunk_render_distance_offsets.emplace_back(DirectX::XMINT3{x, y, z});
                 }
@@ -332,6 +337,22 @@ int main()
             (i32)(floor((camera.m_position.y) / voxel_chunk_t::CHUNK_LENGTH)),
             (i32)(floor((camera.m_position.z) / voxel_chunk_t::CHUNK_LENGTH)),
         };
+
+        // Evict the chunks that are out of range of render distance.
+        std::erase_if(chunk_manager.m_loaded_chunks, [current_chunk_3d_index](
+                                                         const std::pair<const voxel_chunk_position_t, voxel_chunk_t>
+                                                             &key_value_pair) {
+            const auto &chunk = key_value_pair.second;
+
+            if ((std::abs(chunk.m_chunk_position.x - current_chunk_3d_index.x) > CHUNK_RENDER_DISTANCE_PER_DIMENSION) ||
+                (std::abs(chunk.m_chunk_position.y - current_chunk_3d_index.y) > CHUNK_RENDER_DISTANCE_PER_DIMENSION) ||
+                (std::abs(chunk.m_chunk_position.z - current_chunk_3d_index.z) > CHUNK_RENDER_DISTANCE_PER_DIMENSION))
+            {
+                return true;
+            }
+
+            return false;
+        });
 
         if (setup_chunks)
         {

@@ -27,7 +27,10 @@ namespace interop
 
 // NOTE: These variables define how many chunks can be loaded at a given particular instant.
 // If a new chunk is being added, it will replace an older chunk.
-#define CHUNK_RENDER_DISTANCE_PER_DIMENSION 6
+ // Why the *2 + 1? Because -x to x includes 0!!
+#define CHUNK_RENDER_DISTANCE_PER_DIMENSION_EXTENT 6
+#define CHUNK_RENDER_DISTANCE_PER_DIMENSION (CHUNK_RENDER_DISTANCE_PER_DIMENSION_EXTENT* 2 + 1)
+#define MAX_NUMBER_OF_LOADED_CHUNKS (CHUNK_RENDER_DISTANCE_PER_DIMENSION  * CHUNK_RENDER_DISTANCE_PER_DIMENSION * CHUNK_RENDER_DISTANCE_PER_DIMENSION)
     
     // NOTE: Until it becomes a necessity, I will be storing non-indices in render resources for testing purposes. This is simply because to prevent creation of 'micro' constant buffers.
     struct triangle_render_resources_t

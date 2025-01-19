@@ -38,6 +38,9 @@ struct renderer_t
                                                                             const u32 num_elements,
                                                                             const std::wstring_view buffer_name);
 
+    upload_structured_buffer_t create_upload_structured_buffer(const size_t stride, const u32 num_elements,
+                                                               const std::wstring_view buffer_name);
+
     command_buffer_t create_command_buffer(const size_t stride, const size_t max_number_of_elements,
                                            const std::wstring_view buffer_name);
 
