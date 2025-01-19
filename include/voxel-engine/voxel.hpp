@@ -126,5 +126,5 @@ struct voxel_chunk_manager_t
     rhi::structured_buffer_t m_shared_chunk_position_buffer{};
 
     // Threadpool from which std::futures are obtained.
-    thread_pool_t m_thread_pool{6u};
+    thread_pool_t m_thread_pool{};
 };
