@@ -2,7 +2,7 @@
 
 #include "shaders/interop/render_resources.hlsli"
 
-voxel_chunk_t::voxel_chunk_t() : m_color_buffer_start_index_location(0), m_index_buffer_start_index_location(0)
+voxel_chunk_t::voxel_chunk_t()
 {
     m_voxels = std::make_unique<voxel_t[]>(NUMBER_OF_VOXELS_PER_CHUNK);
 }
@@ -81,6 +81,14 @@ voxel_chunk_manager_t::voxel_chunk_manager_t(rhi::renderer_t &renderer)
 
     m_color_buffer = renderer.create_upload_structured_buffer(sizeof(DirectX::XMFLOAT3), MAX_NUMBER_OF_LOADED_CHUNKS,
                                                               L"Chunk manager index buffer");
+
+    for (size_t i = 0; i < MAX_NUMBER_OF_LOADED_CHUNKS; i++)
+    {
+        m_chunk_manager_buffer_offset_queue.push(chunk_manager_buffer_offset_t{
+            .m_color_buffer_start_index_location = i,
+            .m_index_buffer_start_index_location = 36u * NUMBER_OF_VOXELS_PER_CHUNK * i,
+        });
+    }
 }
 
 void voxel_chunk_manager_t::add_chunk_to_setup_stack(const voxel_chunk_position_t index)
@@ -304,6 +312,15 @@ void voxel_chunk_manager_t::transfer_chunks_from_setup_to_loaded_state()
             m_chunk_indices_that_are_being_setup.erase(chunk_index);
 
             m_loaded_chunks[chunk_index] = std::move(chunk_to_load);
+
+            const chunk_manager_buffer_offset_t buffer_offsets = m_chunk_manager_buffer_offset_queue.front();
+            m_chunk_manager_buffer_offset_queue.pop();
+
+            m_loaded_chunks[chunk_index].m_color_buffer_start_index_location =
+                buffer_offsets.m_color_buffer_start_index_location;
+
+            m_loaded_chunks[chunk_index].m_index_buffer_start_index_location =
+                buffer_offsets.m_index_buffer_start_index_location;
         }
         break;
         }

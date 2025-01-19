@@ -79,7 +79,6 @@ struct voxel_chunk_t
 // The class contains several hashmaps, for which the chunk position acts as a index.
 struct voxel_chunk_manager_t
 {
-    // Constructor creates the shared position buffer.
     explicit voxel_chunk_manager_t(rhi::renderer_t &renderer);
 
   public:
@@ -114,6 +113,16 @@ struct voxel_chunk_manager_t
 
     rhi::upload_structured_buffer_t m_color_buffer{};
     rhi::upload_structured_buffer_t m_index_buffer{};
+
+    // A queue of offsets into the chunk managers's color and index buffer.
+    // To be used when new chunks are being created. When old chunks are deleted, their values must be passed into this.
+    struct chunk_manager_buffer_offset_t
+    {
+        size_t m_color_buffer_start_index_location{};
+        size_t m_index_buffer_start_index_location{};
+    };
+
+    std::queue<chunk_manager_buffer_offset_t> m_chunk_manager_buffer_offset_queue{};
 
     // Threadpool from which std::futures are obtained.
     thread_pool_t m_thread_pool{};

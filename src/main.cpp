@@ -211,7 +211,6 @@ int main()
     struct indirect_command_t
     {
         interop::voxel_render_resources_t render_resources{};
-        D3D12_INDEX_BUFFER_VIEW index_buffer_view{};
         D3D12_DRAW_INDEXED_ARGUMENTS draw_arguments{};
     };
 #pragma pack(pop)
@@ -224,7 +223,7 @@ int main()
     printf("Size of voxel render resources: %d\n", (i32)sizeof(interop::voxel_render_resources_t));
 
     // Create the command signature, which tells the GPU how to interpret the data passed in the ExecuteIndirect call.
-    const std::array<D3D12_INDIRECT_ARGUMENT_DESC, 3u> argument_descs = {
+    const std::array<D3D12_INDIRECT_ARGUMENT_DESC, 2u> argument_descs = {
         D3D12_INDIRECT_ARGUMENT_DESC{
             .Type = D3D12_INDIRECT_ARGUMENT_TYPE_CONSTANT,
             .Constant =
@@ -233,9 +232,6 @@ int main()
                     .DestOffsetIn32BitValues = 0u,
                     .Num32BitValuesToSet = sizeof(interop::voxel_render_resources_t) / sizeof(u32),
                 },
-        },
-        D3D12_INDIRECT_ARGUMENT_DESC{
-            .Type = D3D12_INDIRECT_ARGUMENT_TYPE_INDEX_BUFFER_VIEW,
         },
         D3D12_INDIRECT_ARGUMENT_DESC{
             .Type = D3D12_INDIRECT_ARGUMENT_TYPE_DRAW_INDEXED,
@@ -338,6 +334,7 @@ int main()
             (i32)(floor((camera.m_position.z) / voxel_chunk_t::CHUNK_LENGTH)),
         };
 
+        /*
         // Evict the chunks that are out of range of render distance.
         std::erase_if(chunk_manager.m_loaded_chunks, [current_chunk_3d_index](
                                                          const std::pair<const voxel_chunk_position_t, voxel_chunk_t>
@@ -353,6 +350,7 @@ int main()
 
             return false;
         });
+        */
 
         if (setup_chunks)
         {
@@ -388,7 +386,7 @@ int main()
         b32 get_keyboard_state_result = GetKeyboardState(keyboard_state);
         assert(get_keyboard_state_result);
 
-        chunk_manager.transfer_chunks_from_setup_to_loaded_state(renderer.m_copy_queue.m_fence->GetCompletedValue());
+        chunk_manager.transfer_chunks_from_setup_to_loaded_state();
 
         const float window_aspect_ratio = static_cast<float>(window.get_width()) / window.get_height();
 
@@ -455,25 +453,33 @@ int main()
         command_list->RSSetViewports(1u, &viewport);
         command_list->RSSetScissorRects(1u, &scissor_rect);
 
+        // Setup the chunk manager buffer data vectors.
+        std::vector<DirectX::XMFLOAT3> chunk_manager_color_buffer_data{};
+        std::vector<u16> chunk_manager_index_buffer_data{};
+
         // Setup indirect command vector.
         indirect_command_vector.clear();
         for (const auto &[chunk_position, chunk] : chunk_manager.m_loaded_chunks)
         {
+            chunk_manager_color_buffer_data.emplace_back(chunk.m_color_buffer_data);
+            chunk_manager_index_buffer_data.insert(chunk_manager_index_buffer_data.end(),
+                                                   chunk.m_index_buffer_data.begin(), chunk.m_index_buffer_data.end());
+
             const interop::voxel_render_resources_t render_resources = {
                 .scene_constant_buffer_index = scene_buffer.m_cbv_index,
                 .shared_chunk_position_buffer_index = chunk_manager.m_shared_chunk_position_buffer.m_srv_index,
-                .color_buffer_index = chunk.m_color_buffer.m_srv_index,
+                .color_buffer_index = chunk_manager.m_color_buffer.m_structured_buffer.m_srv_index,
+                .color_start_location = (u32)chunk.m_color_buffer_start_index_location,
                 .chunk_position = {chunk_position.x, chunk_position.y, chunk_position.z},
             };
 
             indirect_command_vector.emplace_back(indirect_command_t{
                 .render_resources = render_resources,
-                .index_buffer_view = chunk.m_index_buffer.m_index_buffer_view,
                 .draw_arguments =
                     D3D12_DRAW_INDEXED_ARGUMENTS{
-                        .IndexCountPerInstance = (u32)chunk.m_index_buffer.m_indices_count,
+                        .IndexCountPerInstance = (u32)chunk.m_index_buffer_data.size(),
                         .InstanceCount = 1u,
-                        .StartIndexLocation = 0u,
+                        .StartIndexLocation = (u32)chunk.m_index_buffer_start_index_location,
                         .BaseVertexLocation = 0u,
                         .StartInstanceLocation = 0u,
                     },
@@ -492,6 +498,19 @@ int main()
         // Run the culling compute shader, followed by voxel rendering shader.
         if (!indirect_command_vector.empty())
         {
+
+            chunk_manager.m_color_buffer.update(chunk_manager_color_buffer_data.data(),
+                                                chunk_manager_color_buffer_data.size() * sizeof(DirectX::XMFLOAT3), 0u);
+
+            chunk_manager.m_index_buffer.update(chunk_manager_index_buffer_data.data(),
+                                                chunk_manager_index_buffer_data.size() * sizeof(u16), 0u);
+
+            command_list->CopyResource(chunk_manager.m_color_buffer.m_structured_buffer.m_resource.Get(),
+                                       chunk_manager.m_color_buffer.m_upload_resource.Get());
+
+            command_list->CopyResource(chunk_manager.m_index_buffer.m_structured_buffer.m_resource.Get(),
+                                       chunk_manager.m_index_buffer.m_upload_resource.Get());
+
             const D3D12_RESOURCE_BARRIER indirect_argument_to_copy_dest_state = {
                 .Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
                 .Flags = D3D12_RESOURCE_BARRIER_FLAGS::D3D12_RESOURCE_BARRIER_FLAG_NONE,
@@ -564,6 +583,13 @@ int main()
             command_list->SetPipelineState(pso.Get());
 
             command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+            D3D12_INDEX_BUFFER_VIEW index_buffer_view = {
+                .BufferLocation = chunk_manager.m_index_buffer.m_structured_buffer.m_resource->GetGPUVirtualAddress(),
+                .SizeInBytes = sizeof(u16) * 36u * NUMBER_OF_VOXELS_PER_CHUNK * MAX_NUMBER_OF_LOADED_CHUNKS,
+                .Format = DXGI_FORMAT_R16_UINT,
+            };
+            command_list->IASetIndexBuffer(&index_buffer_view);
 
             command_list->ExecuteIndirect(
                 command_signature.Get(), MAX_CHUNKS_TO_BE_DRAWN, indirect_command_buffer.m_default_resource.Get(), 0u,
