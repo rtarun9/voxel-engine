@@ -160,6 +160,8 @@ renderer_t::renderer_t(const HWND window_handle, const u32 window_width, const u
 renderer_t::index_buffer_with_intermediate_resource_t renderer_t::create_index_buffer(
     const void *data, const size_t stride, const u32 indices_count, const std::wstring_view buffer_name)
 {
+    assert(data);
+
     index_buffer_with_intermediate_resource_t result = {};
 
     const size_t size_in_bytes = stride * indices_count;
@@ -239,6 +241,8 @@ renderer_t::index_buffer_with_intermediate_resource_t renderer_t::create_index_b
 renderer_t::structured_buffer_with_intermediate_resource_t renderer_t::create_structured_buffer(
     const void *data, const size_t stride, const u32 num_elements, const std::wstring_view buffer_name)
 {
+    assert(data);
+
     const size_t size_in_bytes = stride * num_elements;
 
     u8 *resource_ptr{};
@@ -426,6 +430,8 @@ command_buffer_t renderer_t::create_command_buffer(const size_t stride, const si
 
 u32 renderer_t::create_constant_buffer_view(ID3D12Resource *const resource, const size_t size)
 {
+    assert(resource);
+
     const D3D12_CPU_DESCRIPTOR_HANDLE handle =
         m_cbv_srv_uav_descriptor_heap.m_current_descriptor_handle.m_cpu_descriptor_handle;
 
@@ -446,6 +452,8 @@ u32 renderer_t::create_constant_buffer_view(ID3D12Resource *const resource, cons
 u32 renderer_t::create_shader_resource_view(ID3D12Resource *const resource, const size_t stride,
                                             const size_t num_elements)
 {
+    assert(resource);
+
     const D3D12_CPU_DESCRIPTOR_HANDLE handle =
         m_cbv_srv_uav_descriptor_heap.m_current_descriptor_handle.m_cpu_descriptor_handle;
 
@@ -473,6 +481,8 @@ u32 renderer_t::create_unordered_access_view(ID3D12Resource *const resource, con
                                              const size_t num_elements, const bool use_counter,
                                              const size_t counter_offset)
 {
+    assert(resource);
+
     const D3D12_CPU_DESCRIPTOR_HANDLE handle =
         m_cbv_srv_uav_descriptor_heap.m_current_descriptor_handle.m_cpu_descriptor_handle;
 

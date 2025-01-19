@@ -4,6 +4,8 @@ namespace rhi
 {
 void direct_command_queue_t::create(ID3D12Device *const device)
 {
+    assert(device != nullptr);
+
     const D3D12_COMMAND_QUEUE_DESC command_queue_desc = {
         .Type = D3D12_COMMAND_LIST_TYPE_DIRECT,
         .Priority = D3D12_COMMAND_QUEUE_PRIORITY_NORMAL,
@@ -80,6 +82,8 @@ void direct_command_queue_t::flush_queue()
 
 void copy_command_queue_t::create(ID3D12Device *const device)
 {
+    assert(device);
+
     const D3D12_COMMAND_QUEUE_DESC command_queue_desc = {
         .Type = D3D12_COMMAND_LIST_TYPE_COPY,
         .Priority = D3D12_COMMAND_QUEUE_PRIORITY_NORMAL,
@@ -97,6 +101,8 @@ void copy_command_queue_t::create(ID3D12Device *const device)
 copy_command_queue_t::command_allocator_list_pair_t copy_command_queue_t::get_command_allocator_list_pair(
     ID3D12Device *const device)
 {
+    assert(device);
+
     if (!m_command_allocator_list_queue.empty() &&
         m_command_allocator_list_queue.front().m_fence_value <= m_fence->GetCompletedValue())
     {

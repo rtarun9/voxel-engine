@@ -376,7 +376,7 @@ int main()
             quit = true;
         }
 
-        ASSERT((GetKeyboardState(keyboard_state) == TRUE));
+        GetKeyboardState(keyboard_state);
 
         chunk_manager.transfer_chunks_from_setup_to_loaded_state(renderer.m_copy_queue.m_fence->GetCompletedValue());
 

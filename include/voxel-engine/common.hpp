@@ -42,6 +42,8 @@ inline void name_d3d12_object(ID3D12Object *const object, const std::wstring_vie
 
 inline size_t round_up_to_multiple(const size_t a, const size_t multiple)
 {
+    assert(multiple != 0);
+
     if (a % multiple == 0)
     {
         return a;

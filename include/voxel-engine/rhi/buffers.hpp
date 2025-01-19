@@ -24,6 +24,7 @@ template <typename T> struct constant_buffer_t
 
     inline void update() const
     {
+        assert(m_resource_mapped_ptr != nullptr);
         memcpy(m_resource_mapped_ptr, (void *)&m_data, sizeof(T));
     }
 };

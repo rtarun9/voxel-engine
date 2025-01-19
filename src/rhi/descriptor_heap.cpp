@@ -15,6 +15,8 @@ void descriptor_heap_t::create(ID3D12Device *const device, const u32 num_descrip
                                const D3D12_DESCRIPTOR_HEAP_TYPE descriptor_heap_type,
                                const D3D12_DESCRIPTOR_HEAP_FLAGS descriptor_heap_flags, const std::wstring_view name)
 {
+    assert(device);
+
     const D3D12_DESCRIPTOR_HEAP_DESC descriptor_heap_desc = {
         .Type = descriptor_heap_type,
         .NumDescriptors = num_descriptors,

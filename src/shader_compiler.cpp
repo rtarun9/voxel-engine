@@ -9,6 +9,10 @@ ComPtr<IDxcIncludeHandler> g_include_handler{};
 
 IDxcBlob *compile(const wchar_t *const file_path, const wchar_t *const entry_point, const wchar_t *const target)
 {
+    assert(file_path);
+    assert(entry_point);
+    assert(target);
+
     // Check if the compiler objects has been created.
     if (!g_utils)
     {
