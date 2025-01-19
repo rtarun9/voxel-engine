@@ -9,11 +9,9 @@
 
 #include "shaders/interop/render_resources.hlsli"
 
-/*
 #include "imgui.h"
 #include "imgui_impl_dx12.h"
 #include "imgui_impl_win32.h"
-*/
 
 int main()
 {
@@ -22,7 +20,6 @@ int main()
     const window_t window{};
     rhi::renderer_t renderer(window.get_handle(), window.get_width(), window.get_height());
 
-    /*
     // Setup imgui.
     {
         IMGUI_CHECKVERSION();
@@ -31,9 +28,7 @@ int main()
         ImGui::StyleColorsDark();
 
         rhi::descriptor_handle_t cbv_srv_uav_descriptor_handle =
-            renderer.m_cbv_srv_uav_descriptor_heap.m_current_descriptor_handle;
-
-        renderer.m_cbv_srv_uav_descriptor_heap.offset_current_descriptor_handle();
+            renderer.m_cbv_srv_uav_descriptor_heap.get_then_offset_current_descriptor_handle();
 
         // Setup platform / renderer backend.
         ImGui_ImplWin32_Init(window.get_handle());
@@ -42,7 +37,6 @@ int main()
                             cbv_srv_uav_descriptor_handle.m_cpu_descriptor_handle,
                             cbv_srv_uav_descriptor_handle.m_gpu_descriptor_handle);
     }
-    */
 
     voxel_chunk_manager_t chunk_manager{renderer};
 
@@ -101,7 +95,7 @@ int main()
 
     const D3D12_CLEAR_VALUE depth_buffer_optimized_clear_value = {
         .Format = DXGI_FORMAT_D32_FLOAT,
-        .DepthStencil = {.Depth = 1.0f, .Stencil = 0u},
+        .DepthStencil = {.Depth = 0.0f, .Stencil = 0u},
     };
 
     throw_if_failed(renderer.m_device->CreateCommittedResource(
@@ -165,7 +159,7 @@ int main()
             {
                 .DepthEnable = TRUE,
                 .DepthWriteMask = D3D12_DEPTH_WRITE_MASK::D3D12_DEPTH_WRITE_MASK_ALL,
-                .DepthFunc = D3D12_COMPARISON_FUNC_LESS,
+                .DepthFunc = D3D12_COMPARISON_FUNC_GREATER,
                 .StencilEnable = FALSE,
             },
         .InputLayout =
@@ -331,7 +325,6 @@ int main()
     while (!quit)
     {
         static f32 near_plane = 1.0f;
-        static f32 far_plane = 10.0f;
 
         // Get the player's current chunk index.
         const voxel_chunk_position_t current_chunk_3d_index = {
@@ -340,7 +333,7 @@ int main()
             (i32)(floor((camera.m_position.z) / voxel_chunk_t::CHUNK_LENGTH)),
         };
 
-        if (true)
+        if (setup_chunks)
         {
             // Load chunks around the player.
             for (const auto &offset : chunk_render_distance_offsets)
@@ -351,7 +344,7 @@ int main()
                     current_chunk_3d_index.z + offset.z,
                 };
 
-                chunk_manager.add_chunk_to_setup_stack(current_chunk_3d_index);
+                chunk_manager.add_chunk_to_setup_stack(chunk_3d_index);
             }
         }
 
@@ -371,7 +364,8 @@ int main()
             quit = true;
         }
 
-        GetKeyboardState(keyboard_state);
+        b32 get_keyboard_state_result = GetKeyboardState(keyboard_state);
+        assert(get_keyboard_state_result);
 
         chunk_manager.transfer_chunks_from_setup_to_loaded_state(renderer.m_copy_queue.m_fence->GetCompletedValue());
 
@@ -380,9 +374,27 @@ int main()
         rhi::constant_buffer_t<interop::scene_constant_buffer_t> &scene_buffer =
             scene_buffers[renderer.m_swapchain_backbuffer_index];
 
+        DirectX::XMMATRIX projection_matrix = {};
+        {
+            // Article followed for reverse Z:
+            //  https://iolite-engine.com/blog_posts/reverse_z_cheatsheet
+
+            // https://github.com/microsoft/DirectXMath/issues/158 link that shows the projection matrix for infinite
+            // far plane. Note : This code is taken from the directxmath source code for perspective projection fov lh,
+            // but modified for infinite far plane.
+
+            float sin_fov{};
+            float cos_fov{};
+            DirectX::XMScalarSinCos(&sin_fov, &cos_fov, 0.5f * DirectX::XMConvertToRadians(45.0f));
+
+            float height = cos_fov / sin_fov;
+            float width = height / window_aspect_ratio;
+
+            projection_matrix = DirectX::XMMatrixSet(width, 0.0f, 0.0f, 0.0f, 0.0f, height, 0.0f, 0.0f, 0.0f, 0.0f,
+                                                     0.0f, 1.0f, 0.0f, 0.0f, near_plane, 0.0f);
+        }
         scene_buffer.m_data.view_matrix = camera.update_and_get_view_matrix(keyboard_state, delta_time);
-        scene_buffer.m_data.projection_matrix =
-            DirectX::XMMatrixPerspectiveFovLH(DirectX::XMConvertToRadians(45.0f), window_aspect_ratio, 0.1f, 10000.0f);
+        scene_buffer.m_data.projection_matrix = projection_matrix;
         scene_buffer.m_data.camera_position = camera.m_position;
         scene_buffer.m_data.voxel_chunk_length = voxel_chunk_t::CHUNK_LENGTH;
         scene_buffer.update();
@@ -416,7 +428,7 @@ int main()
         // Now, clear the RTV and DSV.
         const float clear_color[4] = {0.1f, 0.1f, 0.1f, 1.0f};
         command_list->ClearRenderTargetView(swapchain_backbuffer.m_rtv_cpu_descriptor_handle, clear_color, 0u, nullptr);
-        command_list->ClearDepthStencilView(dsv_handle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0u, 0u, nullptr);
+        command_list->ClearDepthStencilView(dsv_handle, D3D12_CLEAR_FLAG_DEPTH, 0.0f, 0u, 0u, nullptr);
 
         // Set viewport.
         command_list->RSSetViewports(1u, &viewport);
@@ -476,10 +488,10 @@ int main()
                    indirect_command_vector.size() * sizeof(indirect_command_t));
 
             interop::gpu_cull_render_resources_t gpu_cull_render_resources = {
-                .number_of_chunks = static_cast<u32>(indirect_command_vector.size()),
-                .indirect_command_srv_index = static_cast<u32>(indirect_command_buffer.m_upload_resource_srv_index),
-                .output_command_uav_index = static_cast<u32>(indirect_command_buffer.m_default_resource_uav_index),
-                .scene_constant_buffer_index = static_cast<u32>(scene_buffer.m_cbv_index),
+                .number_of_chunks = (u32)indirect_command_vector.size(),
+                .indirect_command_srv_index = indirect_command_buffer.m_upload_resource_srv_index,
+                .output_command_uav_index = indirect_command_buffer.m_default_resource_uav_index,
+                .scene_constant_buffer_index = scene_buffer.m_cbv_index,
             };
 
             command_list->SetDescriptorHeaps(1u, shader_visible_descriptor_heaps);
@@ -540,7 +552,6 @@ int main()
         // Render UI.
         // Start the Dear ImGui frame
 
-        /*
         ImGui_ImplDX12_NewFrame();
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
@@ -550,7 +561,6 @@ int main()
         ImGui::SliderFloat("rotation_speed", &camera.m_rotation_speed, 0.0f, 10.0f);
         ImGui::SliderFloat("friction", &camera.m_friction, 0.0f, 1.0f);
         ImGui::SliderFloat("near plane", &near_plane, 0.1f, 1.0f);
-        ImGui::SliderFloat("Far plane", &far_plane, 10.0f, 10000000.0f);
         ImGui::Checkbox("Start loading chunks", &setup_chunks);
         ImGui::Text("Delta Time: %f", delta_time);
         ImGui::Text("Camera Position : %f %f %f", camera.m_position.x, camera.m_position.y, camera.m_position.z);
@@ -558,14 +568,11 @@ int main()
         ImGui::Text("Current 3D Index: %d, %d, %d", current_chunk_3d_index.x, current_chunk_3d_index.y,
                     current_chunk_3d_index.z);
         ImGui::Text("Number of loaded chunks: %zu", chunk_manager.m_loaded_chunks.size());
-        ImGui::Text("Number of rendered chunks: %zu", indirect_command_vector.size());
         ImGui::Text("Number of copy alloc / list pairs : %zu",
                     renderer.m_copy_queue.m_command_allocator_list_queue.size());
         ImGui::Text("Voxel edge length : %zu", voxel_t::EDGE_LENGTH);
         ImGui::Text("Number of threads in pool : %zu", chunk_manager.m_thread_pool.get_thread_count());
         ImGui::Text("Number of queued threads in pool : %zu", chunk_manager.m_thread_pool.get_tasks_queued());
-        ImGui::Text("[TEMP] %d", keyboard_state['W'] & 0b1000'0000);
-        ImGui::Text("[TEMP] %d", keyboard_state['W']);
 
         ImGui::ShowMetricsWindow();
         ImGui::End();
@@ -573,7 +580,6 @@ int main()
         command_list->SetDescriptorHeaps(1u, shader_visible_descriptor_heaps);
         ImGui::Render();
         ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), command_list.Get());
-        */
 
         // Now, transition back to presentation mode.
         const D3D12_RESOURCE_BARRIER render_target_to_presentation_barrier = {

@@ -21,7 +21,8 @@
 // clang-format off
 namespace interop
 {
-#define NUMBER_OF_VOXELS_PER_DIMENSION_IN_CHUNK  1u
+#define NUMBER_OF_VOXELS_PER_DIMENSION_IN_CHUNK  16
+
 #define NUMBER_OF_VOXELS_PER_CHUNK (NUMBER_OF_VOXELS_PER_DIMENSION_IN_CHUNK * NUMBER_OF_VOXELS_PER_DIMENSION_IN_CHUNK * NUMBER_OF_VOXELS_PER_DIMENSION_IN_CHUNK)
 
 // NOTE: These variables define how many chunks can be loaded at a given particular instant.

@@ -15,16 +15,21 @@ ConstantBuffer<interop::gpu_cull_render_resources_t> render_resources : register
         ConstantBuffer<interop::scene_constant_buffer_t> scene_constant_buffer =
             ResourceDescriptorHeap[render_resources.scene_constant_buffer_index];
 
+        float4x4 view_projection_matrix =
+            mul(scene_constant_buffer.view_matrix, scene_constant_buffer.projection_matrix);
+
         // For each vertex, find the clip space coord and check if AABB vertex is culled.
         uint culled_vertices = 0;
         for (int i = 0; i < 8; i++)
         {
             float4 clip_space_coords =
-                mul(scene_constant_buffer.aabb_vertices[i] +
-                        float4(indirect_command[dispatch_thread_id].voxel_render_resources.chunk_position *
-                                   scene_constant_buffer.voxel_chunk_length,
-                               1.0f),
-                    mul(scene_constant_buffer.view_matrix, scene_constant_buffer.projection_matrix));
+                (scene_constant_buffer.aabb_vertices[i] +
+                 float4(indirect_command[dispatch_thread_id].voxel_render_resources.chunk_position *
+                            scene_constant_buffer.voxel_chunk_length,
+                        1.0f));
+
+            clip_space_coords = mul(float4(clip_space_coords.xyz - scene_constant_buffer.camera_position.xyz, 1.0f),
+                                    view_projection_matrix);
 
             clip_space_coords.x /= clip_space_coords.w;
             clip_space_coords.y /= clip_space_coords.w;

@@ -28,7 +28,7 @@ set (HEADER_FILES
 )
 
 add_executable(voxel-engine ${SRC_FILES} ${HEADER_FILES})
-#target_link_libraries(voxel-engine PUBLIC d3d12 dxgi dxguid dxcompiler external)
+target_link_libraries(voxel-engine PUBLIC d3d12 dxgi dxguid dxcompiler external)
 target_link_libraries(voxel-engine PUBLIC d3d12 dxgi dxguid dxcompiler)
 
 set_property(TARGET voxel-engine PROPERTY COMPILE_WARNING_AS_ERROR ON)

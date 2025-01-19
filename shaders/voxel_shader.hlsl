@@ -17,8 +17,9 @@ VSOutput vs_main(uint vertex_id : SV_VertexID)
 
     const float4x4 view_projection_matrix = mul(scene_buffer.view_matrix, scene_buffer.projection_matrix);
 
-    const float3 position =
-        position_buffer[vertex_id] + float3(render_resources.chunk_position) * scene_buffer.voxel_chunk_length;
+    const float3 position = position_buffer[vertex_id] +
+                            float3(render_resources.chunk_position) * scene_buffer.voxel_chunk_length -
+                            scene_buffer.camera_position.xyz;
 
     VSOutput output;
     output.position = mul(float4(position, 1.0f), view_projection_matrix);
