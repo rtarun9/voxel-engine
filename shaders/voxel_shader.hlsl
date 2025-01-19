@@ -17,8 +17,8 @@ VSOutput vs_main(uint vertex_id : SV_VertexID)
 
     const float4x4 view_projection_matrix = mul(scene_buffer.view_matrix, scene_buffer.projection_matrix);
 
-    const float3 position = position_buffer[vertex_id] +
-                            float3(0.0f, 0.0f, render_resources.chunk_position.z * scene_buffer.voxel_chunk_length);
+    const float3 position =
+        position_buffer[vertex_id] + float3(render_resources.chunk_position) * scene_buffer.voxel_chunk_length;
 
     VSOutput output;
     output.position = mul(float4(position, 1.0f), view_projection_matrix);
@@ -26,11 +26,9 @@ VSOutput vs_main(uint vertex_id : SV_VertexID)
     return output;
 }
 
-float4 ps_main(VSOutput input, uint primitive_id : SV_PrimitiveID) : SV_Target
+float4 ps_main(VSOutput input) : SV_Target
 {
     StructuredBuffer<float3> color_buffer = ResourceDescriptorHeap[render_resources.color_buffer_index];
 
-    // The idea behind using primitive ID here is that when creating the color buffer for voxel, you can use a single
-    // color value for 3 vertices. But for now, the entire chunk has the same color.
-    return float4(color_buffer[primitive_id], 1.0f);
+    return float4(color_buffer[0], 1.0f);
 }

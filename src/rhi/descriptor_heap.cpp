@@ -3,12 +3,16 @@
 namespace rhi
 {
 
-void descriptor_heap_t::offset_current_descriptor_handle()
+descriptor_handle_t descriptor_heap_t::get_then_offset_current_descriptor_handle()
 {
+    descriptor_handle_t result = m_current_descriptor_handle;
+
     m_current_descriptor_handle.m_cpu_descriptor_handle.ptr += m_descriptor_handle_size;
     m_current_descriptor_handle.m_gpu_descriptor_handle.ptr += m_descriptor_handle_size;
 
     m_current_descriptor_handle.m_index++;
+
+    return result;
 }
 
 void descriptor_heap_t::create(ID3D12Device *const device, const u32 num_descriptors,

@@ -108,7 +108,7 @@ renderer_t::renderer_t(const HWND window_handle, const u32 window_width, const u
 
     for (u8 i = 0; i < NUMBER_OF_BACKBUFFERS; i++)
     {
-        descriptor_handle_t rtv_descriptor_handle = m_rtv_descriptor_heap.m_current_descriptor_handle;
+        descriptor_handle_t rtv_descriptor_handle = m_rtv_descriptor_heap.get_then_offset_current_descriptor_handle();
 
         ComPtr<ID3D12Resource> swapchain_resource{};
         throw_if_failed(m_swapchain->GetBuffer(i, IID_PPV_ARGS(&swapchain_resource)));
@@ -118,8 +118,6 @@ renderer_t::renderer_t(const HWND window_handle, const u32 window_width, const u
                                          m_swapchain_backbuffers[i].m_rtv_cpu_descriptor_handle);
 
         m_swapchain_backbuffers[i].m_resource = (std::move(swapchain_resource));
-
-        m_rtv_descriptor_heap.offset_current_descriptor_handle();
     }
 
     m_swapchain_backbuffer_index = static_cast<u8>(m_swapchain->GetCurrentBackBufferIndex());
@@ -432,8 +430,8 @@ u32 renderer_t::create_constant_buffer_view(ID3D12Resource *const resource, cons
 {
     assert(resource);
 
-    const D3D12_CPU_DESCRIPTOR_HANDLE handle =
-        m_cbv_srv_uav_descriptor_heap.m_current_descriptor_handle.m_cpu_descriptor_handle;
+    descriptor_handle_t descriptor_handle = m_cbv_srv_uav_descriptor_heap.get_then_offset_current_descriptor_handle();
+    const D3D12_CPU_DESCRIPTOR_HANDLE handle = descriptor_handle.m_cpu_descriptor_handle;
 
     const D3D12_CONSTANT_BUFFER_VIEW_DESC cbv_desc = {
         .BufferLocation = resource->GetGPUVirtualAddress(),
@@ -442,9 +440,7 @@ u32 renderer_t::create_constant_buffer_view(ID3D12Resource *const resource, cons
 
     m_device->CreateConstantBufferView(&cbv_desc, handle);
 
-    const size_t cbv_index = m_cbv_srv_uav_descriptor_heap.m_current_descriptor_handle.m_index;
-
-    m_cbv_srv_uav_descriptor_heap.offset_current_descriptor_handle();
+    const size_t cbv_index = descriptor_handle.m_index;
 
     return cbv_index;
 }
@@ -454,8 +450,8 @@ u32 renderer_t::create_shader_resource_view(ID3D12Resource *const resource, cons
 {
     assert(resource);
 
-    const D3D12_CPU_DESCRIPTOR_HANDLE handle =
-        m_cbv_srv_uav_descriptor_heap.m_current_descriptor_handle.m_cpu_descriptor_handle;
+    descriptor_handle_t descriptor_handle = m_cbv_srv_uav_descriptor_heap.get_then_offset_current_descriptor_handle();
+    const D3D12_CPU_DESCRIPTOR_HANDLE handle = descriptor_handle.m_cpu_descriptor_handle;
 
     const D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {
         .Format = DXGI_FORMAT_UNKNOWN,
@@ -470,9 +466,7 @@ u32 renderer_t::create_shader_resource_view(ID3D12Resource *const resource, cons
 
     m_device->CreateShaderResourceView(resource, &srv_desc, handle);
 
-    const size_t srv_index = m_cbv_srv_uav_descriptor_heap.m_current_descriptor_handle.m_index;
-
-    m_cbv_srv_uav_descriptor_heap.offset_current_descriptor_handle();
+    const size_t srv_index = descriptor_handle.m_index;
 
     return srv_index;
 }
@@ -483,8 +477,9 @@ u32 renderer_t::create_unordered_access_view(ID3D12Resource *const resource, con
 {
     assert(resource);
 
-    const D3D12_CPU_DESCRIPTOR_HANDLE handle =
-        m_cbv_srv_uav_descriptor_heap.m_current_descriptor_handle.m_cpu_descriptor_handle;
+    descriptor_handle_t descriptor_handle = m_cbv_srv_uav_descriptor_heap.get_then_offset_current_descriptor_handle();
+
+    const D3D12_CPU_DESCRIPTOR_HANDLE handle = descriptor_handle.m_cpu_descriptor_handle;
 
     D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {
         .Format = DXGI_FORMAT_UNKNOWN,
@@ -508,9 +503,7 @@ u32 renderer_t::create_unordered_access_view(ID3D12Resource *const resource, con
         m_device->CreateUnorderedAccessView(resource, resource, &uav_desc, handle);
     }
 
-    const size_t uav_index = m_cbv_srv_uav_descriptor_heap.m_current_descriptor_handle.m_index;
-
-    m_cbv_srv_uav_descriptor_heap.offset_current_descriptor_handle();
+    const size_t uav_index = descriptor_handle.m_index;
 
     return uav_index;
 }

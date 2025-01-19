@@ -111,7 +111,7 @@ int main()
 
     // Create DSV.
     D3D12_CPU_DESCRIPTOR_HANDLE dsv_handle =
-        renderer.m_dsv_descriptor_heap.m_current_descriptor_handle.m_cpu_descriptor_handle;
+        renderer.m_dsv_descriptor_heap.get_then_offset_current_descriptor_handle().m_cpu_descriptor_handle;
     {
         const D3D12_DEPTH_STENCIL_VIEW_DESC dsv_desc = {
             .Format = DXGI_FORMAT_D32_FLOAT,
@@ -123,8 +123,6 @@ int main()
                     .MipSlice = 0u,
                 },
         };
-
-        renderer.m_dsv_descriptor_heap.offset_current_descriptor_handle();
 
         renderer.m_device->CreateDepthStencilView(depth_buffer_resource.Get(), &dsv_desc, dsv_handle);
     }
@@ -214,13 +212,22 @@ int main()
     // Indirect command struct : command signature must match this struct.
     // Each chunk will have its own IndirectCommand, with 3 arguments. The render resources struct root constants, index
     // buffer view and a draw call.
-    struct IndirectCommand
+
+#pragma pack(push, 4)
+    struct indirect_command_t
     {
         interop::voxel_render_resources_t render_resources{};
         D3D12_INDEX_BUFFER_VIEW index_buffer_view{};
         D3D12_DRAW_INDEXED_ARGUMENTS draw_arguments{};
-        f32 padding;
     };
+#pragma pack(pop)
+
+    // NOTE: gpu_indirect_command_t and indirect_command_t MUST match.
+    static_assert(sizeof(interop::gpu_indirect_command_t) == sizeof(indirect_command_t));
+
+    printf("Size of indirect command : %d\n", (i32)sizeof(indirect_command_t));
+    printf("Size of gpu indirect command : %d\n", (i32)sizeof(interop::gpu_indirect_command_t));
+    printf("Size of voxel render resources: %d\n", (i32)sizeof(interop::voxel_render_resources_t));
 
     // Create the command signature, which tells the GPU how to interpret the data passed in the ExecuteIndirect call.
     const std::array<D3D12_INDIRECT_ARGUMENT_DESC, 3u> argument_descs = {
@@ -243,7 +250,7 @@ int main()
 
     ComPtr<ID3D12CommandSignature> command_signature{};
     const D3D12_COMMAND_SIGNATURE_DESC command_signature_desc = {
-        .ByteStride = sizeof(IndirectCommand),
+        .ByteStride = sizeof(indirect_command_t),
         .NumArgumentDescs = argument_descs.size(),
         .pArgumentDescs = argument_descs.data(),
         .NodeMask = 0u,
@@ -255,10 +262,11 @@ int main()
 
     // Command buffer that will be used to store the indirect command args.
     static constexpr size_t MAX_CHUNKS_TO_BE_DRAWN = 10'00'000;
-    std::vector<IndirectCommand> indirect_command_vector{};
+    std::vector<indirect_command_t> indirect_command_vector{};
+    indirect_command_vector.reserve(MAX_CHUNKS_TO_BE_DRAWN);
 
     rhi::command_buffer_t indirect_command_buffer =
-        renderer.create_command_buffer(sizeof(IndirectCommand), MAX_CHUNKS_TO_BE_DRAWN, L"Indirect Command Buffer");
+        renderer.create_command_buffer(sizeof(indirect_command_t), MAX_CHUNKS_TO_BE_DRAWN, L"Indirect Command Buffer");
 
     // Create viewport and scissor.
     const D3D12_VIEWPORT viewport = {
@@ -310,11 +318,6 @@ int main()
                   return a.x * a.x + a.y * a.y + a.z * a.z < b.x * b.x + b.y * b.y + b.z * b.z;
               });
 
-    for (i32 z = -5; z <= 5; ++z)
-    {
-
-        chunk_manager.add_chunk_to_setup_stack({0, 0, z});
-    }
     camera_t camera{};
 
     timer_t timer{};
@@ -337,7 +340,7 @@ int main()
             (i32)(floor((camera.m_position.z) / voxel_chunk_t::CHUNK_LENGTH)),
         };
 
-        if (setup_chunks)
+        if (true)
         {
             // Load chunks around the player.
             for (const auto &offset : chunk_render_distance_offsets)
@@ -348,7 +351,7 @@ int main()
                     current_chunk_3d_index.z + offset.z,
                 };
 
-                // chunk_manager.add_chunk_to_setup_stack(current_chunk_3d_index);
+                chunk_manager.add_chunk_to_setup_stack(current_chunk_3d_index);
             }
         }
 
@@ -363,14 +366,6 @@ int main()
             DispatchMessageA(&message);
         }
 
-        if (message.message == WM_KEYDOWN)
-        {
-            // TODO: HUH?
-            if (message.wParam == 'W')
-            {
-                auto x = 3;
-            }
-        }
         if (message.message == WM_QUIT)
         {
             quit = true;
@@ -381,24 +376,6 @@ int main()
         chunk_manager.transfer_chunks_from_setup_to_loaded_state(renderer.m_copy_queue.m_fence->GetCompletedValue());
 
         const float window_aspect_ratio = static_cast<float>(window.get_width()) / window.get_height();
-
-        // Article followed for reverse Z:
-        //  https://iolite-engine.com/blog_posts/reverse_z_cheatsheet
-
-        // https://github.com/microsoft/DirectXMath/issues/158 link that shows the projection matrix for infinite far
-        // plane.
-        // Note : This code is taken from the directxmath source code for perspective projection fov lh, but modified
-        // for infinite far plane.
-
-        float sin_fov{};
-        float cos_fov{};
-        DirectX::XMScalarSinCos(&sin_fov, &cos_fov, 0.5f * DirectX::XMConvertToRadians(45.0f));
-
-        float height = cos_fov / sin_fov;
-        float width = height / window_aspect_ratio;
-
-        // const DirectX::XMMATRIX projection_matrix = DirectX::XMMatrixSet(
-        // width, 0.0f, 0.0f, 0.0f, 0.0f, height, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, near_plane, 0.0f);
 
         rhi::constant_buffer_t<interop::scene_constant_buffer_t> &scene_buffer =
             scene_buffers[renderer.m_swapchain_backbuffer_index];
@@ -445,49 +422,8 @@ int main()
         command_list->RSSetViewports(1u, &viewport);
         command_list->RSSetScissorRects(1u, &scissor_rect);
 
-        /*
-        // Evict the chunks that are out of range of render distance.
-        // Because evicting chunks seems to have such a high overhead (more specifically freeing allocated id3d12
-        // resources) each frame only a certain number of chunks are unloaded.
-        for (const auto &[chunk_position, chunk] : chunk_manager.m_loaded_chunks)
-        {
-            if (std::abs((i32)chunk_position.x - (i32)current_chunk_3d_index.x) >
-                    CHUNK_RENDER_DISTANCE_PER_DIMENSION * 8 ||
-                std::abs((i32)chunk_position.y - (i32)current_chunk_3d_index.y) >
-                    CHUNK_RENDER_DISTANCE_PER_DIMENSION * 8 ||
-                std::abs((i32)chunk_position.z - (i32)current_chunk_3d_index.z) >
-                    CHUNK_RENDER_DISTANCE_PER_DIMENSION * 8)
-            {
-                chunks_to_unload.push(chunk_position);
-            }
-        }
-        */
-
-        /*
-        size_t unloaded_chunks = 0;
-        while (false && !chunks_to_unload.empty() && unloaded_chunks < ChunkManager::CHUNKS_TO_UNLOAD_PER_FRAME)
-        {
-            const auto chunk_to_unload = chunks_to_unload.front();
-            chunks_to_unload.pop();
-
-            chunk_manager.m_loaded_chunks.erase(chunk_to_unload);
-
-            chunk_manager.m_chunk_index_buffers.erase(chunk_to_unload);
-            chunk_manager.m_chunk_index_buffers[chunk_to_unload].resource.Reset();
-
-            chunk_manager.m_chunk_color_buffers.erase(chunk_to_unload);
-            chunk_manager.m_chunk_color_buffers[chunk_to_unload].resource.Reset();
-
-            chunk_manager.m_chunk_constant_buffers[chunk_to_unload].resource.Reset();
-            chunk_manager.m_chunk_constant_buffers.erase(chunk_to_unload);
-
-            ++unloaded_chunks;
-        }
-        */
-
         // Setup indirect command vector.
         indirect_command_vector.clear();
-        indirect_command_vector.reserve(chunk_manager.m_loaded_chunks.size());
         for (const auto &[chunk_position, chunk] : chunk_manager.m_loaded_chunks)
         {
             const interop::voxel_render_resources_t render_resources = {
@@ -497,7 +433,7 @@ int main()
                 .chunk_position = {chunk_position.x, chunk_position.y, chunk_position.z},
             };
 
-            indirect_command_vector.emplace_back(IndirectCommand{
+            indirect_command_vector.emplace_back(indirect_command_t{
                 .render_resources = render_resources,
                 .index_buffer_view = chunk.m_index_buffer.m_index_buffer_view,
                 .draw_arguments =
@@ -537,7 +473,7 @@ int main()
             command_list->ResourceBarrier(1u, &indirect_argument_to_copy_dest_state);
 
             memcpy(indirect_command_buffer.m_upload_resource_mapped_ptr, indirect_command_vector.data(),
-                   indirect_command_vector.size() * sizeof(IndirectCommand));
+                   indirect_command_vector.size() * sizeof(indirect_command_t));
 
             interop::gpu_cull_render_resources_t gpu_cull_render_resources = {
                 .number_of_chunks = static_cast<u32>(indirect_command_vector.size()),

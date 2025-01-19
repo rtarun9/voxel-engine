@@ -40,6 +40,7 @@ namespace interop
         uint scene_constant_buffer_index;
         uint shared_chunk_position_buffer_index;
         uint color_buffer_index;
+        uint padding;
         int3 chunk_position;
     };
 
@@ -72,7 +73,6 @@ chunk_manager_constant_buffer_t
         uint4 index_buffer_view;
         uint4 draw_arguments_1;
         uint draw_arguments_2;
-        uint padding;
     };
 
     struct gpu_cull_render_resources_t
