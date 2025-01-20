@@ -150,7 +150,7 @@ int main()
         .SampleMask = 0xffff'ffff,
         .RasterizerState =
             {
-                .FillMode = D3D12_FILL_MODE_SOLID,
+                .FillMode = D3D12_FILL_MODE_WIREFRAME,
                 .CullMode = D3D12_CULL_MODE_BACK,
                 .FrontCounterClockwise = FALSE,
                 .DepthClipEnable = TRUE,
@@ -325,50 +325,6 @@ int main()
     b32 quit{false};
     while (!quit)
     {
-        static f32 near_plane = 1.0f;
-
-        // Get the player's current chunk index.
-        const voxel_chunk_position_t current_chunk_3d_index = {
-            (i32)(floor((camera.m_position.x) / voxel_chunk_t::CHUNK_LENGTH)),
-            (i32)(floor((camera.m_position.y) / voxel_chunk_t::CHUNK_LENGTH)),
-            (i32)(floor((camera.m_position.z) / voxel_chunk_t::CHUNK_LENGTH)),
-        };
-
-        /*
-        // Evict the chunks that are out of range of render distance.
-        std::erase_if(chunk_manager.m_loaded_chunks, [current_chunk_3d_index](
-                                                         const std::pair<const voxel_chunk_position_t, voxel_chunk_t>
-                                                             &key_value_pair) {
-            const auto &chunk = key_value_pair.second;
-
-            if ((std::abs(chunk.m_chunk_position.x - current_chunk_3d_index.x) > CHUNK_RENDER_DISTANCE_PER_DIMENSION) ||
-                (std::abs(chunk.m_chunk_position.y - current_chunk_3d_index.y) > CHUNK_RENDER_DISTANCE_PER_DIMENSION) ||
-                (std::abs(chunk.m_chunk_position.z - current_chunk_3d_index.z) > CHUNK_RENDER_DISTANCE_PER_DIMENSION))
-            {
-                return true;
-            }
-
-            return false;
-        });
-        */
-
-        if (setup_chunks)
-        {
-            // Load chunks around the player.
-            for (const auto &offset : chunk_render_distance_offsets)
-            {
-                const voxel_chunk_position_t chunk_3d_index = {
-                    current_chunk_3d_index.x + offset.x,
-                    current_chunk_3d_index.y + offset.y,
-                    current_chunk_3d_index.z + offset.z,
-                };
-
-                chunk_manager.add_chunk_to_setup_stack(chunk_3d_index);
-            }
-        }
-
-        chunk_manager.create_chunks_from_setup_stack(renderer);
-
         u8 keyboard_state[256] = {};
 
         MSG message = {};
@@ -386,6 +342,52 @@ int main()
         b32 get_keyboard_state_result = GetKeyboardState(keyboard_state);
         assert(get_keyboard_state_result);
 
+        static f32 near_plane = 1.0f;
+
+        // Get the player's current chunk index.
+        const voxel_chunk_position_t current_chunk_3d_index = {
+            (i32)(floor((camera.m_position.x) / voxel_chunk_t::CHUNK_LENGTH)),
+            (i32)(floor((camera.m_position.y) / voxel_chunk_t::CHUNK_LENGTH)),
+            (i32)(floor((camera.m_position.z) / voxel_chunk_t::CHUNK_LENGTH)),
+        };
+
+        // Evict the chunks that are out of range of render distance.
+        std::erase_if(chunk_manager.m_loaded_chunks, [current_chunk_3d_index, &chunk_manager](
+                                                         const std::pair<const voxel_chunk_position_t, voxel_chunk_t>
+                                                             &key_value_pair) {
+            const auto &chunk = key_value_pair.second;
+
+            if ((std::abs(chunk.m_chunk_position.x - current_chunk_3d_index.x) > CHUNK_RENDER_DISTANCE_PER_DIMENSION) ||
+                (std::abs(chunk.m_chunk_position.y - current_chunk_3d_index.y) > CHUNK_RENDER_DISTANCE_PER_DIMENSION) ||
+                (std::abs(chunk.m_chunk_position.z - current_chunk_3d_index.z) > CHUNK_RENDER_DISTANCE_PER_DIMENSION))
+            {
+                chunk_manager.m_chunk_manager_buffer_offset_queue.push(
+                    voxel_chunk_manager_t::chunk_manager_buffer_offset_t{
+                        .m_color_buffer_start_index_location = chunk.m_color_buffer_start_index_location,
+                        .m_index_buffer_start_index_location = chunk.m_index_buffer_start_index_location,
+                    });
+                return true;
+            }
+
+            return false;
+        });
+
+        if (setup_chunks)
+        {
+            // Load chunks around the player.
+            for (const auto &offset : chunk_render_distance_offsets)
+            {
+                const voxel_chunk_position_t chunk_3d_index = {
+                    current_chunk_3d_index.x + offset.x,
+                    current_chunk_3d_index.y + offset.y,
+                    current_chunk_3d_index.z + offset.z,
+                };
+
+                chunk_manager.add_chunk_to_setup_stack(chunk_3d_index);
+            }
+        }
+
+        chunk_manager.create_chunks_from_setup_stack(renderer);
         chunk_manager.transfer_chunks_from_setup_to_loaded_state();
 
         const float window_aspect_ratio = static_cast<float>(window.get_width()) / window.get_height();
@@ -491,7 +493,6 @@ int main()
         };
 
         command_list->SetDescriptorHeaps(1u, shader_visible_descriptor_heaps);
-
         // Prepare rendering commands.
         command_list->OMSetRenderTargets(1u, &swapchain_backbuffer.m_rtv_cpu_descriptor_handle, FALSE, &dsv_handle);
 
@@ -584,9 +585,9 @@ int main()
 
             command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-            D3D12_INDEX_BUFFER_VIEW index_buffer_view = {
+            const D3D12_INDEX_BUFFER_VIEW index_buffer_view = {
                 .BufferLocation = chunk_manager.m_index_buffer.m_structured_buffer.m_resource->GetGPUVirtualAddress(),
-                .SizeInBytes = sizeof(u16) * 36u * NUMBER_OF_VOXELS_PER_CHUNK * MAX_NUMBER_OF_LOADED_CHUNKS,
+                .SizeInBytes = (u32)(sizeof(u16) * 36u * NUMBER_OF_VOXELS_PER_CHUNK * MAX_NUMBER_OF_LOADED_CHUNKS),
                 .Format = DXGI_FORMAT_R16_UINT,
             };
             command_list->IASetIndexBuffer(&index_buffer_view);
@@ -604,7 +605,7 @@ int main()
         ImGui::NewFrame();
 
         ImGui::Begin("Debug Controller");
-        ImGui::SliderFloat("movement_speed", &camera.m_movement_speed, 0.0f, 500000.0f);
+        ImGui::SliderFloat("movement_speed", &camera.m_movement_speed, 0.0f, 500.0f);
         ImGui::SliderFloat("rotation_speed", &camera.m_rotation_speed, 0.0f, 10.0f);
         ImGui::SliderFloat("friction", &camera.m_friction, 0.0f, 1.0f);
         ImGui::SliderFloat("near plane", &near_plane, 0.1f, 1.0f);

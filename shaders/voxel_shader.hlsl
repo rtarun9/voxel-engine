@@ -31,5 +31,5 @@ float4 ps_main(VSOutput input) : SV_Target
 {
     StructuredBuffer<float3> color_buffer = ResourceDescriptorHeap[render_resources.color_buffer_index];
 
-    return float4(color_buffer[0], 1.0f);
+    return float4(color_buffer[render_resources.color_start_location], 1.0f);
 }
