@@ -337,6 +337,14 @@ void voxel_chunk_manager_t::transfer_chunks_from_setup_to_loaded_state()
 
             m_loaded_chunks[chunk_index].m_index_buffer_start_index_location =
                 buffer_offsets.m_index_buffer_start_index_location;
+
+            m_index_buffer.update(m_loaded_chunks[chunk_index].m_index_buffer_data.data(),
+                                  m_loaded_chunks[chunk_index].m_index_buffer_data.size() * sizeof(u16),
+                                  m_loaded_chunks[chunk_index].m_index_buffer_start_index_location * sizeof(u16));
+
+            m_color_buffer.update(&m_loaded_chunks[chunk_index].m_color_buffer_data, sizeof(DirectX::XMFLOAT3),
+                                  m_loaded_chunks[chunk_index].m_color_buffer_start_index_location *
+                                      sizeof(DirectX::XMFLOAT3));
         }
         break;
         }

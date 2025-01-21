@@ -88,10 +88,10 @@ struct voxel_chunk_manager_t
     void transfer_chunks_from_setup_to_loaded_state();
 
     // Chunks to create per frame : How many chunks are setup (i.e the meshing processes occurs).
-    static constexpr u32 NUMBER_OF_CHUNKS_TO_CREATE_PER_FRAME = 16u;
+    static constexpr u32 NUMBER_OF_CHUNKS_TO_CREATE_PER_FRAME = 128u;
 
     // Chunks to load per frame : How many setup chunks are moved into the loaded chunk hash map.
-    static constexpr u32 NUMBER_OF_CHUNKS_TO_LOAD_PER_FRAME = 16u;
+    static constexpr u32 NUMBER_OF_CHUNKS_TO_LOAD_PER_FRAME = 128u;
 
     std::unordered_map<voxel_chunk_position_t, voxel_chunk_t> m_loaded_chunks{};
 

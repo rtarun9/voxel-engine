@@ -353,32 +353,39 @@ int main()
             (i32)(floor((camera.m_position.z) / voxel_chunk_t::CHUNK_LENGTH)),
         };
 
-        // Evict the chunks that are out of range of render distance.
-        std::erase_if(chunk_manager.m_loaded_chunks, [current_chunk_3d_index, &chunk_manager](
-                                                         const std::pair<const voxel_chunk_position_t, voxel_chunk_t>
-                                                             &key_value_pair) {
-            const auto &chunk = key_value_pair.second;
+        {
+            // Evict the chunks that are out of range of render distance.
+            std::erase_if(
+                chunk_manager.m_loaded_chunks,
+                [current_chunk_3d_index,
+                 &chunk_manager](const std::pair<const voxel_chunk_position_t, voxel_chunk_t> &key_value_pair) {
+                    auto &chunk = key_value_pair.second;
 
-            if ((std::abs(chunk.m_chunk_position.x - current_chunk_3d_index.x) > CHUNK_RENDER_DISTANCE_PER_DIMENSION) ||
-                (std::abs(chunk.m_chunk_position.y - current_chunk_3d_index.y) > CHUNK_RENDER_DISTANCE_PER_DIMENSION) ||
-                (std::abs(chunk.m_chunk_position.z - current_chunk_3d_index.z) > CHUNK_RENDER_DISTANCE_PER_DIMENSION))
-            {
-                chunk_manager.m_cached_chunk_creation_resources.push(
-                    voxel_chunk_manager_t::cached_chunk_creation_resources_t{.indices_data =
-                                                                                 std::move(chunk.m_index_buffer_data)});
-                chunk_manager.m_chunk_manager_buffer_offset_queue.push(
-                    voxel_chunk_manager_t::chunk_manager_buffer_offset_t{
-                        .m_color_buffer_start_index_location = chunk.m_color_buffer_start_index_location,
-                        .m_index_buffer_start_index_location = chunk.m_index_buffer_start_index_location,
-                    });
-                return true;
-            }
+                    if ((std::abs(chunk.m_chunk_position.x - current_chunk_3d_index.x) >
+                         CHUNK_RENDER_DISTANCE_PER_DIMENSION) ||
+                        (std::abs(chunk.m_chunk_position.y - current_chunk_3d_index.y) >
+                         CHUNK_RENDER_DISTANCE_PER_DIMENSION) ||
+                        (std::abs(chunk.m_chunk_position.z - current_chunk_3d_index.z) >
+                         CHUNK_RENDER_DISTANCE_PER_DIMENSION))
+                    {
+                        chunk_manager.m_cached_chunk_creation_resources.push(
+                            voxel_chunk_manager_t::cached_chunk_creation_resources_t{
+                                .indices_data = std::move(chunk.m_index_buffer_data)});
+                        chunk_manager.m_chunk_manager_buffer_offset_queue.push(
+                            voxel_chunk_manager_t::chunk_manager_buffer_offset_t{
+                                .m_color_buffer_start_index_location = chunk.m_color_buffer_start_index_location,
+                                .m_index_buffer_start_index_location = chunk.m_index_buffer_start_index_location,
+                            });
+                        return true;
+                    }
 
-            return false;
-        });
+                    return false;
+                });
+        }
 
         if (setup_chunks)
         {
+            ZoneScopedN("Setup chunks");
             // Load chunks around the player.
             for (const auto &offset : chunk_render_distance_offsets)
             {
@@ -460,39 +467,35 @@ int main()
         command_list->RSSetViewports(1u, &viewport);
         command_list->RSSetScissorRects(1u, &scissor_rect);
 
-        // Setup the chunk manager buffer data vectors.
-        std::vector<DirectX::XMFLOAT3> chunk_manager_color_buffer_data{};
-        std::vector<u16> chunk_manager_index_buffer_data{};
-
         // Setup indirect command vector.
-        indirect_command_vector.clear();
-        for (const auto &[chunk_position, chunk] : chunk_manager.m_loaded_chunks)
         {
-            chunk_manager_color_buffer_data.emplace_back(chunk.m_color_buffer_data);
-            chunk_manager_index_buffer_data.insert(chunk_manager_index_buffer_data.end(),
-                                                   chunk.m_index_buffer_data.begin(), chunk.m_index_buffer_data.end());
 
-            const interop::voxel_render_resources_t render_resources = {
-                .scene_constant_buffer_index = scene_buffer.m_cbv_index,
-                .shared_chunk_position_buffer_index = chunk_manager.m_shared_chunk_position_buffer.m_srv_index,
-                .color_buffer_index = chunk_manager.m_color_buffer.m_srv_index,
-                .color_start_location = (u32)chunk.m_color_buffer_start_index_location,
-                .chunk_position = {chunk_position.x, chunk_position.y, chunk_position.z},
-            };
+            ZoneScopedN("Indirect command vector setup");
 
-            indirect_command_vector.emplace_back(indirect_command_t{
-                .render_resources = render_resources,
-                .draw_arguments =
-                    D3D12_DRAW_INDEXED_ARGUMENTS{
-                        .IndexCountPerInstance = (u32)chunk.m_index_buffer_data.size(),
-                        .InstanceCount = 1u,
-                        .StartIndexLocation = (u32)chunk.m_index_buffer_start_index_location,
-                        .BaseVertexLocation = 0u,
-                        .StartInstanceLocation = 0u,
-                    },
-            });
+            indirect_command_vector.clear();
+            for (const auto &[chunk_position, chunk] : chunk_manager.m_loaded_chunks)
+            {
+                const interop::voxel_render_resources_t render_resources = {
+                    .scene_constant_buffer_index = scene_buffer.m_cbv_index,
+                    .shared_chunk_position_buffer_index = chunk_manager.m_shared_chunk_position_buffer.m_srv_index,
+                    .color_buffer_index = chunk_manager.m_color_buffer.m_srv_index,
+                    .color_start_location = (u32)chunk.m_color_buffer_start_index_location,
+                    .chunk_position = {chunk_position.x, chunk_position.y, chunk_position.z},
+                };
+
+                indirect_command_vector.emplace_back(indirect_command_t{
+                    .render_resources = render_resources,
+                    .draw_arguments =
+                        D3D12_DRAW_INDEXED_ARGUMENTS{
+                            .IndexCountPerInstance = (u32)chunk.m_index_buffer_data.size(),
+                            .InstanceCount = 1u,
+                            .StartIndexLocation = (u32)chunk.m_index_buffer_start_index_location,
+                            .BaseVertexLocation = 0u,
+                            .StartInstanceLocation = 0u,
+                        },
+                });
+            }
         }
-
         ID3D12DescriptorHeap *const *shader_visible_descriptor_heaps = {
             renderer.m_cbv_srv_uav_descriptor_heap.m_descriptor_heap.GetAddressOf(),
         };
@@ -504,12 +507,7 @@ int main()
         // Run the culling compute shader, followed by voxel rendering shader.
         if (!indirect_command_vector.empty())
         {
-
-            chunk_manager.m_color_buffer.update(chunk_manager_color_buffer_data.data(),
-                                                chunk_manager_color_buffer_data.size() * sizeof(DirectX::XMFLOAT3), 0u);
-
-            chunk_manager.m_index_buffer.update(chunk_manager_index_buffer_data.data(),
-                                                chunk_manager_index_buffer_data.size() * sizeof(u16), 0u);
+            ZoneScopedN("Cull and render");
 
             const D3D12_RESOURCE_BARRIER indirect_argument_to_copy_dest_state = {
                 .Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
@@ -604,7 +602,7 @@ int main()
         ImGui::NewFrame();
 
         ImGui::Begin("Debug Controller");
-        ImGui::SliderFloat("movement_speed", &camera.m_movement_speed, 0.0f, 500.0f);
+        ImGui::SliderFloat("movement_speed", &camera.m_movement_speed, 0.0f, 50000.0f);
         ImGui::SliderFloat("rotation_speed", &camera.m_rotation_speed, 0.0f, 10.0f);
         ImGui::SliderFloat("friction", &camera.m_friction, 0.0f, 1.0f);
         ImGui::SliderFloat("near plane", &near_plane, 0.1f, 1.0f);
