@@ -31,10 +31,10 @@ template <typename T> struct constant_buffer_t
 
 struct upload_structured_buffer_t
 {
-    structured_buffer_t m_structured_buffer{};
 
     ComPtr<ID3D12Resource> m_upload_resource{};
     u8 *m_upload_resource_mapped_ptr{};
+    u32 m_srv_index{};
 
     inline void update(const void *data, const size_t size_in_bytes, const size_t offset_in_bytes) const
     {

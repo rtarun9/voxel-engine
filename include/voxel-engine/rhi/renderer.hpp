@@ -5,6 +5,8 @@
 #include "common.hpp"
 #include "descriptor_heap.hpp"
 
+#include "tracy/Tracy.hpp"
+
 namespace rhi
 {
 // A simple & straight forward high level renderer abstraction.
@@ -91,6 +93,7 @@ struct renderer_t
 template <typename T>
 inline constant_buffer_t<T> renderer_t::create_constant_buffer(const std::wstring_view buffer_name)
 {
+    ZoneScopedC(tracy::Color::AntiqueWhite);
     constant_buffer_t<T> constant_buffer = {};
 
     const D3D12_HEAP_PROPERTIES upload_heap_properties = {

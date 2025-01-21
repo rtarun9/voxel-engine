@@ -1,10 +1,13 @@
 #include "voxel-engine/rhi/descriptor_heap.hpp"
 
+#include "tracy/Tracy.hpp"
+
 namespace rhi
 {
 
 descriptor_handle_t descriptor_heap_t::get_then_offset_current_descriptor_handle()
 {
+    ZoneScoped;
     descriptor_handle_t result = m_current_descriptor_handle;
 
     m_current_descriptor_handle.m_cpu_descriptor_handle.ptr += m_descriptor_handle_size;

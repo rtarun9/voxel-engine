@@ -126,4 +126,12 @@ struct voxel_chunk_manager_t
 
     // Threadpool from which std::futures are obtained.
     thread_pool_t m_thread_pool{};
+
+    // A queue of index / color buffer vectors that threads can re-use when creating new chunks.
+    // Reduces overhead of creating 100's of large vectors per frame.
+    struct cached_chunk_creation_resources_t
+    {
+        std::vector<u16> indices_data{};
+    };
+    std::queue<cached_chunk_creation_resources_t> m_cached_chunk_creation_resources{};
 };

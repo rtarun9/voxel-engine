@@ -1,4 +1,6 @@
+
 #include "voxel-engine/rhi/command_queue.hpp"
+#include "tracy/Tracy.hpp"
 
 namespace rhi
 {
@@ -36,6 +38,7 @@ void direct_command_queue_t::create(ID3D12Device *const device)
 
 void direct_command_queue_t::reset(const u8 index) const
 {
+    ZoneScoped;
     // Reset command allocator and command list.
     throw_if_failed(m_command_allocators[index]->Reset());
     throw_if_failed(m_command_list->Reset(m_command_allocators[index].Get(), nullptr));
@@ -43,6 +46,7 @@ void direct_command_queue_t::reset(const u8 index) const
 
 void direct_command_queue_t::execute_command_list() const
 {
+    ZoneScoped;
     throw_if_failed(m_command_list->Close());
 
     ID3D12CommandList *const command_lists_to_execute[1] = {m_command_list.Get()};
@@ -52,6 +56,7 @@ void direct_command_queue_t::execute_command_list() const
 
 void direct_command_queue_t::wait_for_fence_value_at_index(const u8 index)
 {
+    ZoneScoped;
     if (m_fence->GetCompletedValue() >= m_frame_fence_values[index])
     {
         return;
@@ -64,12 +69,14 @@ void direct_command_queue_t::wait_for_fence_value_at_index(const u8 index)
 
 void direct_command_queue_t::signal_fence(const u8 index)
 {
+    ZoneScoped;
     throw_if_failed(m_command_queue->Signal(m_fence.Get(), ++m_monotonic_fence_value));
     m_frame_fence_values[index] = m_monotonic_fence_value;
 }
 
 void direct_command_queue_t::flush_queue()
 {
+    ZoneScoped;
     signal_fence(0);
 
     for (u32 i = 0; i < NUMBER_OF_BACKBUFFERS; i++)
@@ -82,6 +89,7 @@ void direct_command_queue_t::flush_queue()
 
 void copy_command_queue_t::create(ID3D12Device *const device)
 {
+    ZoneScoped;
     assert(device);
 
     const D3D12_COMMAND_QUEUE_DESC command_queue_desc = {
@@ -101,6 +109,7 @@ void copy_command_queue_t::create(ID3D12Device *const device)
 copy_command_queue_t::command_allocator_list_pair_t copy_command_queue_t::get_command_allocator_list_pair(
     ID3D12Device *const device)
 {
+    ZoneScoped;
     assert(device);
 
     if (!m_command_allocator_list_queue.empty() &&
@@ -133,6 +142,7 @@ copy_command_queue_t::command_allocator_list_pair_t copy_command_queue_t::get_co
 
 void copy_command_queue_t::execute_command_list(command_allocator_list_pair_t &&alloc_list_pair)
 {
+    ZoneScoped;
     throw_if_failed(alloc_list_pair.m_command_list->Close());
 
     ID3D12CommandList *const command_lists_to_execute[1] = {alloc_list_pair.m_command_list.Get()};
@@ -148,6 +158,7 @@ void copy_command_queue_t::execute_command_list(command_allocator_list_pair_t &&
 
 void copy_command_queue_t::flush_queue()
 {
+    ZoneScoped;
     throw_if_failed(m_command_queue->Signal(m_fence.Get(), ++m_monotonic_fence_value));
     throw_if_failed(m_fence->SetEventOnCompletion(m_monotonic_fence_value, nullptr));
 }

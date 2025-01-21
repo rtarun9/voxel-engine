@@ -13,6 +13,8 @@
 #include "imgui_impl_dx12.h"
 #include "imgui_impl_win32.h"
 
+#include "tracy/Tracy.hpp"
+
 int main()
 {
     printf("Executable Path :: %s\n", file_system_t::instance().executable_path().c_str());
@@ -361,6 +363,9 @@ int main()
                 (std::abs(chunk.m_chunk_position.y - current_chunk_3d_index.y) > CHUNK_RENDER_DISTANCE_PER_DIMENSION) ||
                 (std::abs(chunk.m_chunk_position.z - current_chunk_3d_index.z) > CHUNK_RENDER_DISTANCE_PER_DIMENSION))
             {
+                chunk_manager.m_cached_chunk_creation_resources.push(
+                    voxel_chunk_manager_t::cached_chunk_creation_resources_t{.indices_data =
+                                                                                 std::move(chunk.m_index_buffer_data)});
                 chunk_manager.m_chunk_manager_buffer_offset_queue.push(
                     voxel_chunk_manager_t::chunk_manager_buffer_offset_t{
                         .m_color_buffer_start_index_location = chunk.m_color_buffer_start_index_location,
@@ -470,7 +475,7 @@ int main()
             const interop::voxel_render_resources_t render_resources = {
                 .scene_constant_buffer_index = scene_buffer.m_cbv_index,
                 .shared_chunk_position_buffer_index = chunk_manager.m_shared_chunk_position_buffer.m_srv_index,
-                .color_buffer_index = chunk_manager.m_color_buffer.m_structured_buffer.m_srv_index,
+                .color_buffer_index = chunk_manager.m_color_buffer.m_srv_index,
                 .color_start_location = (u32)chunk.m_color_buffer_start_index_location,
                 .chunk_position = {chunk_position.x, chunk_position.y, chunk_position.z},
             };
@@ -505,12 +510,6 @@ int main()
 
             chunk_manager.m_index_buffer.update(chunk_manager_index_buffer_data.data(),
                                                 chunk_manager_index_buffer_data.size() * sizeof(u16), 0u);
-
-            command_list->CopyResource(chunk_manager.m_color_buffer.m_structured_buffer.m_resource.Get(),
-                                       chunk_manager.m_color_buffer.m_upload_resource.Get());
-
-            command_list->CopyResource(chunk_manager.m_index_buffer.m_structured_buffer.m_resource.Get(),
-                                       chunk_manager.m_index_buffer.m_upload_resource.Get());
 
             const D3D12_RESOURCE_BARRIER indirect_argument_to_copy_dest_state = {
                 .Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
@@ -586,7 +585,7 @@ int main()
             command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
             const D3D12_INDEX_BUFFER_VIEW index_buffer_view = {
-                .BufferLocation = chunk_manager.m_index_buffer.m_structured_buffer.m_resource->GetGPUVirtualAddress(),
+                .BufferLocation = chunk_manager.m_index_buffer.m_upload_resource->GetGPUVirtualAddress(),
                 .SizeInBytes = (u32)(sizeof(u16) * 36u * NUMBER_OF_VOXELS_PER_CHUNK * MAX_NUMBER_OF_LOADED_CHUNKS),
                 .Format = DXGI_FORMAT_R16_UINT,
             };
@@ -660,6 +659,8 @@ int main()
         ++frame_count;
 
         delta_time = timer.tick_and_get_delta_time_seconds();
+
+        FrameMark;
     }
 
     // Cleanup
