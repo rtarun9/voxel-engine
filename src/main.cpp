@@ -327,337 +327,352 @@ int main()
     b32 quit{false};
     while (!quit)
     {
-        u8 keyboard_state[256] = {};
-
-        MSG message = {};
-        if (PeekMessageA(&message, NULL, 0u, 0u, PM_REMOVE))
-        {
-            TranslateMessage(&message);
-            DispatchMessageA(&message);
-        }
-
-        if (message.message == WM_QUIT)
-        {
-            quit = true;
-        }
-
-        b32 get_keyboard_state_result = GetKeyboardState(keyboard_state);
-        assert(get_keyboard_state_result);
-
-        static f32 near_plane = 1.0f;
-
-        // Get the player's current chunk index.
-        const voxel_chunk_position_t current_chunk_3d_index = {
-            (i32)(floor((camera.m_position.x) / voxel_chunk_t::CHUNK_LENGTH)),
-            (i32)(floor((camera.m_position.y) / voxel_chunk_t::CHUNK_LENGTH)),
-            (i32)(floor((camera.m_position.z) / voxel_chunk_t::CHUNK_LENGTH)),
-        };
-
-        {
-            // Evict the chunks that are out of range of render distance.
-            std::erase_if(
-                chunk_manager.m_loaded_chunks,
-                [current_chunk_3d_index,
-                 &chunk_manager](const std::pair<const voxel_chunk_position_t, voxel_chunk_t> &key_value_pair) {
-                    auto &chunk = key_value_pair.second;
-
-                    if ((std::abs(chunk.m_chunk_position.x - current_chunk_3d_index.x) >
-                         CHUNK_RENDER_DISTANCE_PER_DIMENSION) ||
-                        (std::abs(chunk.m_chunk_position.y - current_chunk_3d_index.y) >
-                         CHUNK_RENDER_DISTANCE_PER_DIMENSION) ||
-                        (std::abs(chunk.m_chunk_position.z - current_chunk_3d_index.z) >
-                         CHUNK_RENDER_DISTANCE_PER_DIMENSION))
-                    {
-                        chunk_manager.m_cached_chunk_creation_resources.push(
-                            voxel_chunk_manager_t::cached_chunk_creation_resources_t{
-                                .indices_data = std::move(chunk.m_index_buffer_data)});
-                        chunk_manager.m_chunk_manager_buffer_offset_queue.push(
-                            voxel_chunk_manager_t::chunk_manager_buffer_offset_t{
-                                .m_color_buffer_start_index_location = chunk.m_color_buffer_start_index_location,
-                                .m_index_buffer_start_index_location = chunk.m_index_buffer_start_index_location,
-                            });
-                        return true;
-                    }
-
-                    return false;
-                });
-        }
-
-        if (setup_chunks)
-        {
-            ZoneScopedN("Setup chunks");
-            // Load chunks around the player.
-            for (const auto &offset : chunk_render_distance_offsets)
-            {
-                const voxel_chunk_position_t chunk_3d_index = {
-                    current_chunk_3d_index.x + offset.x,
-                    current_chunk_3d_index.y + offset.y,
-                    current_chunk_3d_index.z + offset.z,
-                };
-
-                chunk_manager.add_chunk_to_setup_stack(chunk_3d_index);
-            }
-        }
-
-        chunk_manager.create_chunks_from_setup_stack(renderer);
-        chunk_manager.transfer_chunks_from_setup_to_loaded_state();
-
-        const float window_aspect_ratio = static_cast<float>(window.get_width()) / window.get_height();
+        ZoneScopedN("Game loop");
 
         rhi::constant_buffer_t<interop::scene_constant_buffer_t> &scene_buffer =
             scene_buffers[renderer.m_swapchain_backbuffer_index];
 
-        DirectX::XMMATRIX projection_matrix = {};
+        voxel_chunk_position_t current_chunk_3d_index{};
+
+        static f32 near_plane = 1.0f;
+
         {
-            // Article followed for reverse Z:
-            //  https://iolite-engine.com/blog_posts/reverse_z_cheatsheet
+            ZoneScopedN("Update");
+            u8 keyboard_state[256] = {};
 
-            // https://github.com/microsoft/DirectXMath/issues/158 link that shows the projection matrix for infinite
-            // far plane. Note : This code is taken from the directxmath source code for perspective projection fov lh,
-            // but modified for infinite far plane.
-
-            float sin_fov{};
-            float cos_fov{};
-            DirectX::XMScalarSinCos(&sin_fov, &cos_fov, 0.5f * DirectX::XMConvertToRadians(45.0f));
-
-            float height = cos_fov / sin_fov;
-            float width = height / window_aspect_ratio;
-
-            projection_matrix = DirectX::XMMatrixSet(width, 0.0f, 0.0f, 0.0f, 0.0f, height, 0.0f, 0.0f, 0.0f, 0.0f,
-                                                     0.0f, 1.0f, 0.0f, 0.0f, near_plane, 0.0f);
-        }
-        scene_buffer.m_data.view_matrix = camera.update_and_get_view_matrix(keyboard_state, delta_time);
-        scene_buffer.m_data.projection_matrix = projection_matrix;
-        scene_buffer.m_data.camera_position = camera.m_position;
-        scene_buffer.m_data.voxel_chunk_length = voxel_chunk_t::CHUNK_LENGTH;
-        scene_buffer.update();
-
-        const auto &swapchain_index = renderer.m_swapchain_backbuffer_index;
-
-        // Reset command allocator and command list.
-        renderer.m_direct_queue.reset(swapchain_index);
-
-        const auto &command_list = renderer.m_direct_queue.m_command_list;
-
-        const auto &swapchain_backbuffer = renderer.m_swapchain_backbuffers[swapchain_index];
-
-        const ComPtr<ID3D12Resource> swapchain_resource = swapchain_backbuffer.m_resource;
-
-        // Transition the backbuffer from presentation mode to render target mode.
-        const D3D12_RESOURCE_BARRIER presentation_to_render_target_barrier = {
-            .Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
-            .Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE,
-            .Transition =
-                {
-                    .pResource = swapchain_resource.Get(),
-                    .Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
-                    .StateBefore = D3D12_RESOURCE_STATE_PRESENT,
-                    .StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET,
-                },
-        };
-
-        command_list->ResourceBarrier(1u, &presentation_to_render_target_barrier);
-
-        // Now, clear the RTV and DSV.
-        const float clear_color[4] = {0.1f, 0.1f, 0.1f, 1.0f};
-        command_list->ClearRenderTargetView(swapchain_backbuffer.m_rtv_cpu_descriptor_handle, clear_color, 0u, nullptr);
-        command_list->ClearDepthStencilView(dsv_handle, D3D12_CLEAR_FLAG_DEPTH, 0.0f, 0u, 0u, nullptr);
-
-        // Set viewport.
-        command_list->RSSetViewports(1u, &viewport);
-        command_list->RSSetScissorRects(1u, &scissor_rect);
-
-        // Setup indirect command vector.
-        {
-
-            ZoneScopedN("Indirect command vector setup");
-
-            indirect_command_vector.clear();
-            for (const auto &[chunk_position, chunk] : chunk_manager.m_loaded_chunks)
+            MSG message = {};
+            if (PeekMessageA(&message, NULL, 0u, 0u, PM_REMOVE))
             {
-                const interop::voxel_render_resources_t render_resources = {
-                    .scene_constant_buffer_index = scene_buffer.m_cbv_index,
-                    .shared_chunk_position_buffer_index = chunk_manager.m_shared_chunk_position_buffer.m_srv_index,
-                    .color_buffer_index = chunk_manager.m_color_buffer.m_srv_index,
-                    .color_start_location = (u32)chunk.m_color_buffer_start_index_location,
-                    .chunk_position = {chunk_position.x, chunk_position.y, chunk_position.z},
-                };
-
-                indirect_command_vector.emplace_back(indirect_command_t{
-                    .render_resources = render_resources,
-                    .draw_arguments =
-                        D3D12_DRAW_INDEXED_ARGUMENTS{
-                            .IndexCountPerInstance = (u32)chunk.m_index_buffer_data.size(),
-                            .InstanceCount = 1u,
-                            .StartIndexLocation = (u32)chunk.m_index_buffer_start_index_location,
-                            .BaseVertexLocation = 0u,
-                            .StartInstanceLocation = 0u,
-                        },
-                });
+                TranslateMessage(&message);
+                DispatchMessageA(&message);
             }
-        }
-        ID3D12DescriptorHeap *const *shader_visible_descriptor_heaps = {
-            renderer.m_cbv_srv_uav_descriptor_heap.m_descriptor_heap.GetAddressOf(),
-        };
 
-        command_list->SetDescriptorHeaps(1u, shader_visible_descriptor_heaps);
-        // Prepare rendering commands.
-        command_list->OMSetRenderTargets(1u, &swapchain_backbuffer.m_rtv_cpu_descriptor_handle, FALSE, &dsv_handle);
+            if (message.message == WM_QUIT)
+            {
+                quit = true;
+            }
 
-        // Run the culling compute shader, followed by voxel rendering shader.
-        if (!indirect_command_vector.empty())
-        {
-            ZoneScopedN("Cull and render");
+            b32 get_keyboard_state_result = GetKeyboardState(keyboard_state);
+            assert(get_keyboard_state_result);
 
-            const D3D12_RESOURCE_BARRIER indirect_argument_to_copy_dest_state = {
-                .Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
-                .Flags = D3D12_RESOURCE_BARRIER_FLAGS::D3D12_RESOURCE_BARRIER_FLAG_NONE,
-                .Transition =
-                    D3D12_RESOURCE_TRANSITION_BARRIER{
-                        .pResource = indirect_command_buffer.m_default_resource.Get(),
-                        .Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
-                        .StateBefore = D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT,
-                        .StateAfter = D3D12_RESOURCE_STATE_COPY_DEST,
-                    },
-            };
-            command_list->ResourceBarrier(1u, &indirect_argument_to_copy_dest_state);
-
-            memcpy(indirect_command_buffer.m_upload_resource_mapped_ptr, indirect_command_vector.data(),
-                   indirect_command_vector.size() * sizeof(indirect_command_t));
-
-            interop::gpu_cull_render_resources_t gpu_cull_render_resources = {
-                .number_of_chunks = (u32)indirect_command_vector.size(),
-                .indirect_command_srv_index = indirect_command_buffer.m_upload_resource_srv_index,
-                .output_command_uav_index = indirect_command_buffer.m_default_resource_uav_index,
-                .scene_constant_buffer_index = scene_buffer.m_cbv_index,
+            // Get the player's current chunk index.
+            current_chunk_3d_index = {
+                (i32)(floor((camera.m_position.x) / voxel_chunk_t::CHUNK_LENGTH)),
+                (i32)(floor((camera.m_position.y) / voxel_chunk_t::CHUNK_LENGTH)),
+                (i32)(floor((camera.m_position.z) / voxel_chunk_t::CHUNK_LENGTH)),
             };
 
-            command_list->SetDescriptorHeaps(1u, shader_visible_descriptor_heaps);
-            command_list->SetComputeRootSignature(renderer.m_bindless_root_signature.Get());
-            command_list->SetPipelineState(gpu_culling_pso.Get());
+            {
+                ZoneScopedN("Chunk eviction");
+                // Evict the chunks that are out of range of render distance.
+                std::erase_if(
+                    chunk_manager.m_loaded_chunks,
+                    [current_chunk_3d_index,
+                     &chunk_manager](const std::pair<const voxel_chunk_position_t, voxel_chunk_t> &key_value_pair) {
+                        auto &chunk = key_value_pair.second;
 
-            command_list->SetComputeRoot32BitConstants(0u, 64u, &gpu_cull_render_resources, 0u);
+                        if ((std::abs(chunk.m_chunk_position.x - current_chunk_3d_index.x) >
+                             CHUNK_RENDER_DISTANCE_PER_DIMENSION) ||
+                            (std::abs(chunk.m_chunk_position.y - current_chunk_3d_index.y) >
+                             CHUNK_RENDER_DISTANCE_PER_DIMENSION) ||
+                            (std::abs(chunk.m_chunk_position.z - current_chunk_3d_index.z) >
+                             CHUNK_RENDER_DISTANCE_PER_DIMENSION))
+                        {
+                            chunk_manager.m_unloaded_voxel_chunk_data.push(
+                                voxel_chunk_manager_t::unloaded_voxel_chunk_data_t{.m_chunk = std::move(chunk)});
+                            return true;
+                        }
 
-            // Clear the counter associated with UAV.
+                        return false;
+                    });
+            }
 
-            command_list->CopyBufferRegion(indirect_command_buffer.m_default_resource.Get(),
-                                           indirect_command_buffer.m_counter_offset,
-                                           indirect_command_buffer.m_zeroed_counter_buffer_resource.Get(), 0u, 4u);
-
-            const D3D12_RESOURCE_BARRIER copy_dest_to_unordered_access_state = {
-                .Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
-                .Flags = D3D12_RESOURCE_BARRIER_FLAGS::D3D12_RESOURCE_BARRIER_FLAG_NONE,
-                .Transition =
-                    D3D12_RESOURCE_TRANSITION_BARRIER{
-                        .pResource = indirect_command_buffer.m_default_resource.Get(),
-                        .Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
-                        .StateBefore = D3D12_RESOURCE_STATE_COPY_DEST,
-                        .StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-                    },
-
-            };
-
-            command_list->ResourceBarrier(1u, &copy_dest_to_unordered_access_state);
-
-            command_list->Dispatch((indirect_command_vector.size() + 31) / 32u, 1u, 1u);
-
-            const D3D12_RESOURCE_BARRIER unordered_access_to_indirect_argument_state = {
-                .Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
-                .Flags = D3D12_RESOURCE_BARRIER_FLAGS::D3D12_RESOURCE_BARRIER_FLAG_NONE,
-                .Transition =
-                    D3D12_RESOURCE_TRANSITION_BARRIER{
-                        .pResource = indirect_command_buffer.m_default_resource.Get(),
-                        .Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
-                        .StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-                        .StateAfter = D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT,
-                    },
-
-            };
-
-            command_list->ResourceBarrier(1u, &unordered_access_to_indirect_argument_state);
-
-            command_list->SetDescriptorHeaps(1u, shader_visible_descriptor_heaps);
-            command_list->SetGraphicsRootSignature(renderer.m_bindless_root_signature.Get());
-            command_list->SetPipelineState(pso.Get());
-
-            command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-
-            const D3D12_INDEX_BUFFER_VIEW index_buffer_view = {
-                .BufferLocation = chunk_manager.m_index_buffer.m_upload_resource->GetGPUVirtualAddress(),
-                .SizeInBytes = (u32)(sizeof(u16) * 36u * NUMBER_OF_VOXELS_PER_CHUNK * MAX_NUMBER_OF_LOADED_CHUNKS),
-                .Format = DXGI_FORMAT_R16_UINT,
-            };
-            command_list->IASetIndexBuffer(&index_buffer_view);
-
-            command_list->ExecuteIndirect(
-                command_signature.Get(), MAX_CHUNKS_TO_BE_DRAWN, indirect_command_buffer.m_default_resource.Get(), 0u,
-                indirect_command_buffer.m_default_resource.Get(), indirect_command_buffer.m_counter_offset);
-        }
-
-        // Render UI.
-        // Start the Dear ImGui frame
-
-        ImGui_ImplDX12_NewFrame();
-        ImGui_ImplWin32_NewFrame();
-        ImGui::NewFrame();
-
-        ImGui::Begin("Debug Controller");
-        ImGui::SliderFloat("movement_speed", &camera.m_movement_speed, 0.0f, 50000.0f);
-        ImGui::SliderFloat("rotation_speed", &camera.m_rotation_speed, 0.0f, 10.0f);
-        ImGui::SliderFloat("friction", &camera.m_friction, 0.0f, 1.0f);
-        ImGui::SliderFloat("near plane", &near_plane, 0.1f, 1.0f);
-        ImGui::Checkbox("Start loading chunks", &setup_chunks);
-        ImGui::Text("Delta Time: %f", delta_time);
-        ImGui::Text("Camera Position : %f %f %f", camera.m_position.x, camera.m_position.y, camera.m_position.z);
-        ImGui::Text("Pitch and Yaw: %f %f", camera.m_pitch, camera.m_yaw);
-        ImGui::Text("Current 3D Index: %d, %d, %d", current_chunk_3d_index.x, current_chunk_3d_index.y,
-                    current_chunk_3d_index.z);
-        ImGui::Text("Number of loaded chunks: %zu", chunk_manager.m_loaded_chunks.size());
-        ImGui::Text("Number of copy alloc / list pairs : %zu",
-                    renderer.m_copy_queue.m_command_allocator_list_queue.size());
-        ImGui::Text("Voxel edge length : %zu", voxel_t::EDGE_LENGTH);
-        ImGui::Text("Number of threads in pool : %zu", chunk_manager.m_thread_pool.get_thread_count());
-        ImGui::Text("Number of queued threads in pool : %zu", chunk_manager.m_thread_pool.get_tasks_queued());
-
-        ImGui::ShowMetricsWindow();
-        ImGui::End();
-
-        command_list->SetDescriptorHeaps(1u, shader_visible_descriptor_heaps);
-        ImGui::Render();
-        ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), command_list.Get());
-
-        // Now, transition back to presentation mode.
-        const D3D12_RESOURCE_BARRIER render_target_to_presentation_barrier = {
-            .Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
-            .Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE,
-            .Transition =
+            if (setup_chunks)
+            {
+                ZoneScopedN("Setup chunks");
+                // Load chunks around the player.
+                for (const auto &offset : chunk_render_distance_offsets)
                 {
-                    .pResource = swapchain_resource.Get(),
-                    .Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
-                    .StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET,
-                    .StateAfter = D3D12_RESOURCE_STATE_PRESENT,
-                },
-        };
+                    const voxel_chunk_position_t chunk_3d_index = {
+                        current_chunk_3d_index.x + offset.x,
+                        current_chunk_3d_index.y + offset.y,
+                        current_chunk_3d_index.z + offset.z,
+                    };
 
-        command_list->ResourceBarrier(1u, &render_target_to_presentation_barrier);
+                    chunk_manager.add_chunk_to_setup_stack(chunk_3d_index);
+                }
+            }
 
-        // Submit command list to queue for execution.
-        renderer.m_direct_queue.execute_command_list();
+            chunk_manager.create_chunks_from_setup_stack(renderer);
+            chunk_manager.transfer_chunks_from_setup_to_loaded_state();
 
-        // Now, present the rendertarget and signal command queue.
-        throw_if_failed(renderer.m_swapchain->Present(1u, 0u));
-        renderer.m_direct_queue.signal_fence(renderer.m_swapchain_backbuffer_index);
+            const float window_aspect_ratio = static_cast<float>(window.get_width()) / window.get_height();
 
-        renderer.m_swapchain_backbuffer_index = static_cast<u8>(renderer.m_swapchain->GetCurrentBackBufferIndex());
+            DirectX::XMMATRIX projection_matrix = {};
+            {
+                // Article followed for reverse Z:
+                //  https://iolite-engine.com/blog_posts/reverse_z_cheatsheet
 
-        // Wait for the previous frame (that is presenting to
-        // swpachain_backbuffer_index) to complete execution.
-        renderer.m_direct_queue.wait_for_fence_value_at_index(renderer.m_swapchain_backbuffer_index);
+                // https://github.com/microsoft/DirectXMath/issues/158 link that shows the projection matrix for
+                // infinite far plane. Note : This code is taken from the directxmath source code for perspective
+                // projection fov lh, but modified for infinite far plane.
+
+                float sin_fov{};
+                float cos_fov{};
+                DirectX::XMScalarSinCos(&sin_fov, &cos_fov, 0.5f * DirectX::XMConvertToRadians(45.0f));
+
+                float height = cos_fov / sin_fov;
+                float width = height / window_aspect_ratio;
+
+                projection_matrix = DirectX::XMMatrixSet(width, 0.0f, 0.0f, 0.0f, 0.0f, height, 0.0f, 0.0f, 0.0f, 0.0f,
+                                                         0.0f, 1.0f, 0.0f, 0.0f, near_plane, 0.0f);
+            }
+            scene_buffer.m_data.view_matrix = camera.update_and_get_view_matrix(keyboard_state, delta_time);
+            scene_buffer.m_data.projection_matrix = projection_matrix;
+            scene_buffer.m_data.camera_position = camera.m_position;
+            scene_buffer.m_data.voxel_chunk_length = voxel_chunk_t::CHUNK_LENGTH;
+            scene_buffer.update();
+        }
+
+        {
+            ZoneScopedN("Render");
+            const auto &swapchain_index = renderer.m_swapchain_backbuffer_index;
+
+            // Reset command allocator and command list.
+            renderer.m_direct_queue.reset(swapchain_index);
+
+            const auto &command_list = renderer.m_direct_queue.m_command_list;
+
+            const auto &swapchain_backbuffer = renderer.m_swapchain_backbuffers[swapchain_index];
+
+            const ComPtr<ID3D12Resource> swapchain_resource = swapchain_backbuffer.m_resource;
+
+            // Transition the backbuffer from presentation mode to render target mode.
+            const D3D12_RESOURCE_BARRIER presentation_to_render_target_barrier = {
+                .Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
+                .Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE,
+                .Transition =
+                    {
+                        .pResource = swapchain_resource.Get(),
+                        .Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+                        .StateBefore = D3D12_RESOURCE_STATE_PRESENT,
+                        .StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET,
+                    },
+            };
+
+            command_list->ResourceBarrier(1u, &presentation_to_render_target_barrier);
+
+            // Now, clear the RTV and DSV.
+            const float clear_color[4] = {0.1f, 0.1f, 0.1f, 1.0f};
+            command_list->ClearRenderTargetView(swapchain_backbuffer.m_rtv_cpu_descriptor_handle, clear_color, 0u,
+                                                nullptr);
+            command_list->ClearDepthStencilView(dsv_handle, D3D12_CLEAR_FLAG_DEPTH, 0.0f, 0u, 0u, nullptr);
+
+            // Set viewport.
+            command_list->RSSetViewports(1u, &viewport);
+            command_list->RSSetScissorRects(1u, &scissor_rect);
+
+            // Setup indirect command vector.
+            {
+
+                ZoneScopedN("Indirect command vector setup");
+
+                indirect_command_vector.clear();
+                for (const auto &[chunk_position, chunk] : chunk_manager.m_loaded_chunks)
+                {
+                    const interop::voxel_render_resources_t render_resources = {
+                        .scene_constant_buffer_index = scene_buffer.m_cbv_index,
+                        .shared_chunk_position_buffer_index = chunk_manager.m_shared_chunk_position_buffer.m_srv_index,
+                        .color_buffer_index = chunk_manager.m_color_buffer.m_srv_index,
+                        .color_start_location = (u32)chunk.m_color_buffer_start_index_location,
+                        .chunk_position = {chunk_position.x, chunk_position.y, chunk_position.z},
+                    };
+
+                    indirect_command_vector.emplace_back(indirect_command_t{
+                        .render_resources = render_resources,
+                        .draw_arguments =
+                            D3D12_DRAW_INDEXED_ARGUMENTS{
+                                .IndexCountPerInstance = (u32)chunk.m_index_buffer_data.size(),
+                                .InstanceCount = 1u,
+                                .StartIndexLocation = (u32)chunk.m_index_buffer_start_index_location,
+                                .BaseVertexLocation = 0u,
+                                .StartInstanceLocation = 0u,
+                            },
+                    });
+                }
+            }
+            ID3D12DescriptorHeap *const *shader_visible_descriptor_heaps = {
+                renderer.m_cbv_srv_uav_descriptor_heap.m_descriptor_heap.GetAddressOf(),
+            };
+
+            command_list->SetDescriptorHeaps(1u, shader_visible_descriptor_heaps);
+            // Prepare rendering commands.
+            command_list->OMSetRenderTargets(1u, &swapchain_backbuffer.m_rtv_cpu_descriptor_handle, FALSE, &dsv_handle);
+
+            // Run the culling compute shader, followed by voxel rendering shader.
+            if (!indirect_command_vector.empty())
+            {
+                ZoneScopedN("Cull and render");
+
+                {
+                    ZoneScopedN("Frustrum culling");
+
+                    const D3D12_RESOURCE_BARRIER indirect_argument_to_copy_dest_state = {
+                        .Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
+                        .Flags = D3D12_RESOURCE_BARRIER_FLAGS::D3D12_RESOURCE_BARRIER_FLAG_NONE,
+                        .Transition =
+                            D3D12_RESOURCE_TRANSITION_BARRIER{
+                                .pResource = indirect_command_buffer.m_default_resource.Get(),
+                                .Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+                                .StateBefore = D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT,
+                                .StateAfter = D3D12_RESOURCE_STATE_COPY_DEST,
+                            },
+                    };
+                    command_list->ResourceBarrier(1u, &indirect_argument_to_copy_dest_state);
+
+                    memcpy(indirect_command_buffer.m_upload_resource_mapped_ptr, indirect_command_vector.data(),
+                           indirect_command_vector.size() * sizeof(indirect_command_t));
+
+                    interop::gpu_cull_render_resources_t gpu_cull_render_resources = {
+                        .number_of_chunks = (u32)indirect_command_vector.size(),
+                        .indirect_command_srv_index = indirect_command_buffer.m_upload_resource_srv_index,
+                        .output_command_uav_index = indirect_command_buffer.m_default_resource_uav_index,
+                        .scene_constant_buffer_index = scene_buffer.m_cbv_index,
+                    };
+
+                    command_list->SetDescriptorHeaps(1u, shader_visible_descriptor_heaps);
+                    command_list->SetComputeRootSignature(renderer.m_bindless_root_signature.Get());
+                    command_list->SetPipelineState(gpu_culling_pso.Get());
+
+                    command_list->SetComputeRoot32BitConstants(0u, 64u, &gpu_cull_render_resources, 0u);
+
+                    // Clear the counter associated with UAV.
+
+                    command_list->CopyBufferRegion(
+                        indirect_command_buffer.m_default_resource.Get(), indirect_command_buffer.m_counter_offset,
+                        indirect_command_buffer.m_zeroed_counter_buffer_resource.Get(), 0u, 4u);
+
+                    const D3D12_RESOURCE_BARRIER copy_dest_to_unordered_access_state = {
+                        .Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
+                        .Flags = D3D12_RESOURCE_BARRIER_FLAGS::D3D12_RESOURCE_BARRIER_FLAG_NONE,
+                        .Transition =
+                            D3D12_RESOURCE_TRANSITION_BARRIER{
+                                .pResource = indirect_command_buffer.m_default_resource.Get(),
+                                .Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+                                .StateBefore = D3D12_RESOURCE_STATE_COPY_DEST,
+                                .StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                            },
+
+                    };
+
+                    command_list->ResourceBarrier(1u, &copy_dest_to_unordered_access_state);
+
+                    command_list->Dispatch((indirect_command_vector.size() + 31) / 32u, 1u, 1u);
+
+                    const D3D12_RESOURCE_BARRIER unordered_access_to_indirect_argument_state = {
+                        .Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
+                        .Flags = D3D12_RESOURCE_BARRIER_FLAGS::D3D12_RESOURCE_BARRIER_FLAG_NONE,
+                        .Transition =
+                            D3D12_RESOURCE_TRANSITION_BARRIER{
+                                .pResource = indirect_command_buffer.m_default_resource.Get(),
+                                .Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+                                .StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                                .StateAfter = D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT,
+                            },
+
+                    };
+
+                    command_list->ResourceBarrier(1u, &unordered_access_to_indirect_argument_state);
+                }
+
+                {
+
+                    ZoneScopedN("Execute indirect");
+                    command_list->SetDescriptorHeaps(1u, shader_visible_descriptor_heaps);
+                    command_list->SetGraphicsRootSignature(renderer.m_bindless_root_signature.Get());
+                    command_list->SetPipelineState(pso.Get());
+
+                    command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+                    const D3D12_INDEX_BUFFER_VIEW index_buffer_view = {
+                        .BufferLocation = chunk_manager.m_index_buffer.m_upload_resource->GetGPUVirtualAddress(),
+                        .SizeInBytes =
+                            (u32)(sizeof(u16) * 36u * NUMBER_OF_VOXELS_PER_CHUNK * MAX_NUMBER_OF_LOADED_CHUNKS),
+                        .Format = DXGI_FORMAT_R16_UINT,
+                    };
+                    command_list->IASetIndexBuffer(&index_buffer_view);
+
+                    command_list->ExecuteIndirect(command_signature.Get(), MAX_CHUNKS_TO_BE_DRAWN,
+                                                  indirect_command_buffer.m_default_resource.Get(), 0u,
+                                                  indirect_command_buffer.m_default_resource.Get(),
+                                                  indirect_command_buffer.m_counter_offset);
+                }
+            }
+
+            // Render UI.
+            // Start the Dear ImGui frame
+
+            ImGui_ImplDX12_NewFrame();
+            ImGui_ImplWin32_NewFrame();
+            ImGui::NewFrame();
+
+            ImGui::Begin("Debug Controller");
+            ImGui::SliderFloat("movement_speed", &camera.m_movement_speed, 0.0f, 50000.0f);
+            ImGui::SliderFloat("rotation_speed", &camera.m_rotation_speed, 0.0f, 10.0f);
+            ImGui::SliderFloat("friction", &camera.m_friction, 0.0f, 1.0f);
+            ImGui::SliderFloat("near plane", &near_plane, 0.1f, 1.0f);
+            ImGui::Checkbox("Start loading chunks", &setup_chunks);
+            ImGui::Text("Delta Time: %f", delta_time);
+            ImGui::Text("Camera Position : %f %f %f", camera.m_position.x, camera.m_position.y, camera.m_position.z);
+            ImGui::Text("Pitch and Yaw: %f %f", camera.m_pitch, camera.m_yaw);
+            ImGui::Text("Current 3D Index: %d, %d, %d", current_chunk_3d_index.x, current_chunk_3d_index.y,
+                        current_chunk_3d_index.z);
+            ImGui::Text("Number of loaded chunks: %zu", chunk_manager.m_loaded_chunks.size());
+            ImGui::Text("Number of copy alloc / list pairs : %zu",
+                        renderer.m_copy_queue.m_command_allocator_list_queue.size());
+            ImGui::Text("Voxel edge length : %zu", voxel_t::EDGE_LENGTH);
+            ImGui::Text("Number of threads in pool : %zu", chunk_manager.m_thread_pool.get_thread_count());
+            ImGui::Text("Number of queued threads in pool : %zu", chunk_manager.m_thread_pool.get_tasks_queued());
+
+            ImGui::ShowMetricsWindow();
+            ImGui::End();
+
+            command_list->SetDescriptorHeaps(1u, shader_visible_descriptor_heaps);
+            ImGui::Render();
+            ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), command_list.Get());
+
+            // Now, transition back to presentation mode.
+            const D3D12_RESOURCE_BARRIER render_target_to_presentation_barrier = {
+                .Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
+                .Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE,
+                .Transition =
+                    {
+                        .pResource = swapchain_resource.Get(),
+                        .Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+                        .StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET,
+                        .StateAfter = D3D12_RESOURCE_STATE_PRESENT,
+                    },
+            };
+
+            command_list->ResourceBarrier(1u, &render_target_to_presentation_barrier);
+
+            // Submit command list to queue for execution.
+            renderer.m_direct_queue.execute_command_list();
+
+            // Now, present the rendertarget and signal command queue.
+            throw_if_failed(renderer.m_swapchain->Present(1u, 0u));
+            renderer.m_direct_queue.signal_fence(renderer.m_swapchain_backbuffer_index);
+
+            renderer.m_swapchain_backbuffer_index = static_cast<u8>(renderer.m_swapchain->GetCurrentBackBufferIndex());
+
+            // Wait for the previous frame (that is presenting to
+            // swpachain_backbuffer_index) to complete execution.
+            renderer.m_direct_queue.wait_for_fence_value_at_index(renderer.m_swapchain_backbuffer_index);
+        }
 
         ++frame_count;
 
         delta_time = timer.tick_and_get_delta_time_seconds();
-
         FrameMark;
     }
 

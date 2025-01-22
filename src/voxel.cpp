@@ -117,27 +117,35 @@ void voxel_chunk_manager_t::create_chunks_from_setup_stack(rhi::renderer_t &rend
     while (chunks_that_are_setup++ < voxel_chunk_manager_t::NUMBER_OF_CHUNKS_TO_CREATE_PER_FRAME &&
            !m_chunks_to_setup_stack.empty())
     {
+
         // First check if chunk_index_data is cached and ready for use.
         const voxel_chunk_position_t top = m_chunks_to_setup_stack.top();
         m_chunks_to_setup_stack.pop();
 
         m_setup_chunk_futures_queue.emplace(m_thread_pool.add_to_task_queue([this, &renderer, chunk_position = top]() {
-            voxel_chunk_t setup_chunk_data{};
+            ZoneScopedN("Meshing algorithm MT");
 
-            // See if a vector of u16's is cached and available for use. This will prevent unnecessary creation of
-            // std::vectors each frame. Iterate over each voxel in chunk and setup the chunk index and color buffer.
-            std::vector<u16> chunk_index_data{};
-            if (!m_cached_chunk_creation_resources.empty())
-            {
-                chunk_index_data = std::move(m_cached_chunk_creation_resources.front().indices_data);
-                m_cached_chunk_creation_resources.pop();
-            }
-            else
-            {
-                chunk_index_data.reserve((size_t)36u * NUMBER_OF_VOXELS_PER_CHUNK);
-            }
+            voxel_chunk_t setup_chunk_data = [&]() {
+                ZoneScopedN("Cached chunk resource creation stage");
+                if (!m_unloaded_voxel_chunk_data.empty())
+                {
+                    ZoneScopedN("Resource reuse");
+                    voxel_chunk_t reused_chunk_data = std::move(m_unloaded_voxel_chunk_data.front().m_chunk);
+                    m_unloaded_voxel_chunk_data.pop();
 
-            chunk_index_data.clear();
+                    return std::move(reused_chunk_data);
+                }
+                else
+                {
+                    ZoneScopedN("New resource creation");
+                    voxel_chunk_t new_chunk{};
+                    new_chunk.m_index_buffer_data.reserve((size_t)36u * NUMBER_OF_VOXELS_PER_CHUNK);
+
+                    return std::move(new_chunk);
+                }
+            }();
+
+            setup_chunk_data.m_index_buffer_data.clear();
 
             std::random_device random_device{};
             std::mt19937 engine(random_device());
@@ -183,7 +191,8 @@ void voxel_chunk_manager_t::create_chunks_from_setup_stack(rhi::renderer_t &rend
                             {
                                 for (const auto &vertex_index : {0u, 1u, 2u, 0u, 2u, 3u})
                                 {
-                                    chunk_index_data.push_back(vertex_index + shared_index_buffer_offset);
+                                    setup_chunk_data.m_index_buffer_data.push_back(vertex_index +
+                                                                                   shared_index_buffer_offset);
                                 }
                             }
                         }
@@ -202,7 +211,8 @@ void voxel_chunk_manager_t::create_chunks_from_setup_stack(rhi::renderer_t &rend
                             {
                                 for (const auto &vertex_index : {4u, 6u, 5u, 4u, 7u, 6u})
                                 {
-                                    chunk_index_data.push_back(vertex_index + shared_index_buffer_offset);
+                                    setup_chunk_data.m_index_buffer_data.push_back(vertex_index +
+                                                                                   shared_index_buffer_offset);
                                 }
                             }
                         }
@@ -221,7 +231,9 @@ void voxel_chunk_manager_t::create_chunks_from_setup_stack(rhi::renderer_t &rend
                             {
                                 for (const auto &vertex_index : {4u, 5u, 1u, 4u, 1u, 0u})
                                 {
-                                    chunk_index_data.push_back(vertex_index + shared_index_buffer_offset);
+                                    setup_chunk_data.m_index_buffer_data.
+
+                                        push_back(vertex_index + shared_index_buffer_offset);
                                 }
                             }
                         }
@@ -241,7 +253,9 @@ void voxel_chunk_manager_t::create_chunks_from_setup_stack(rhi::renderer_t &rend
                             {
                                 for (const auto &vertex_index : {3u, 2u, 6u, 3u, 6u, 7u})
                                 {
-                                    chunk_index_data.push_back(vertex_index + shared_index_buffer_offset);
+                                    setup_chunk_data.m_index_buffer_data.
+
+                                        push_back(vertex_index + shared_index_buffer_offset);
                                 }
                             }
                         }
@@ -260,7 +274,9 @@ void voxel_chunk_manager_t::create_chunks_from_setup_stack(rhi::renderer_t &rend
                             {
                                 for (const auto &vertex_index : {1u, 5u, 6u, 1u, 6u, 2u})
                                 {
-                                    chunk_index_data.push_back(vertex_index + shared_index_buffer_offset);
+                                    setup_chunk_data.m_index_buffer_data.
+
+                                        push_back(vertex_index + shared_index_buffer_offset);
                                 }
                             }
                         }
@@ -279,7 +295,9 @@ void voxel_chunk_manager_t::create_chunks_from_setup_stack(rhi::renderer_t &rend
                             {
                                 for (const auto &vertex_index : {4u, 0u, 3u, 4u, 3u, 7u})
                                 {
-                                    chunk_index_data.push_back(vertex_index + shared_index_buffer_offset);
+                                    setup_chunk_data.m_index_buffer_data.
+
+                                        push_back(vertex_index + shared_index_buffer_offset);
                                 }
                             }
                         }
@@ -287,11 +305,10 @@ void voxel_chunk_manager_t::create_chunks_from_setup_stack(rhi::renderer_t &rend
                 }
             }
 
-            if (!chunk_index_data.empty())
+            if (setup_chunk_data.m_index_buffer_data.empty())
             {
 
                 setup_chunk_data.m_color_buffer_data = chunk_color;
-                setup_chunk_data.m_index_buffer_data = std::move(chunk_index_data);
             }
 
             setup_chunk_data.m_chunk_position = chunk_position;

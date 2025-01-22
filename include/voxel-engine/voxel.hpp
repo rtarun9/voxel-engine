@@ -129,9 +129,9 @@ struct voxel_chunk_manager_t
 
     // A queue of index / color buffer vectors that threads can re-use when creating new chunks.
     // Reduces overhead of creating 100's of large vectors per frame.
-    struct cached_chunk_creation_resources_t
+    struct unloaded_voxel_chunk_data_t
     {
-        std::vector<u16> indices_data{};
+        voxel_chunk_t m_chunk;
     };
-    std::queue<cached_chunk_creation_resources_t> m_cached_chunk_creation_resources{};
+    std::queue<unloaded_voxel_chunk_data_t> m_unloaded_voxel_chunk_data{};
 };
