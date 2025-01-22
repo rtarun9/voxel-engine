@@ -364,27 +364,46 @@ int main()
 
             {
                 ZoneScopedN("Chunk eviction");
+                std::vector<voxel_chunk_position_t> keys_of_chunks_to_unload{};
+
                 // Evict the chunks that are out of range of render distance.
-                std::erase_if(
-                    chunk_manager.m_loaded_chunks,
-                    [current_chunk_3d_index,
-                     &chunk_manager](const std::pair<const voxel_chunk_position_t, voxel_chunk_t> &key_value_pair) {
-                        auto &chunk = key_value_pair.second;
+                for (const auto &[key, chunk] : chunk_manager.m_loaded_chunks)
+                {
+                    ZoneScopedN("Chunk eviction check");
 
-                        if ((std::abs(chunk.m_chunk_position.x - current_chunk_3d_index.x) >
-                             CHUNK_RENDER_DISTANCE_PER_DIMENSION) ||
-                            (std::abs(chunk.m_chunk_position.y - current_chunk_3d_index.y) >
-                             CHUNK_RENDER_DISTANCE_PER_DIMENSION) ||
-                            (std::abs(chunk.m_chunk_position.z - current_chunk_3d_index.z) >
-                             CHUNK_RENDER_DISTANCE_PER_DIMENSION))
+                    if ((std::abs(chunk.m_chunk_position.x - current_chunk_3d_index.x) >=
+                         CHUNK_RENDER_DISTANCE_PER_DIMENSION) ||
+                        (std::abs(chunk.m_chunk_position.y - current_chunk_3d_index.y) >=
+                         CHUNK_RENDER_DISTANCE_PER_DIMENSION) ||
+                        (std::abs(chunk.m_chunk_position.z - current_chunk_3d_index.z) >=
+                         CHUNK_RENDER_DISTANCE_PER_DIMENSION))
+                    {
+                        keys_of_chunks_to_unload.push_back(key);
+                    }
+                };
+
+                if (!keys_of_chunks_to_unload.empty())
+                {
+                    ZoneScopedN("Move to unloaded chunk queue");
+                    std::scoped_lock<std::mutex> scoped_lock(chunk_manager.m_unloaded_chunk_queue_mutex);
+                    for (const auto &key : keys_of_chunks_to_unload)
+                    {
+                        auto it = chunk_manager.m_loaded_chunks.find(key);
+                        if (it != chunk_manager.m_loaded_chunks.end())
                         {
-                            chunk_manager.m_unloaded_voxel_chunk_data.push(
-                                voxel_chunk_manager_t::unloaded_voxel_chunk_data_t{.m_chunk = std::move(chunk)});
-                            return true;
-                        }
+                            chunk_manager.m_chunk_manager_buffer_offset_queue.push(
+                                voxel_chunk_manager_t::chunk_manager_buffer_offset_t{
+                                    .m_color_buffer_start_index_location =
+                                        it->second.m_color_buffer_start_index_location,
+                                    .m_index_buffer_start_index_location =
+                                        it->second.m_index_buffer_start_index_location,
+                                });
 
-                        return false;
-                    });
+                            chunk_manager.m_unloaded_voxel_chunks.emplace(std::move(it->second));
+                            chunk_manager.m_loaded_chunks.erase(key);
+                        }
+                    }
+                }
             }
 
             if (setup_chunks)

@@ -47,7 +47,8 @@ template <> struct hash<voxel_chunk_position_t>
 // Each chunk has offsets into index buffer and color buffers that are stored in the chunk manager.
 struct voxel_chunk_t
 {
-    explicit voxel_chunk_t();
+    // NOTE: Doing this just to stop constructor from being called... without my knowing about it
+    explicit voxel_chunk_t(const voxel_chunk_position_t chunk_position);
 
     voxel_chunk_t(const voxel_chunk_t &other) = delete;
     voxel_chunk_t &operator=(voxel_chunk_t &other) = delete;
@@ -127,11 +128,7 @@ struct voxel_chunk_manager_t
     // Threadpool from which std::futures are obtained.
     thread_pool_t m_thread_pool{};
 
-    // A queue of index / color buffer vectors that threads can re-use when creating new chunks.
-    // Reduces overhead of creating 100's of large vectors per frame.
-    struct unloaded_voxel_chunk_data_t
-    {
-        voxel_chunk_t m_chunk;
-    };
-    std::queue<unloaded_voxel_chunk_data_t> m_unloaded_voxel_chunk_data{};
+    // When chunks are unloaded, the underlying voxel / cpu side buffer data is reused.
+    std::mutex m_unloaded_chunk_queue_mutex{};
+    std::queue<voxel_chunk_t> m_unloaded_voxel_chunks{};
 };
