@@ -28,7 +28,7 @@ namespace interop
 // NOTE: These variables define how many chunks can be loaded at a given particular instant.
 // If a new chunk is being added, it will replace an older chunk.
  // Why the *2 + 1? Because -x to x includes 0!!
-#define CHUNK_RENDER_DISTANCE_PER_DIMENSION_EXTENT 12
+#define CHUNK_RENDER_DISTANCE_PER_DIMENSION_EXTENT 8
 #define CHUNK_RENDER_DISTANCE_PER_DIMENSION (CHUNK_RENDER_DISTANCE_PER_DIMENSION_EXTENT* 2 + 1)
 #define MAX_NUMBER_OF_LOADED_CHUNKS (CHUNK_RENDER_DISTANCE_PER_DIMENSION  * CHUNK_RENDER_DISTANCE_PER_DIMENSION * CHUNK_RENDER_DISTANCE_PER_DIMENSION)
     

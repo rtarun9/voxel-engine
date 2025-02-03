@@ -47,8 +47,8 @@ template <> struct hash<voxel_chunk_position_t>
 // Each chunk has offsets into index buffer and color buffers that are stored in the chunk manager.
 struct voxel_chunk_t
 {
-    // NOTE: Doing this just to stop constructor from being called... without my knowing about it
-    explicit voxel_chunk_t(const voxel_chunk_position_t chunk_position);
+    explicit voxel_chunk_t(const voxel_chunk_position_t chunk_position, const size_t index_buffer_start_location,
+                           const size_t color_buffer_start_location);
 
     voxel_chunk_t(const voxel_chunk_t &other) = delete;
     voxel_chunk_t &operator=(voxel_chunk_t &other) = delete;
@@ -78,35 +78,24 @@ struct voxel_chunk_t
 // (ii) Setup -> Chunk mesh is ready, but associated buffers may or maynot be ready. Once the buffers are ready, these
 // chunks are moved into the loaded chunks hashmap.
 // The class contains several hashmaps, for which the chunk position acts as a index.
+
 struct voxel_chunk_manager_t
 {
     explicit voxel_chunk_manager_t(rhi::renderer_t &renderer);
+    static constexpr u32 NUMBER_OF_CHUNKS_TO_CREATE_PER_FRAME = 128u;
 
   public:
     void add_chunk_to_setup_stack(const voxel_chunk_position_t chunk_position);
     void create_chunks_from_setup_stack(rhi::renderer_t &renderer);
 
-    void transfer_chunks_from_setup_to_loaded_state();
+    std::vector<voxel_chunk_t> m_voxel_chunks{};
+    std::unordered_map<voxel_chunk_position_t, size_t> m_loaded_chunk_to_index_map{};
 
-    // Chunks to create per frame : How many chunks are setup (i.e the meshing processes occurs).
-    static constexpr u32 NUMBER_OF_CHUNKS_TO_CREATE_PER_FRAME = 128u;
-
-    // Chunks to load per frame : How many setup chunks are moved into the loaded chunk hash map.
-    static constexpr u32 NUMBER_OF_CHUNKS_TO_LOAD_PER_FRAME = 128u;
-
-    std::unordered_map<voxel_chunk_position_t, voxel_chunk_t> m_loaded_chunks{};
-
-    std::queue<std::future<voxel_chunk_t>> m_setup_chunk_futures_queue{};
-
-    // Why is there also a stack?
-    // Use the stack to store chunk indices that at any given point in time are close to the player.
-    // Then, each from from this stack, add elements into the queue.
-    std::stack<voxel_chunk_position_t> m_chunks_to_setup_stack{};
-
-    // A unordered set to keep track of chunks that are currently in process of being setup.
-    // This is required in case create_chunk is called for a chunk that is being setup but not loaded. We do not want to
-    // load this chunk again.
-    std::unordered_set<voxel_chunk_position_t> m_chunk_indices_that_are_being_setup{};
+    // A queue of chunks that are to be unloaded. When a chunk is being unloaded, a new chunk will be loaded in its
+    // place.
+    std::queue<std::pair<voxel_chunk_position_t, size_t>> m_unloaded_chunk_queue{};
+    std::stack<voxel_chunk_position_t> m_chunks_being_setup_stack{};
+    std::unordered_set<voxel_chunk_position_t> m_chunks_being_setup_set{};
 
     // All chunks only have a index buffer with them. The indices 'index' into this common shared chunk constant buffer.
     // The data in this buffer is ordered vertex wise, voxel wise.
@@ -115,20 +104,11 @@ struct voxel_chunk_manager_t
     rhi::upload_structured_buffer_t m_color_buffer{};
     rhi::upload_structured_buffer_t m_index_buffer{};
 
-    // A queue of offsets into the chunk managers's color and index buffer.
-    // To be used when new chunks are being created. When old chunks are deleted, their values must be passed into this.
-    struct chunk_manager_buffer_offset_t
-    {
-        size_t m_color_buffer_start_index_location{};
-        size_t m_index_buffer_start_index_location{};
-    };
-
-    std::queue<chunk_manager_buffer_offset_t> m_chunk_manager_buffer_offset_queue{};
-
     // Threadpool from which std::futures are obtained.
     thread_pool_t m_thread_pool{};
 
     // When chunks are unloaded, the underlying voxel / cpu side buffer data is reused.
-    std::mutex m_unloaded_chunk_queue_mutex{};
-    std::queue<voxel_chunk_t> m_unloaded_voxel_chunks{};
+    std::mutex m_chunk_mutex{};
+
+    std::vector<voxel_chunk_position_t> m_chunk_render_distance_offsets{};
 };
