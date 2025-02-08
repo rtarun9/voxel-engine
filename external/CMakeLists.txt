@@ -7,7 +7,21 @@ FetchContent_Declare(
     GIT_PROGRESS TRUE
 )
 
-FetchContent_MakeAvailable(imgui)
+# Thank you deccer for https://github.com/deccer/CMake-Glfw-OpenGL-Template/blob/main/lib/CMakeLists.txt!!
+FetchContent_Declare(
+    tracy
+    GIT_REPOSITORY  https://github.com/wolfpld/tracy.git
+    GIT_TAG         v0.11.1
+    GIT_SHALLOW     TRUE
+    GIT_PROGRESS    TRUE
+)
+
+set(TRACY_ENABLE ON CACHE BOOL "Enable profiling")
+set(TRACY_ONLY_IPV4 ON CACHE BOOL "IPv4 only")
+option(TRACY_ENABLE "Enable profiling" ON)
+option(TRACY_ONLY_IPV4 "IPv4 only" ON)
+
+FetchContent_MakeAvailable(imgui tracy)
 
 add_library(libimgui
     ${imgui_SOURCE_DIR}/imgui.cpp
@@ -27,4 +41,4 @@ target_include_directories(libimgui PUBLIC
 target_link_libraries(libimgui PUBLIC d3d12 dxguid dxgi)
 
 add_library(external INTERFACE)
-target_link_libraries(external INTERFACE libimgui)
+target_link_libraries(external INTERFACE libimgui TracyClient)

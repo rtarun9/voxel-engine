@@ -56,6 +56,7 @@ class thread_pool_t
     template <typename F, typename... Args>
     auto add_to_task_queue(F &&func, Args &&...args) -> std::future<decltype(func(args...))>
     {
+        ZoneScoped;
         // The task queue only accepts function's that takes no arguments.
         // For this, bind the func and args together and create a wrapper function.
         std::function<decltype(func(args...))()> wrapper_func =
@@ -69,7 +70,10 @@ class thread_pool_t
         std::future<decltype(func(args...))> future = shared_ptr_of_packaged_task->get_future();
 
         std::unique_lock<std::mutex> lock(m_task_queue_mutex);
-        m_task_queue.push([shared_ptr_of_packaged_task]() { (*shared_ptr_of_packaged_task)(); });
+        m_task_queue.push([shared_ptr_of_packaged_task]() {
+            ZoneScoped;
+            (*shared_ptr_of_packaged_task)();
+        });
 
         m_task_queue_cv.notify_one();
 

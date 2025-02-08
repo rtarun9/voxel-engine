@@ -1,5 +1,7 @@
 #include "voxel-engine/rhi/renderer.hpp"
 
+#include "tracy/Tracy.hpp"
+
 // Agility SDK setup.
 // Setting the Agility SDK parameters.
 extern "C"
@@ -158,6 +160,7 @@ renderer_t::renderer_t(const HWND window_handle, const u32 window_width, const u
 renderer_t::index_buffer_with_intermediate_resource_t renderer_t::create_index_buffer(
     const void *data, const size_t stride, const u32 indices_count, const std::wstring_view buffer_name)
 {
+    ZoneScoped;
     assert(data);
 
     index_buffer_with_intermediate_resource_t result = {};
@@ -239,6 +242,7 @@ renderer_t::index_buffer_with_intermediate_resource_t renderer_t::create_index_b
 renderer_t::structured_buffer_with_intermediate_resource_t renderer_t::create_structured_buffer(
     const void *data, const size_t stride, const u32 num_elements, const std::wstring_view buffer_name)
 {
+    ZoneScoped;
     assert(data);
 
     const size_t size_in_bytes = stride * num_elements;
@@ -314,9 +318,61 @@ renderer_t::structured_buffer_with_intermediate_resource_t renderer_t::create_st
     return result;
 }
 
+upload_structured_buffer_t renderer_t::create_upload_structured_buffer(const size_t stride, const u32 num_elements,
+                                                                       const std::wstring_view buffer_name)
+{
+    ZoneScoped;
+    const size_t size_in_bytes = stride * num_elements;
+
+    upload_structured_buffer_t result = {};
+
+    // First, create a upload buffer (that is placed in memory accesible by both GPU and CPU).
+    // Then create a GPU only buffer, and copy data from the previous buffer to GPU only one.
+    const D3D12_HEAP_PROPERTIES upload_heap_properties = {
+        .Type = D3D12_HEAP_TYPE_UPLOAD,
+        .CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+        .MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN,
+        .CreationNodeMask = 0u,
+        .VisibleNodeMask = 0u,
+    };
+
+    const D3D12_RESOURCE_DESC buffer_resource_desc = {
+        .Dimension = D3D12_RESOURCE_DIMENSION_BUFFER,
+        .Width = size_in_bytes,
+        .Height = 1u,
+        .DepthOrArraySize = 1u,
+        .MipLevels = 1u,
+        .Format = DXGI_FORMAT_UNKNOWN,
+        .SampleDesc = {1u, 0u},
+        .Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
+        .Flags = D3D12_RESOURCE_FLAG_NONE,
+    };
+
+    throw_if_failed(m_device->CreateCommittedResource(
+        &upload_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES | D3D12_HEAP_FLAG_CREATE_NOT_ZEROED,
+        &buffer_resource_desc, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, nullptr,
+        IID_PPV_ARGS(&result.m_upload_resource)));
+
+    // Now that a resource is created, copy CPU data to this upload buffer.
+    const D3D12_RANGE read_range{.Begin = 0u, .End = 0u};
+
+    throw_if_failed(result.m_upload_resource->Map(0u, &read_range, (void **)&result.m_upload_resource_mapped_ptr));
+
+    name_d3d12_object(result.m_upload_resource.Get(), std::wstring(buffer_name));
+
+    std::scoped_lock<std::mutex> scoped_lock(m_resource_mutex);
+
+    // Create structured buffer view.
+    result.m_srv_index = create_shader_resource_view(result.m_upload_resource.Get(), stride, num_elements);
+
+    return result;
+}
+
 command_buffer_t renderer_t::create_command_buffer(const size_t stride, const size_t max_number_of_elements,
                                                    const std::wstring_view buffer_name)
 {
+    ZoneScoped;
+
     command_buffer_t result = {};
     // Note that counter offset must be multiple of d3d12 uav counter placement alignment.
     result.m_counter_offset =
@@ -428,6 +484,7 @@ command_buffer_t renderer_t::create_command_buffer(const size_t stride, const si
 
 u32 renderer_t::create_constant_buffer_view(ID3D12Resource *const resource, const size_t size)
 {
+    ZoneScoped;
     assert(resource);
 
     descriptor_handle_t descriptor_handle = m_cbv_srv_uav_descriptor_heap.get_then_offset_current_descriptor_handle();
@@ -448,6 +505,7 @@ u32 renderer_t::create_constant_buffer_view(ID3D12Resource *const resource, cons
 u32 renderer_t::create_shader_resource_view(ID3D12Resource *const resource, const size_t stride,
                                             const size_t num_elements)
 {
+    ZoneScoped;
     assert(resource);
 
     descriptor_handle_t descriptor_handle = m_cbv_srv_uav_descriptor_heap.get_then_offset_current_descriptor_handle();
@@ -475,6 +533,7 @@ u32 renderer_t::create_unordered_access_view(ID3D12Resource *const resource, con
                                              const size_t num_elements, const bool use_counter,
                                              const size_t counter_offset)
 {
+    ZoneScoped;
     assert(resource);
 
     descriptor_handle_t descriptor_handle = m_cbv_srv_uav_descriptor_heap.get_then_offset_current_descriptor_handle();

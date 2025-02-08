@@ -5,6 +5,8 @@
 #include "common.hpp"
 #include "descriptor_heap.hpp"
 
+#include "tracy/Tracy.hpp"
+
 namespace rhi
 {
 // A simple & straight forward high level renderer abstraction.
@@ -37,6 +39,9 @@ struct renderer_t
     structured_buffer_with_intermediate_resource_t create_structured_buffer(const void *data, const size_t stride,
                                                                             const u32 num_elements,
                                                                             const std::wstring_view buffer_name);
+
+    upload_structured_buffer_t create_upload_structured_buffer(const size_t stride, const u32 num_elements,
+                                                               const std::wstring_view buffer_name);
 
     command_buffer_t create_command_buffer(const size_t stride, const size_t max_number_of_elements,
                                            const std::wstring_view buffer_name);
@@ -88,6 +93,7 @@ struct renderer_t
 template <typename T>
 inline constant_buffer_t<T> renderer_t::create_constant_buffer(const std::wstring_view buffer_name)
 {
+    ZoneScopedC(tracy::Color::AntiqueWhite);
     constant_buffer_t<T> constant_buffer = {};
 
     const D3D12_HEAP_PROPERTIES upload_heap_properties = {
