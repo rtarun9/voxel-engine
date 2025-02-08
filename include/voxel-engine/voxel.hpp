@@ -124,4 +124,5 @@ struct voxel_chunk_manager_t
     thread_pool_t m_thread_pool{};
 
     std::vector<voxel_chunk_position_t> m_chunk_render_distance_offsets{};
+
 };
