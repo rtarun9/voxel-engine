@@ -132,6 +132,7 @@ voxel_chunk_manager_t::voxel_chunk_manager_t(rhi::renderer_t &renderer)
 
 void voxel_chunk_manager_t::add_chunk_to_setup_stack(const voxel_chunk_position_t index)
 {
+    // TODO: Put this elsewhere.
     ZoneScoped;
     if (m_loaded_chunk_to_index_map.contains(index) || m_chunks_being_setup_set.contains(index))
     {
@@ -147,11 +148,12 @@ void voxel_chunk_manager_t::create_chunks_from_setup_stack(rhi::renderer_t &rend
     ZoneScopedC(tracy::Color::AliceBlue);
 
     u64 chunks_that_are_setup = 0u;
-    while (chunks_that_are_setup++ < voxel_chunk_manager_t::NUMBER_OF_CHUNKS_TO_CREATE_PER_FRAME &&
-           !m_chunks_to_setup_stack.empty())
+    while (chunks_that_are_setup++ < NUMBER_OF_CHUNKS_TO_CREATE_PER_FRAME && !m_chunks_to_setup_stack.empty())
     {
+        ZoneScopedN("create_chunks_from_setup_stack iteration");
+
         // Check if there is a chunk that has to be unloaded. Only if this is the case, attempt to setup a new chunk.
-        if (!m_unloaded_chunk_queue.empty())
+        if (m_unloaded_chunk_queue.empty())
         {
             return;
         }
@@ -159,14 +161,17 @@ void voxel_chunk_manager_t::create_chunks_from_setup_stack(rhi::renderer_t &rend
         const auto &[chunk_to_unload, index_of_chunk_being_unloaded] = m_unloaded_chunk_queue.front();
         m_unloaded_chunk_queue.pop();
 
+        m_unloaded_chunks_set.erase(chunk_to_unload);
+
         // Chunks are marked as unloaded only when a new chunks is going to be loaded in its space.
         m_loaded_chunk_to_index_map.erase(chunk_to_unload);
 
         const voxel_chunk_position_t chunk_to_setup = m_chunks_to_setup_stack.top();
         m_chunks_to_setup_stack.pop();
 
-        const auto meshing_algorithm = ([this, &renderer, index_of_chunk_being_unloaded, chunk_to_unload,
-                                         chunk_to_setup]() -> voxel_chunk_setup_data_t {
+        const auto meshing_algorithm =
+            [this, &renderer](size_t index_of_chunk_being_unloaded, voxel_chunk_position_t chunk_to_unload,
+                              voxel_chunk_position_t chunk_to_setup) -> voxel_chunk_setup_data_t {
             ZoneScopedN("Meshing algorithm MT");
 
             voxel_chunk_t &setup_chunk_data = m_voxel_chunks[index_of_chunk_being_unloaded];
@@ -355,10 +360,15 @@ void voxel_chunk_manager_t::create_chunks_from_setup_stack(rhi::renderer_t &rend
 
             setup_data.should_chunk_be_loaded = false;
             return setup_data;
-        });
+        };
 
-        m_setup_chunk_futures_queue.emplace(std::pair{renderer.m_copy_queue.m_monotonic_fence_value + 1,
-                                                      m_thread_pool.add_to_task_queue(meshing_algorithm)});
+        {
+            ZoneScopedN("Adding future to queue");
+            m_setup_chunk_futures_queue.push(
+                std::pair{renderer.m_copy_queue.m_monotonic_fence_value + 1,
+                          m_thread_pool.add_to_task_queue(meshing_algorithm, index_of_chunk_being_unloaded,
+                                                          chunk_to_unload, chunk_to_setup)});
+        }
     }
 }
 
@@ -386,6 +396,7 @@ void voxel_chunk_manager_t::transfer_chunks_from_setup_to_loaded_state(const u64
             // if (setup_chunk_result.first <= current_copy_queue_fence_value)
             {
                 voxel_chunk_setup_data_t setup_data = setup_chunk_result.second.get();
+                m_setup_chunk_futures_queue.pop();
 
                 m_chunks_being_setup_set.erase(setup_data.chunk_position);
 

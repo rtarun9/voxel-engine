@@ -83,7 +83,7 @@ struct voxel_chunk_t
 struct voxel_chunk_manager_t
 {
   public:
-    static constexpr u32 NUMBER_OF_CHUNKS_TO_CREATE_PER_FRAME = 128u;
+    static constexpr u32 NUMBER_OF_CHUNKS_TO_CREATE_PER_FRAME = 12u;
 
     explicit voxel_chunk_manager_t(rhi::renderer_t &renderer);
 
@@ -97,7 +97,10 @@ struct voxel_chunk_manager_t
 
     // A queue of chunks that are to be unloaded. When a chunk is being unloaded, a new chunk will be loaded in its
     // place.
+
     std::queue<std::pair<voxel_chunk_position_t, size_t>> m_unloaded_chunk_queue{};
+    std::unordered_set<voxel_chunk_position_t> m_unloaded_chunks_set{};
+
     std::stack<voxel_chunk_position_t> m_chunks_to_setup_stack{};
     std::unordered_set<voxel_chunk_position_t> m_chunks_being_setup_set{};
 
