@@ -4,10 +4,10 @@
 
 #include <tracy/Tracy.hpp>
 
-voxel_chunk_t::voxel_chunk_t(const voxel_chunk_position_t chunk_position, const size_t index_buffer_start_location,
-                             const size_t color_buffer_start_location)
-    : m_chunk_position(chunk_position), m_index_buffer_start_index_location(index_buffer_start_location),
-      m_color_buffer_start_index_location(color_buffer_start_location)
+voxel_chunk_t::voxel_chunk_t(const voxel_chunk_position_t chunk_position, const size_t index_buffer_offset,
+                             const size_t color_buffer_offset)
+    : m_chunk_position(chunk_position), m_index_buffer_offset(index_buffer_offset),
+      m_color_buffer_offset(color_buffer_offset)
 {
     ZoneScoped;
 
@@ -18,9 +18,8 @@ voxel_chunk_t::voxel_chunk_t(const voxel_chunk_position_t chunk_position, const 
 voxel_chunk_t::voxel_chunk_t(voxel_chunk_t &&other) noexcept
     : m_voxels(std::move(other.m_voxels)), m_chunk_position(other.m_chunk_position),
       m_index_buffer_data(std::move(other.m_index_buffer_data)),
-      m_color_buffer_data(std::move(other.m_color_buffer_data)),
-      m_color_buffer_start_index_location(other.m_color_buffer_start_index_location),
-      m_index_buffer_start_index_location(other.m_index_buffer_start_index_location)
+      m_color_buffer_data(std::move(other.m_color_buffer_data)), m_color_buffer_offset(other.m_color_buffer_offset),
+      m_index_buffer_offset(other.m_index_buffer_offset)
 
 {
     ZoneScoped;
@@ -39,8 +38,8 @@ voxel_chunk_t &voxel_chunk_t::operator=(voxel_chunk_t &&other) noexcept
         m_index_buffer_data = std::move(other.m_index_buffer_data);
         m_color_buffer_data = std::move(other.m_color_buffer_data);
 
-        m_color_buffer_start_index_location = other.m_color_buffer_start_index_location;
-        m_index_buffer_start_index_location = other.m_index_buffer_start_index_location;
+        m_color_buffer_offset = other.m_color_buffer_offset;
+        m_index_buffer_offset = other.m_index_buffer_offset;
 
         other.m_voxels = nullptr;
     }
@@ -50,6 +49,7 @@ voxel_chunk_t &voxel_chunk_t::operator=(voxel_chunk_t &&other) noexcept
 voxel_chunk_manager_t::voxel_chunk_manager_t(rhi::renderer_t &renderer)
 {
     ZoneScoped;
+
     // Create the shared position buffer.
     std::vector<DirectX::XMFLOAT3> chunk_position_data{};
     chunk_position_data.reserve(size_t(8 * NUMBER_OF_VOXELS_PER_CHUNK));
@@ -138,7 +138,7 @@ void voxel_chunk_manager_t::add_chunk_to_setup_stack(const voxel_chunk_position_
         return;
     }
 
-    m_chunks_being_setup_stack.push(index);
+    m_chunks_to_setup_stack.push(index);
     m_chunks_being_setup_set.insert(index);
 }
 
@@ -148,31 +148,28 @@ void voxel_chunk_manager_t::create_chunks_from_setup_stack(rhi::renderer_t &rend
 
     u64 chunks_that_are_setup = 0u;
     while (chunks_that_are_setup++ < voxel_chunk_manager_t::NUMBER_OF_CHUNKS_TO_CREATE_PER_FRAME &&
-           !m_chunks_being_setup_stack.empty())
+           !m_chunks_to_setup_stack.empty())
     {
+        // Check if there is a chunk that has to be unloaded. Only if this is the case, attempt to setup a new chunk.
+        if (!m_unloaded_chunk_queue.empty())
+        {
+            return;
+        }
 
-        // First check if chunk_index_data is cached and ready for use.
-        const voxel_chunk_position_t top = m_chunks_being_setup_stack.top();
-        m_chunks_being_setup_stack.pop();
+        const auto &[chunk_to_unload, index_of_chunk_being_unloaded] = m_unloaded_chunk_queue.front();
+        m_unloaded_chunk_queue.pop();
 
-        m_thread_pool.add_to_task_queue([this, &renderer, chunk_position = top]() {
+        // Chunks are marked as unloaded only when a new chunks is going to be loaded in its space.
+        m_loaded_chunk_to_index_map.erase(chunk_to_unload);
+
+        const voxel_chunk_position_t chunk_to_setup = m_chunks_to_setup_stack.top();
+        m_chunks_to_setup_stack.pop();
+
+        const auto meshing_algorithm = ([this, &renderer, index_of_chunk_being_unloaded, chunk_to_unload,
+                                         chunk_to_setup]() -> voxel_chunk_setup_data_t {
             ZoneScopedN("Meshing algorithm MT");
 
-            voxel_chunk_position_t chunk_being_replaced = {};
-            u32 chunk_index_in_vector = 0;
-            {
-                std::scoped_lock<std::mutex> scoped_lock(m_chunk_mutex);
-                if (m_unloaded_chunk_queue.empty())
-                {
-                    return;
-                }
-                chunk_being_replaced = m_unloaded_chunk_queue.front().first;
-                chunk_index_in_vector = m_unloaded_chunk_queue.front().second;
-
-                m_unloaded_chunk_queue.pop();
-            }
-
-            voxel_chunk_t &setup_chunk_data = m_voxel_chunks[chunk_index_in_vector];
+            voxel_chunk_t &setup_chunk_data = m_voxel_chunks[index_of_chunk_being_unloaded];
 
             setup_chunk_data.m_index_buffer_data.clear();
 
@@ -334,25 +331,74 @@ void voxel_chunk_manager_t::create_chunks_from_setup_stack(rhi::renderer_t &rend
                 }
             }
 
+            voxel_chunk_setup_data_t setup_data = {
+                .should_chunk_be_loaded = true,
+                .chunk_position = chunk_to_setup,
+                .index = index_of_chunk_being_unloaded,
+            };
+
             if (!setup_chunk_data.m_index_buffer_data.empty())
             {
                 setup_chunk_data.m_color_buffer_data = chunk_color;
 
-                setup_chunk_data.m_chunk_position = chunk_position;
+                setup_chunk_data.m_chunk_position = chunk_to_unload;
 
                 m_index_buffer.update(setup_chunk_data.m_index_buffer_data.data(),
                                       setup_chunk_data.m_index_buffer_data.size() * sizeof(u16),
-                                      setup_chunk_data.m_index_buffer_start_index_location * sizeof(u16));
+                                      setup_chunk_data.m_index_buffer_offset * sizeof(u16));
 
                 m_color_buffer.update(&setup_chunk_data.m_color_buffer_data, sizeof(DirectX::XMFLOAT3),
-                                      setup_chunk_data.m_color_buffer_start_index_location * sizeof(DirectX::XMFLOAT3));
+                                      setup_chunk_data.m_color_buffer_offset * sizeof(DirectX::XMFLOAT3));
 
-                {
-                    std::scoped_lock<std::mutex> scoped_lock(m_chunk_mutex);
-                    m_chunks_being_setup_set.erase(chunk_position);
-                    m_loaded_chunk_to_index_map[chunk_position] = chunk_index_in_vector;
-                }
+                return setup_data;
             }
+
+            setup_data.should_chunk_be_loaded = false;
+            return setup_data;
         });
+
+        m_setup_chunk_futures_queue.emplace(std::pair{renderer.m_copy_queue.m_monotonic_fence_value + 1,
+                                                      m_thread_pool.add_to_task_queue(meshing_algorithm)});
+    }
+}
+
+void voxel_chunk_manager_t::transfer_chunks_from_setup_to_loaded_state(const u64 current_copy_queue_fence_value)
+{
+    using namespace std::chrono_literals;
+
+    u64 chunks_loaded = 0u;
+    while (!m_setup_chunk_futures_queue.empty() &&
+           chunks_loaded < voxel_chunk_manager_t::NUMBER_OF_CHUNKS_TO_CREATE_PER_FRAME)
+    {
+        auto &setup_chunk_result = m_setup_chunk_futures_queue.front();
+
+        switch (std::future_status status = setup_chunk_result.second.wait_for(0s); status)
+        {
+        case std::future_status::timeout: {
+
+            return;
+        }
+        break;
+
+        case std::future_status::ready: {
+            // If this condition is satisfied, the buffers are ready, so chunk is ready to be loaded :)
+            if (true)
+            // if (setup_chunk_result.first <= current_copy_queue_fence_value)
+            {
+                voxel_chunk_setup_data_t setup_data = setup_chunk_result.second.get();
+
+                m_chunks_being_setup_set.erase(setup_data.chunk_position);
+
+                m_loaded_chunk_to_index_map[setup_data.chunk_position] = setup_data.index;
+            }
+            else
+            {
+                return;
+            }
+        }
+        break;
+        }
+
+        ++chunks_loaded;
     }
 }

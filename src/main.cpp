@@ -351,10 +351,8 @@ int main()
                 if (!keys_of_chunks_to_unload.empty())
                 {
                     ZoneScopedN("Move to unloaded chunk queue");
-                    std::scoped_lock<std::mutex> scoped_lock(chunk_manager.m_chunk_mutex);
                     for (const auto &key : keys_of_chunks_to_unload)
                     {
-                        chunk_manager.m_loaded_chunk_to_index_map.erase(key.first);
                         chunk_manager.m_unloaded_chunk_queue.push({key.first, key.second});
                     }
                 }

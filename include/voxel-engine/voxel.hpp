@@ -63,12 +63,13 @@ struct voxel_chunk_t
     // A flattened 1d array of Voxels.
     std::unique_ptr<voxel_t[]> m_voxels{};
 
-    size_t m_index_buffer_start_index_location{};
-    size_t m_color_buffer_start_index_location{};
+    size_t m_index_buffer_offset{};
+    size_t m_color_buffer_offset{};
 
     std::vector<u16> m_index_buffer_data{};
     DirectX::XMFLOAT3 m_color_buffer_data{};
 
+    // TODO: Is this even used anywhere? If not, remove it.
     voxel_chunk_position_t m_chunk_position{};
 };
 
@@ -81,12 +82,15 @@ struct voxel_chunk_t
 
 struct voxel_chunk_manager_t
 {
-    explicit voxel_chunk_manager_t(rhi::renderer_t &renderer);
+  public:
     static constexpr u32 NUMBER_OF_CHUNKS_TO_CREATE_PER_FRAME = 128u;
 
-  public:
+    explicit voxel_chunk_manager_t(rhi::renderer_t &renderer);
+
     void add_chunk_to_setup_stack(const voxel_chunk_position_t chunk_position);
     void create_chunks_from_setup_stack(rhi::renderer_t &renderer);
+
+    void transfer_chunks_from_setup_to_loaded_state(const u64 current_copy_queue_fence_value);
 
     std::vector<voxel_chunk_t> m_voxel_chunks{};
     std::unordered_map<voxel_chunk_position_t, size_t> m_loaded_chunk_to_index_map{};
@@ -94,8 +98,17 @@ struct voxel_chunk_manager_t
     // A queue of chunks that are to be unloaded. When a chunk is being unloaded, a new chunk will be loaded in its
     // place.
     std::queue<std::pair<voxel_chunk_position_t, size_t>> m_unloaded_chunk_queue{};
-    std::stack<voxel_chunk_position_t> m_chunks_being_setup_stack{};
+    std::stack<voxel_chunk_position_t> m_chunks_to_setup_stack{};
     std::unordered_set<voxel_chunk_position_t> m_chunks_being_setup_set{};
+
+    struct voxel_chunk_setup_data_t
+    {
+        b32 should_chunk_be_loaded{};
+        voxel_chunk_position_t chunk_position{};
+        size_t index{};
+    };
+
+    std::queue<std::pair<u64, std::future<voxel_chunk_setup_data_t>>> m_setup_chunk_futures_queue{};
 
     // All chunks only have a index buffer with them. The indices 'index' into this common shared chunk constant buffer.
     // The data in this buffer is ordered vertex wise, voxel wise.
@@ -106,9 +119,6 @@ struct voxel_chunk_manager_t
 
     // Threadpool from which std::futures are obtained.
     thread_pool_t m_thread_pool{};
-
-    // When chunks are unloaded, the underlying voxel / cpu side buffer data is reused.
-    std::mutex m_chunk_mutex{};
 
     std::vector<voxel_chunk_position_t> m_chunk_render_distance_offsets{};
 };
