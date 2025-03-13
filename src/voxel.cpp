@@ -132,14 +132,21 @@ voxel_chunk_manager_t::voxel_chunk_manager_t(rhi::renderer_t &renderer)
 
 void voxel_chunk_manager_t::add_chunk_to_setup_stack(const voxel_chunk_position_t index)
 {
-    // TODO: Put this elsewhere.
     ZoneScoped;
     if (m_loaded_chunk_to_index_map.contains(index) || m_chunks_being_setup_set.contains(index))
     {
         return;
     }
 
-    m_chunks_to_setup_stack.push(index);
+    if (m_chunks_to_setup_stack.size() > voxel_chunk_manager_t::MAX_SIZE_OF_CHUNKS_TO_SETUP_STACK)
+    {
+        const voxel_chunk_position_t element_being_removed = m_chunks_to_setup_stack.back();
+        m_chunks_being_setup_set.erase(element_being_removed);
+
+        m_chunks_to_setup_stack.pop_back();
+    }
+
+    m_chunks_to_setup_stack.push_front(index);
     m_chunks_being_setup_set.insert(index);
 }
 
@@ -166,8 +173,8 @@ void voxel_chunk_manager_t::create_chunks_from_setup_stack(rhi::renderer_t &rend
         // Chunks are marked as unloaded only when a new chunks is going to be loaded in its space.
         m_loaded_chunk_to_index_map.erase(chunk_to_unload);
 
-        const voxel_chunk_position_t chunk_to_setup = m_chunks_to_setup_stack.top();
-        m_chunks_to_setup_stack.pop();
+        const voxel_chunk_position_t chunk_to_setup = m_chunks_to_setup_stack.front();
+        m_chunks_to_setup_stack.pop_front();
 
         const auto meshing_algorithm =
             [this, &renderer](size_t index_of_chunk_being_unloaded, voxel_chunk_position_t chunk_to_unload,
@@ -348,12 +355,13 @@ void voxel_chunk_manager_t::create_chunks_from_setup_stack(rhi::renderer_t &rend
 
                 setup_chunk_data.m_chunk_position = chunk_to_unload;
 
-                m_index_buffer.update(setup_chunk_data.m_index_buffer_data.data(),
-                                      setup_chunk_data.m_index_buffer_data.size() * sizeof(u16),
-                                      setup_chunk_data.m_index_buffer_offset * sizeof(u16));
+                renderer.update_upload_structured_buffer(m_index_buffer, setup_chunk_data.m_index_buffer_data.data(),
+                                                         setup_chunk_data.m_index_buffer_data.size() * sizeof(u16),
+                                                         setup_chunk_data.m_index_buffer_offset * sizeof(u16));
 
-                m_color_buffer.update(&setup_chunk_data.m_color_buffer_data, sizeof(DirectX::XMFLOAT3),
-                                      setup_chunk_data.m_color_buffer_offset * sizeof(DirectX::XMFLOAT3));
+                renderer.update_upload_structured_buffer(
+                    m_color_buffer, &setup_chunk_data.m_color_buffer_data, sizeof(DirectX::XMFLOAT3),
+                    setup_chunk_data.m_color_buffer_offset * sizeof(DirectX::XMFLOAT3));
 
                 return setup_data;
             }
@@ -392,8 +400,7 @@ void voxel_chunk_manager_t::transfer_chunks_from_setup_to_loaded_state(const u64
 
         case std::future_status::ready: {
             // If this condition is satisfied, the buffers are ready, so chunk is ready to be loaded :)
-            if (true)
-            // if (setup_chunk_result.first <= current_copy_queue_fence_value)
+            if (setup_chunk_result.first <= current_copy_queue_fence_value)
             {
                 voxel_chunk_setup_data_t setup_data = setup_chunk_result.second.get();
                 m_setup_chunk_futures_queue.pop();

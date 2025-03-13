@@ -358,14 +358,48 @@ upload_structured_buffer_t renderer_t::create_upload_structured_buffer(const siz
 
     throw_if_failed(result.m_upload_resource->Map(0u, &read_range, (void **)&result.m_upload_resource_mapped_ptr));
 
-    name_d3d12_object(result.m_upload_resource.Get(), std::wstring(buffer_name));
+    // Create the final resource and transfer the data from upload buffer to the final buffer.
+    // The heap type is : Default (no CPU access).
+    const D3D12_HEAP_PROPERTIES default_heap_properties = {
+        .Type = D3D12_HEAP_TYPE_DEFAULT,
+        .CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+        .MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN,
+        .CreationNodeMask = 0u,
+        .VisibleNodeMask = 0u,
+    };
+
+    throw_if_failed(m_device->CreateCommittedResource(
+        &default_heap_properties, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES | D3D12_HEAP_FLAG_CREATE_NOT_ZEROED,
+        &buffer_resource_desc, D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&result.m_default_resource)));
+
+    name_d3d12_object(result.m_upload_resource.Get(), std::wstring(buffer_name) + std::wstring(L" upload resource"));
+    name_d3d12_object(result.m_default_resource.Get(), std::wstring(buffer_name) + std::wstring(L" default resource"));
 
     std::scoped_lock<std::mutex> scoped_lock(m_resource_mutex);
 
     // Create structured buffer view.
-    result.m_srv_index = create_shader_resource_view(result.m_upload_resource.Get(), stride, num_elements);
+    result.m_default_resource_srv_index =
+        create_shader_resource_view(result.m_upload_resource.Get(), stride, num_elements);
 
     return result;
+}
+
+void renderer_t::update_upload_structured_buffer(upload_structured_buffer_t &upload_structured_buffer, const void *data,
+                                                 const size_t size_in_bytes, const size_t offset_in_bytes)
+{
+    assert(upload_structured_buffer.m_upload_resource_mapped_ptr != nullptr);
+    memcpy((void *)((u8 *)upload_structured_buffer.m_upload_resource_mapped_ptr + offset_in_bytes), (void *)(data),
+           size_in_bytes);
+
+    std::scoped_lock<std::mutex> scoped_lock(m_resource_mutex);
+
+    auto command_allocator_list_pair = m_copy_queue.get_command_allocator_list_pair(m_device.Get());
+
+    command_allocator_list_pair.m_command_list->CopyBufferRegion(
+        upload_structured_buffer.m_default_resource.Get(), offset_in_bytes,
+        upload_structured_buffer.m_upload_resource.Get(), offset_in_bytes, size_in_bytes);
+
+    m_copy_queue.execute_command_list(std::move(command_allocator_list_pair));
 }
 
 command_buffer_t renderer_t::create_command_buffer(const size_t stride, const size_t max_number_of_elements,

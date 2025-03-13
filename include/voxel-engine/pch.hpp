@@ -6,6 +6,10 @@ constexpr bool VX_DEBUG_MODE = true;
 constexpr bool VX_DEBUG_MODE = false;
 #endif
 
+// Basically, when no profiler is attached tracy will start going crazy with memory.
+// If TRACY_ON_DEMAND is defined, this memory issue will not occur.
+#define TRACY_ON_DEMAND
+
 // Windows includes.
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>

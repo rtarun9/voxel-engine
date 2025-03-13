@@ -152,7 +152,7 @@ int main()
         .SampleMask = 0xffff'ffff,
         .RasterizerState =
             {
-                .FillMode = D3D12_FILL_MODE_WIREFRAME,
+                .FillMode = D3D12_FILL_MODE_SOLID,
                 .CullMode = D3D12_CULL_MODE_BACK,
                 .FrontCounterClockwise = FALSE,
                 .DepthClipEnable = TRUE,
@@ -450,7 +450,7 @@ int main()
                     const interop::voxel_render_resources_t render_resources = {
                         .scene_constant_buffer_index = scene_buffer.m_cbv_index,
                         .shared_chunk_position_buffer_index = chunk_manager.m_shared_chunk_position_buffer.m_srv_index,
-                        .color_buffer_index = chunk_manager.m_color_buffer.m_srv_index,
+                        .color_buffer_index = chunk_manager.m_color_buffer.m_default_resource_srv_index,
                         .color_start_location = (u32)chunk.m_color_buffer_offset,
                         .chunk_position = {chunk_position.x, chunk_position.y, chunk_position.z},
                     };

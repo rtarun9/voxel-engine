@@ -29,18 +29,16 @@ template <typename T> struct constant_buffer_t
     }
 };
 
+// Encapsulation over structured buffer and a upload buffer.
+// Provides function to copy data from the upload buffer to structured buffer.
 struct upload_structured_buffer_t
 {
-
     ComPtr<ID3D12Resource> m_upload_resource{};
-    u8 *m_upload_resource_mapped_ptr{};
-    u32 m_srv_index{};
+    ComPtr<ID3D12Resource> m_default_resource{};
 
-    inline void update(const void *data, const size_t size_in_bytes, const size_t offset_in_bytes) const
-    {
-        assert(m_upload_resource_mapped_ptr != nullptr);
-        memcpy((void *)((u8 *)m_upload_resource_mapped_ptr + offset_in_bytes), (void *)(data), size_in_bytes);
-    }
+    u8 *m_upload_resource_mapped_ptr{};
+
+    u32 m_default_resource_srv_index{};
 };
 
 struct index_buffer_t

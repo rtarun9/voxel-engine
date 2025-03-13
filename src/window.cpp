@@ -61,7 +61,7 @@ window_t::window_t()
 
     // Register the window class.
     // This represents a set of common behavious that several windows may have.
-    const HINSTANCE instance_handle = GetModuleHandle(NULL);
+    const HINSTANCE instance_handle = GetModuleHandle(nullptr);
 
     const WNDCLASSA window_class = {
         .lpfnWndProc = window_proc,

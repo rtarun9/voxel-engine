@@ -6,7 +6,7 @@ class window_t
   public:
     // For now window is only created in full screen mode.
     explicit window_t();
-    virtual ~window_t();
+    ~window_t();
 
     inline u32 get_width() const
     {
