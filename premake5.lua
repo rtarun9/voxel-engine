@@ -10,7 +10,9 @@ workspace  "voxel-engine"
         includedirs {
             "include",
             "include/voxel-engine",
-            "include/voxel-engine/pch.hpp"
+            "include/voxel-engine/pch.hpp",
+            ".",
+            "shaders"
         }
         
         files {
@@ -29,6 +31,8 @@ workspace  "voxel-engine"
             "include/voxel-engine/types.hpp",
             "include/voxel-engine/voxel.hpp",
             "include/voxel-engine/window.hpp",
+
+            "include/voxel-engine/pch.hpp",
 
             "src/main.cpp",
             "src/window.cpp",

@@ -8,3 +8,4 @@ build/
 *.vcxproj
 *.filters
 *.user
+vcpkg_installed

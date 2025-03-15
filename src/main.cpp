@@ -17,6 +17,8 @@
 
 #include "tracy/Tracy.hpp"
 
+rhi::descriptor_handle_t g_imgui_cbv_srv_uav_descriptor_handle = {};
+
 int main()
 {
     printf("Executable Path :: %s\n", file_system_t::instance().executable_path().c_str());
@@ -30,16 +32,27 @@ int main()
         ImGui::CreateContext();
 
         ImGui::StyleColorsDark();
-
-        rhi::descriptor_handle_t cbv_srv_uav_descriptor_handle =
+        g_imgui_cbv_srv_uav_descriptor_handle =
             renderer.m_cbv_srv_uav_descriptor_heap.get_then_offset_current_descriptor_handle();
+
+        ImGui_ImplDX12_InitInfo init_info = {};
+        init_info.Device = renderer.m_device.Get();
+        init_info.CommandQueue = renderer.m_direct_queue.m_command_queue.Get();
+        init_info.NumFramesInFlight = rhi::NUMBER_OF_BACKBUFFERS;
+        init_info.RTVFormat = rhi::BACKBUFFER_FORMAT;
+        init_info.DSVFormat = DXGI_FORMAT_UNKNOWN;
+        init_info.SrvDescriptorHeap = renderer.m_cbv_srv_uav_descriptor_heap.m_descriptor_heap.Get();
+        init_info.SrvDescriptorAllocFn = [](ImGui_ImplDX12_InitInfo *, D3D12_CPU_DESCRIPTOR_HANDLE *out_cpu_handle,
+                                            D3D12_GPU_DESCRIPTOR_HANDLE *out_gpu_handle) {
+            *out_cpu_handle = g_imgui_cbv_srv_uav_descriptor_handle.m_cpu_descriptor_handle;
+            *out_gpu_handle = g_imgui_cbv_srv_uav_descriptor_handle.m_gpu_descriptor_handle;
+        };
+        init_info.SrvDescriptorFreeFn = [](ImGui_ImplDX12_InitInfo *, D3D12_CPU_DESCRIPTOR_HANDLE cpu_handle,
+                                           D3D12_GPU_DESCRIPTOR_HANDLE gpu_handle) { return; };
 
         // Setup platform / renderer backend.
         ImGui_ImplWin32_Init(window.get_handle());
-        ImGui_ImplDX12_Init(renderer.m_device.Get(), rhi::NUMBER_OF_BACKBUFFERS, rhi::BACKBUFFER_FORMAT,
-                            renderer.m_cbv_srv_uav_descriptor_heap.m_descriptor_heap.Get(),
-                            cbv_srv_uav_descriptor_handle.m_cpu_descriptor_handle,
-                            cbv_srv_uav_descriptor_handle.m_gpu_descriptor_handle);
+        ImGui_ImplDX12_Init(&init_info);
     }
 
     voxel_chunk_manager_t chunk_manager{renderer};
@@ -208,8 +221,8 @@ int main()
     name_d3d12_object(gpu_culling_pso.Get(), L"Gpu culling PSO");
 
     // Indirect command struct : command signature must match this struct.
-    // Each chunk will have its own IndirectCommand, with 3 arguments. The render resources struct root constants, index
-    // buffer view and a draw call.
+    // Each chunk will have its own IndirectCommand, with 3 arguments. The render resources struct root constants,
+    // index buffer view and a draw call.
 
 #pragma pack(push, 4)
     struct indirect_command_t
@@ -226,7 +239,8 @@ int main()
     printf("Size of gpu indirect command : %d\n", (i32)sizeof(interop::gpu_indirect_command_t));
     printf("Size of voxel render resources: %d\n", (i32)sizeof(interop::voxel_render_resources_t));
 
-    // Create the command signature, which tells the GPU how to interpret the data passed in the ExecuteIndirect call.
+    // Create the command signature, which tells the GPU how to interpret the data passed in the ExecuteIndirect
+    // call.
     const std::array<D3D12_INDIRECT_ARGUMENT_DESC, 2u> argument_descs = {
         D3D12_INDIRECT_ARGUMENT_DESC{
             .Type = D3D12_INDIRECT_ARGUMENT_TYPE_CONSTANT,
@@ -584,6 +598,8 @@ int main()
             ImGui_ImplDX12_NewFrame();
             ImGui_ImplWin32_NewFrame();
             ImGui::NewFrame();
+
+            ImGui::ShowDemoWindow();
 
             ImGui::Begin("Debug Controller");
             ImGui::SliderFloat("movement_speed", &camera.m_movement_speed, 0.0f, 50000.0f);

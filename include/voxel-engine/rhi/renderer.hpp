@@ -5,6 +5,7 @@
 #include "common.hpp"
 #include "descriptor_heap.hpp"
 
+#include "imgui_impl_dx12.h"
 #include "tracy/Tracy.hpp"
 
 namespace rhi

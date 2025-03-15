@@ -2,6 +2,7 @@
 
 #include "voxel-engine/rhi/renderer.hpp"
 
+#include "imgui_impl_dx12.h"
 #include "tracy/Tracy.hpp"
 
 // Agility SDK setup.
@@ -18,6 +19,9 @@ extern "C"
 
 namespace rhi
 {
+
+descriptor_handle_t g_imgui_cbv_srv_uav_descriptor_handle = {};
+
 renderer_t::renderer_t(const HWND window_handle, const u32 window_width, const u32 window_height)
 {
     // Enable the debug layer in debug mode.

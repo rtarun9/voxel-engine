@@ -59,6 +59,7 @@ scene_constant_buffer_t
         float4 aabb_vertices[8];
         float4 camera_position;
         float voxel_chunk_length;
+        float3 padding;
     };
 
 // D3D12_DRAW_INDEXED_ARGUMENTS has 5 32 bit members, which is why draw arguments is split into a uint4 and uint.
