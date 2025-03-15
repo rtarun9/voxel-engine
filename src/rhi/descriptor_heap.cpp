@@ -1,3 +1,5 @@
+#include "pch.hpp"
+
 #include "voxel-engine/rhi/descriptor_heap.hpp"
 
 #include "tracy/Tracy.hpp"

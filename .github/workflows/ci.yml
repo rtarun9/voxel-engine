@@ -1,4 +1,4 @@
-name: C++ CMake
+name: C++ Premake vcpkg
 
 on:
   push:
@@ -11,20 +11,29 @@ env:
   
 jobs:
   build:
-
     runs-on: windows-latest
 
     steps:
     - uses: actions/checkout@v4
 
+    - name: vcpkg build
+      id: vcpkg
+      uses: johnwason/vcpkg-action@v6
+      with:
+      manifest-dir: ${{ github.workspace }} 
+      triplet: x64-windows-release
+      token: ${{ github.token }}
+      github-binarycache: true
+
+
     - name: Add MSBuild to PATH
       uses: microsoft/setup-msbuild@v1.0.2
       
-    - name: Cmake Configure
-      run: cmake -B ${{github.workspace}}/build
+    - name: Generate VS solution 
+      run: ./premake5.exe vs2022 
     
     - name: Build-Debug
-      run: cmake --build ${{github.workspace}}/build --config debug
+      run: msbuild /p:VcpkgEnableManifest=true voxel-engine.sln /p:Configuration=Debug
 
     - name: Build-Release
-      run: cmake --build ${{github.workspace}}/build --config release
+      run: msbuild /p:VcpkgEnableManifest=true voxel-engine.sln /p:Configuration=Release
