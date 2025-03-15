@@ -17,8 +17,6 @@
 
 #include "tracy/Tracy.hpp"
 
-rhi::descriptor_handle_t g_imgui_cbv_srv_uav_descriptor_handle = {};
-
 int main()
 {
     printf("Executable Path :: %s\n", file_system_t::instance().executable_path().c_str());
@@ -32,20 +30,27 @@ int main()
         ImGui::CreateContext();
 
         ImGui::StyleColorsDark();
-        g_imgui_cbv_srv_uav_descriptor_handle =
-            renderer.m_cbv_srv_uav_descriptor_heap.get_then_offset_current_descriptor_handle();
 
         ImGui_ImplDX12_InitInfo init_info = {};
+        init_info.UserData = (void *)&renderer;
         init_info.Device = renderer.m_device.Get();
         init_info.CommandQueue = renderer.m_direct_queue.m_command_queue.Get();
         init_info.NumFramesInFlight = rhi::NUMBER_OF_BACKBUFFERS;
         init_info.RTVFormat = rhi::BACKBUFFER_FORMAT;
         init_info.DSVFormat = DXGI_FORMAT_UNKNOWN;
         init_info.SrvDescriptorHeap = renderer.m_cbv_srv_uav_descriptor_heap.m_descriptor_heap.Get();
-        init_info.SrvDescriptorAllocFn = [](ImGui_ImplDX12_InitInfo *, D3D12_CPU_DESCRIPTOR_HANDLE *out_cpu_handle,
+        init_info.SrvDescriptorAllocFn = [](ImGui_ImplDX12_InitInfo *init_info,
+                                            D3D12_CPU_DESCRIPTOR_HANDLE *out_cpu_handle,
                                             D3D12_GPU_DESCRIPTOR_HANDLE *out_gpu_handle) {
-            *out_cpu_handle = g_imgui_cbv_srv_uav_descriptor_handle.m_cpu_descriptor_handle;
-            *out_gpu_handle = g_imgui_cbv_srv_uav_descriptor_handle.m_gpu_descriptor_handle;
+            rhi::renderer_t *renderer = (rhi::renderer_t *)init_info->UserData;
+
+            std::scoped_lock<std::mutex> scoped_lock(renderer->m_resource_mutex);
+
+            rhi::descriptor_handle_t handle =
+                renderer->m_cbv_srv_uav_descriptor_heap.get_then_offset_current_descriptor_handle();
+
+            *out_cpu_handle = handle.m_cpu_descriptor_handle;
+            *out_gpu_handle = handle.m_gpu_descriptor_handle;
         };
         init_info.SrvDescriptorFreeFn = [](ImGui_ImplDX12_InitInfo *, D3D12_CPU_DESCRIPTOR_HANDLE cpu_handle,
                                            D3D12_GPU_DESCRIPTOR_HANDLE gpu_handle) { return; };
