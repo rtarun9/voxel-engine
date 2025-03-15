@@ -1,3 +1,5 @@
+#include "pch.hpp"
+
 #include "voxel-engine/camera.hpp"
 
 DirectX::XMMATRIX camera_t::update_and_get_view_matrix(const u8 *const keyboard_state, const f32 delta_time)

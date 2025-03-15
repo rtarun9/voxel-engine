@@ -1,3 +1,5 @@
+#include "pch.hpp"
+
 #include "voxel-engine/rhi/renderer.hpp"
 
 #include "tracy/Tracy.hpp"

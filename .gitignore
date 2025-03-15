@@ -4,3 +4,7 @@ agility.zip
 dxc.zip
 build/
 .vs/
+*.sln
+*.vcxproj
+*.filters
+*.user
