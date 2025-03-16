@@ -1,19 +1,19 @@
 #pragma once
 
 // Simple abstraction class over win32 window.
-class Window
+class window_t
 {
   public:
     // For now window is only created in full screen mode.
-    explicit Window();
-    virtual ~Window();
+    explicit window_t();
+    ~window_t();
 
-    inline u16 get_width() const
+    inline u32 get_width() const
     {
         return m_width;
     }
 
-    inline u16 get_height() const
+    inline u32 get_height() const
     {
         return m_height;
     }
@@ -29,6 +29,6 @@ class Window
   private:
     HWND m_handle{nullptr};
 
-    u16 m_width{};
-    u16 m_height{};
+    u32 m_width{};
+    u32 m_height{};
 };

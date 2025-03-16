@@ -3,17 +3,35 @@ include(FetchContent)
 FetchContent_Declare(
     imgui
     GIT_REPOSITORY https://github.com/ocornut/imgui
-    GIT_TAG v1.90.9
+    GIT_TAG v1.91.9
     GIT_PROGRESS TRUE
+    GIT_SHALLOW TRUE
+)
+
+# Thank you deccer for https://github.com/deccer/CMake-Glfw-OpenGL-Template/blob/main/lib/CMakeLists.txt!!
+FetchContent_Declare(
+    tracy
+    GIT_REPOSITORY  https://github.com/wolfpld/tracy.git
+    GIT_TAG         v0.11.1
+    GIT_SHALLOW     TRUE
+    GIT_PROGRESS    TRUE
 )
 
 FetchContent_Declare(
-    thread-pool
-    GIT_REPOSITORY https://github.com/bshoshany/thread-pool
-    GIT_PROGRESS TRUE
+    fastnoise2
+    GIT_REPOSITORY  https://github.com/Auburn/FastNoise2
+    GIT_TAG         v0.10.0-alpha
+    GIT_SHALLOW     FALSE 
+    GIT_PROGRESS    TRUE
 )
 
-FetchContent_MakeAvailable(imgui thread-pool)
+set(TRACY_ENABLE ON CACHE BOOL "Enable profiling")
+set(TRACY_ONLY_IPV4 ON CACHE BOOL "IPv4 only")
+option(TRACY_ENABLE "Enable profiling" ON)
+option(TRACY_ONLY_IPV4 "IPv4 only" ON)
+set(FASTNOISE2_NOISETOOL OFF CACHE BOOL "Build Noise Tool" FORCE)
+
+FetchContent_MakeAvailable(imgui tracy fastnoise2)
 
 add_library(libimgui
     ${imgui_SOURCE_DIR}/imgui.cpp
@@ -26,12 +44,11 @@ add_library(libimgui
 )
 
 target_include_directories(libimgui PUBLIC 
-${imgui_SOURCE_DIR} 
-${imgui_SOURCE_DIR}/backends
+	${imgui_SOURCE_DIR} 
+	${imgui_SOURCE_DIR}/backends
 )
 
 target_link_libraries(libimgui PUBLIC d3d12 dxguid dxgi)
 
 add_library(external INTERFACE)
-target_link_libraries(external INTERFACE libimgui)
-target_include_directories(external INTERFACE ${thread-pool_SOURCE_DIR})
+target_link_libraries(external INTERFACE libimgui TracyClient FastNoise)

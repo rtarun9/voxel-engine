@@ -1,38 +1,78 @@
 #pragma once
 
-#include "include/BS_thread_pool.hpp"
-#include "voxel-engine/renderer.hpp"
+#include "shaders/interop/render_resources.hlsli"
+
+#include "voxel-engine/rhi/renderer.hpp"
+#include "voxel-engine/thread_pool.hpp"
+
+#include "FastNoise/FastNoise.h"
 
 // A voxel is just a value on a regular 3D grid. Think of it as the corners where the cells meet in a 3d grid.
 // For 3d visualization of voxels, A cube is rendered for each voxel where the front lower left corner is the 'voxel
 // position' and has a edge length as specified in the class below.
-struct Voxel
+struct voxel_t
 {
-    static constexpr u32 EDGE_LENGTH{640 * 8u};
-    bool m_active{true};
+    static constexpr u32 EDGE_LENGTH{64u};
+    b32 m_active : 1 = 0;
 };
 
-struct Chunk
+struct voxel_chunk_position_t
 {
-    explicit Chunk();
+    i32 x{};
+    i32 y{};
+    i32 z{};
 
-    Chunk(const Chunk &other) = delete;
-    Chunk &operator=(Chunk &other) = delete;
+    b32 operator==(const voxel_chunk_position_t &other) const
+    {
+        return x == other.x && y == other.y && z == other.z;
+    }
 
-    Chunk(Chunk &&other) noexcept;
-    Chunk &operator=(Chunk &&other) noexcept;
+    std::wstring to_wstring() const
+    {
+        return std::to_wstring(x) + L"," + std::to_wstring(y) + L"," + std::to_wstring(z);
+    }
+};
 
-    ~Chunk();
+// Specializing std::hash for voxel_chunk_position_t
+namespace std
+{
+template <> struct hash<voxel_chunk_position_t>
+{
+    size_t operator()(const voxel_chunk_position_t &pos) const
+    {
+        // Combine the hash of each member
+        return (hash<int>()(pos.x) ^ (hash<int>()(pos.y) << 1)) ^ (hash<int>()(pos.z) << 2);
+    }
+};
+} // namespace std
 
-    static constexpr u32 NUMBER_OF_VOXELS_PER_DIMENSION = 8u;
-    static constexpr size_t NUMBER_OF_VOXELS =
-        NUMBER_OF_VOXELS_PER_DIMENSION * NUMBER_OF_VOXELS_PER_DIMENSION * NUMBER_OF_VOXELS_PER_DIMENSION;
+// Each chunk has offsets into index buffer and color buffers that are stored in the chunk manager.
+struct voxel_chunk_t
+{
+    explicit voxel_chunk_t(const voxel_chunk_position_t chunk_position, const size_t index_buffer_start_location,
+                           const size_t color_buffer_start_location);
 
-    static constexpr u32 CHUNK_LENGTH = Voxel::EDGE_LENGTH * Chunk::NUMBER_OF_VOXELS_PER_DIMENSION;
+    voxel_chunk_t(const voxel_chunk_t &other) = delete;
+    voxel_chunk_t &operator=(voxel_chunk_t &other) = delete;
 
-    // A flattened 3d array of Voxels.
-    Voxel *m_voxels{};
-    size_t m_chunk_index{};
+    voxel_chunk_t(voxel_chunk_t &&other) noexcept;
+    voxel_chunk_t &operator=(voxel_chunk_t &&other) noexcept;
+
+    ~voxel_chunk_t() = default;
+
+    static constexpr u32 CHUNK_LENGTH = voxel_t::EDGE_LENGTH * NUMBER_OF_VOXELS_PER_DIMENSION_IN_CHUNK;
+
+    // A flattened 1d array of Voxels.
+    std::unique_ptr<voxel_t[]> m_voxels{};
+
+    size_t m_index_buffer_offset{};
+    size_t m_color_buffer_offset{};
+
+    std::vector<u16> m_index_buffer_data{};
+    DirectX::XMFLOAT3 m_color_buffer_data{};
+
+    // TODO: Is this even used anywhere? If not, remove it.
+    voxel_chunk_position_t m_chunk_position{};
 };
 
 // A class that contains a collection of chunks and associated data.
@@ -40,83 +80,55 @@ struct Chunk
 // (i) Loaded -> Ready to be rendered.
 // (ii) Setup -> Chunk mesh is ready, but associated buffers may or maynot be ready. Once the buffers are ready, these
 // chunks are moved into the loaded chunks hashmap.
-struct ChunkManager
+// The class contains several hashmaps, for which the chunk position acts as a index.
+
+struct voxel_chunk_manager_t
 {
-    // Constructor creates the shared position buffer.
-    explicit ChunkManager(Renderer &renderer);
-
-    struct SetupChunkData
-    {
-        Chunk m_chunk{};
-
-        Renderer::IndexBufferWithIntermediateResource m_chunk_index_buffer{};
-        Renderer::StucturedBufferWithIntermediateResource m_chunk_color_buffer{};
-
-        // A strange design decision, but rather than accessing the render resources via root constants, render
-        // resources will now be embedded into the chunk constant buffer.
-        // This is done to make the indirect rendering & GPU culling process simpler.
-        ConstantBuffer m_chunk_constant_buffer{};
-
-        std::vector<u16> m_chunk_indices_data{};
-        std::vector<DirectX::XMFLOAT3> m_chunk_color_data{};
-    };
-
-  private:
-    // internal_mt : Internal multithreaded.
-    SetupChunkData internal_mt_setup_chunk(Renderer &renderer, const size_t index);
-
   public:
-    void add_chunk_to_setup_stack(const size_t chunk_index);
-    void create_chunks_from_setup_stack(Renderer &renderer);
+    static constexpr u32 NUMBER_OF_CHUNKS_TO_CREATE_PER_FRAME = 64u;
+    static constexpr u32 MAX_SIZE_OF_CHUNKS_TO_SETUP_STACK =
+        CHUNK_RENDER_DISTANCE_PER_DIMENSION * CHUNK_RENDER_DISTANCE_PER_DIMENSION * CHUNK_RENDER_DISTANCE_PER_DIMENSION;
+
+    static constexpr u32 MAX_TERRAIN_HEIGHT = 64u;
+
+    explicit voxel_chunk_manager_t(rhi::renderer_t &renderer);
+
+    void add_chunk_to_setup_stack(const voxel_chunk_position_t chunk_position);
+    void create_chunks_from_setup_stack(rhi::renderer_t &renderer);
 
     void transfer_chunks_from_setup_to_loaded_state(const u64 current_copy_queue_fence_value);
 
-    static constexpr u32 NUMBER_OF_CHUNKS_PER_DIMENSION = 2048u;
-    static constexpr size_t NUMBER_OF_CHUNKS =
-        NUMBER_OF_CHUNKS_PER_DIMENSION * NUMBER_OF_CHUNKS_PER_DIMENSION * NUMBER_OF_CHUNKS_PER_DIMENSION;
+    std::vector<voxel_chunk_t> m_voxel_chunks{};
+    std::unordered_map<voxel_chunk_position_t, size_t> m_loaded_chunk_to_index_map{};
 
-    // Determines how many chunks are loaded around the player.
-    static constexpr u32 CHUNKS_LOADED_AROUND_PLAYER = 6u;
+    // A queue of chunks that are to be unloaded. When a chunk is being unloaded, a new chunk will be loaded in its
+    // place.
+    std::queue<std::pair<voxel_chunk_position_t, size_t>> m_unloaded_chunk_queue{};
+    std::unordered_set<voxel_chunk_position_t> m_unloaded_chunks_set{};
 
-    // Determines how many chunks are deleted per frame.
-    static constexpr u32 CHUNKS_TO_UNLOAD_PER_FRAME = 64u * 4u;
+    std::deque<voxel_chunk_position_t> m_chunks_to_setup_stack{};
+    std::unordered_set<voxel_chunk_position_t> m_chunks_being_setup_set{};
 
-    // Determine how many chunks can be loaded at once. If a chunk is to be loaded and loaded chunks is already at the
-    // limit, re-use of memory happens.
-    static constexpr u32 CHUNK_RENDER_DISTANCE = CHUNKS_LOADED_AROUND_PLAYER;
+    struct voxel_chunk_setup_data_t
+    {
+        b32 should_chunk_be_loaded{};
+        voxel_chunk_position_t chunk_position{};
+        size_t index{};
+    };
 
-    // Chunks to create per frame : How many chunks are setup (i.e the meshing processes occurs).
-    static constexpr u32 NUMBER_OF_CHUNKS_TO_CREATE_PER_FRAME = 16u;
-
-    // Chunks to load per frame : How many setup chunks are moved into the loaded chunk hash map.
-    static constexpr u32 NUMBER_OF_CHUNKS_TO_LOAD_PER_FRAME = 64u;
-
-    std::unordered_map<size_t, Chunk> m_loaded_chunks{};
-
-    // NOTE : Chunks are considered to be setup when :
-    // (i) The result of async call (i.e the future) is ready,
-    // (ii) The fence value is < the current copy queue fence value.
-    // The setup chunks future stack consist of pairs of fence values , futures.
-    std::queue<std::pair<u64, std::future<SetupChunkData>>> m_setup_chunk_futures_queue{};
-
-    // Why is there also a stack?
-    // Use the stack to store chunk indices that at any given point in time are close to the player.
-    // Then, each from from this stack, add elements into the queue.
-    std::stack<size_t> m_chunks_to_setup_stack{};
-
-    // A unordered set to keep track of chunks that are currently in process of being setup.
-    // This is required in case create_chunk is called for a chunk that is being setup but not loaded. We do not want to
-    // load this chunk again.
-    std::unordered_set<size_t> m_chunk_indices_that_are_being_setup{};
-
-    std::unordered_map<size_t, IndexBuffer> m_chunk_index_buffers{};
-    std::unordered_map<size_t, StructuredBuffer> m_chunk_color_buffers{};
-    std::unordered_map<size_t, ConstantBuffer> m_chunk_constant_buffers{};
+    std::queue<std::pair<u64, std::future<voxel_chunk_setup_data_t>>> m_setup_chunk_futures_queue{};
 
     // All chunks only have a index buffer with them. The indices 'index' into this common shared chunk constant buffer.
     // The data in this buffer is ordered vertex wise, voxel wise.
-    StructuredBuffer m_shared_chunk_position_buffer{};
+    rhi::structured_buffer_t m_shared_chunk_position_buffer{};
+
+    rhi::upload_structured_buffer_t m_color_buffer{};
+    rhi::upload_structured_buffer_t m_index_buffer{};
 
     // Threadpool from which std::futures are obtained.
-    BS::thread_pool m_thread_pool;
+    thread_pool_t m_thread_pool{};
+
+    std::vector<voxel_chunk_position_t> m_chunk_render_distance_offsets{};
+
+    FastNoise::SmartNode<FastNoise::Perlin> m_perlin{};
 };

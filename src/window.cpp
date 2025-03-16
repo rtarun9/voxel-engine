@@ -40,7 +40,7 @@ static LRESULT CALLBACK window_proc(HWND window_handle, UINT message, WPARAM w_p
     return DefWindowProcA(window_handle, message, w_param, l_param);
 }
 
-Window::Window()
+window_t::window_t()
 {
     // Get screen dimension.
     const i32 screen_width = GetSystemMetrics(SM_CXSCREEN);
@@ -56,12 +56,12 @@ Window::Window()
     // Calculate required size of window rect based on client rectangle size.
     AdjustWindowRect(&window_rect, WS_OVERLAPPEDWINDOW, FALSE);
 
-    m_width = static_cast<u16>(window_rect.right - window_rect.left);
-    m_height = static_cast<u16>(window_rect.bottom - window_rect.top);
+    m_width = static_cast<u32>(window_rect.right - window_rect.left);
+    m_height = static_cast<u32>(window_rect.bottom - window_rect.top);
 
     // Register the window class.
     // This represents a set of common behavious that several windows may have.
-    const HINSTANCE instance_handle = GetModuleHandle(NULL);
+    const HINSTANCE instance_handle = GetModuleHandle(nullptr);
 
     const WNDCLASSA window_class = {
         .lpfnWndProc = window_proc,
@@ -85,7 +85,7 @@ Window::Window()
     }
 }
 
-Window::~Window()
+window_t::~window_t()
 {
     UnregisterClassA(WINDOW_CLASS_NAME, GetModuleHandle(NULL));
 }

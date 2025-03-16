@@ -1,18 +1,17 @@
 #pragma once
 
-class Timer
+class timer_t
 {
   public:
-    explicit Timer();
+    explicit timer_t();
 
-    void start();
-    void stop();
-
-    float get_delta_time() const;
+    // To be called at end of each frame.
+    // Computed correct value of start and end time.
+    f32 tick_and_get_delta_time_seconds();
 
   private:
     LARGE_INTEGER m_performance_frequency{};
-    float m_seconds_per_count{};
+    f32 m_seconds_per_count{};
 
     LARGE_INTEGER m_start_time{};
     LARGE_INTEGER m_end_time{};

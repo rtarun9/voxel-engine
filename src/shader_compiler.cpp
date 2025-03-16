@@ -1,15 +1,19 @@
 #include "voxel-engine/shader_compiler.hpp"
 
-namespace ShaderCompiler
+namespace shader_compiler
 {
 // Core DXC objects.
-Microsoft::WRL::ComPtr<IDxcUtils> g_utils{};
-Microsoft::WRL::ComPtr<IDxcCompiler3> g_compiler{};
-Microsoft::WRL::ComPtr<IDxcIncludeHandler> g_include_handler{};
+ComPtr<IDxcUtils> g_utils{};
+ComPtr<IDxcCompiler3> g_compiler{};
+ComPtr<IDxcIncludeHandler> g_include_handler{};
 
 IDxcBlob *compile(const wchar_t *const file_path, const wchar_t *const entry_point, const wchar_t *const target)
 {
-    // Check if the compiler object has been created.
+    assert(file_path);
+    assert(entry_point);
+    assert(target);
+
+    // Check if the compiler objects has been created.
     if (!g_utils)
     {
         throw_if_failed(DxcCreateInstance(CLSID_DxcUtils, IID_PPV_ARGS(&g_utils)));
@@ -29,7 +33,7 @@ IDxcBlob *compile(const wchar_t *const file_path, const wchar_t *const entry_poi
     }
 
     // Open the source file.
-    Microsoft::WRL::ComPtr<IDxcBlobEncoding> source{};
+    ComPtr<IDxcBlobEncoding> source{};
     throw_if_failed(g_utils->LoadFile(file_path, nullptr, &source));
     const DxcBuffer source_buffer = {
         .Ptr = source->GetBufferPointer(),
@@ -38,13 +42,13 @@ IDxcBlob *compile(const wchar_t *const file_path, const wchar_t *const entry_poi
     };
 
     // Compile the shader.
-    Microsoft::WRL::ComPtr<IDxcResult> results{};
+    ComPtr<IDxcResult> results{};
     throw_if_failed(g_compiler->Compile(&source_buffer, compiler_arguments.data(),
                                         static_cast<u32>(compiler_arguments.size()), g_include_handler.Get(),
                                         IID_PPV_ARGS(&results)));
 
     // Check for errors.
-    Microsoft::WRL::ComPtr<IDxcBlobUtf8> error_blob{};
+    ComPtr<IDxcBlobUtf8> error_blob{};
     throw_if_failed(results->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(&error_blob), nullptr));
 
     if (error_blob && error_blob->GetStringLength() > 0)
@@ -57,4 +61,4 @@ IDxcBlob *compile(const wchar_t *const file_path, const wchar_t *const entry_poi
     throw_if_failed(results->GetOutput(DXC_OUT_OBJECT, IID_PPV_ARGS(&shader_blob), nullptr));
     return shader_blob;
 }
-} // namespace ShaderCompiler
+} // namespace shader_compiler
