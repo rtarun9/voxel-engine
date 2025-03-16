@@ -5,13 +5,15 @@
 #include "voxel-engine/rhi/renderer.hpp"
 #include "voxel-engine/thread_pool.hpp"
 
+#include "FastNoise/FastNoise.h"
+
 // A voxel is just a value on a regular 3D grid. Think of it as the corners where the cells meet in a 3d grid.
 // For 3d visualization of voxels, A cube is rendered for each voxel where the front lower left corner is the 'voxel
 // position' and has a edge length as specified in the class below.
 struct voxel_t
 {
     static constexpr u32 EDGE_LENGTH{64u};
-    b32 m_active : 1 = 1;
+    b32 m_active : 1 = 0;
 };
 
 struct voxel_chunk_position_t
@@ -84,7 +86,10 @@ struct voxel_chunk_manager_t
 {
   public:
     static constexpr u32 NUMBER_OF_CHUNKS_TO_CREATE_PER_FRAME = 64u;
-    static constexpr u32 MAX_SIZE_OF_CHUNKS_TO_SETUP_STACK = CHUNK_RENDER_DISTANCE_PER_DIMENSION * CHUNK_RENDER_DISTANCE_PER_DIMENSION * CHUNK_RENDER_DISTANCE_PER_DIMENSION;
+    static constexpr u32 MAX_SIZE_OF_CHUNKS_TO_SETUP_STACK =
+        CHUNK_RENDER_DISTANCE_PER_DIMENSION * CHUNK_RENDER_DISTANCE_PER_DIMENSION * CHUNK_RENDER_DISTANCE_PER_DIMENSION;
+
+    static constexpr u32 MAX_TERRAIN_HEIGHT = 64u;
 
     explicit voxel_chunk_manager_t(rhi::renderer_t &renderer);
 
@@ -124,4 +129,6 @@ struct voxel_chunk_manager_t
     thread_pool_t m_thread_pool{};
 
     std::vector<voxel_chunk_position_t> m_chunk_render_distance_offsets{};
+
+    FastNoise::SmartNode<FastNoise::Perlin> m_perlin{};
 };

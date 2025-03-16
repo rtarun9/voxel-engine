@@ -1,5 +1,3 @@
-#include "pch.hpp"
-
 #include "voxel-engine/camera.hpp"
 #include "voxel-engine/filesystem.hpp"
 #include "voxel-engine/rhi/common.hpp"

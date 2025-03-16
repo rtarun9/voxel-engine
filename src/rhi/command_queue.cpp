@@ -1,7 +1,5 @@
-#include "pch.hpp"
-
-#include "tracy/Tracy.hpp"
 #include "voxel-engine/rhi/command_queue.hpp"
+#include "tracy/Tracy.hpp"
 
 namespace rhi
 {

@@ -12,6 +12,7 @@ constexpr bool VX_DEBUG_MODE = false;
 
 // Windows includes.
 #define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
 #include <Windows.h>
 
 // Dx12 / Com headers.

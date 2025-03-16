@@ -1,5 +1,3 @@
-#include "pch.hpp"
-
 #include "voxel-engine/timer.hpp"
 
 timer_t::timer_t()

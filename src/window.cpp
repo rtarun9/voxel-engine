@@ -1,5 +1,3 @@
-#include "pch.hpp"
-
 #include "voxel-engine/window.hpp"
 
 #include <imgui.h>

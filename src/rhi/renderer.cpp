@@ -1,5 +1,3 @@
-#include "pch.hpp"
-
 #include "voxel-engine/rhi/renderer.hpp"
 
 #include "imgui_impl_dx12.h"

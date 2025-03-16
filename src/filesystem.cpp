@@ -1,5 +1,3 @@
-#include "pch.hpp"
-
 #include "voxel-engine/filesystem.hpp"
 
 file_system_t::file_system_t()

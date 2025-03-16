@@ -1,5 +1,3 @@
-#include "pch.hpp"
-
 #include "voxel-engine/shader_compiler.hpp"
 
 namespace shader_compiler
